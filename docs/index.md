@@ -1,35 +1,25 @@
-# Project Documentation
+# Project documentation
 
-Status: bootstrap scaffold
-Last verified: unknown
+This is the index for the apm-control-plane codebase. Product capability and implementation state must be distinguished from proposed architecture.
 
-<!-- BOOTSTRAP_TODO: Add project-specific sources of truth and owners. -->
+## Start here
 
-## Start Here
+- [README](../README.md) — start P0 and run the demonstration test agent.
+- [ARCHITECTURE](../ARCHITECTURE.md) — source-backed P0 boundaries and proposed P1–P3 dependencies.
+- [Functional requirements](requirements/APM_CONTROL_PLANE.md) — FR-001 to FR-009 and testable acceptance.
+- [Engineering workflow](PROJECT_WORKFLOW.md) — RepoFoundryAI v0.15.1 / EngineeringSpecifications v1.9.0.
 
-- Agent guidance: use the installed adapter entrypoints recorded in
-  `docs/.engineering/harness.json`.
-- Architecture map: `ARCHITECTURE.md`
-- Project overview and development setup: `README.md`
+## Governed engineering artifacts
 
-## Engineering Lifecycle
+- [DD-001 OpAMP Control Plane (draft)](design-docs/dd-001_opamp-control-plane.md) — proposed persistent architecture; not approved.
+- [EP-001 Deliver durable Control Plane (blocked)](exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) — P1–P3 milestones, verification, identity decisions and blockers.
+- [Design index](DESIGN-DOCS.md), [architecture decisions](DECISIONS.md), [execution plans](PLANS.md), [Research](RESEARCH.md), [Bugfixes](BUGFIXES.md), and [technical debt](exec-plans/tech-debt-tracker.md).
 
-- Research index: `docs/RESEARCH.md`
-- Architecture decision index: `docs/DECISIONS.md`
-- Design documents: `docs/design-docs/index.md`
-- Execution plan index: `docs/PLANS.md`
-- Bugfix index: `docs/BUGFIXES.md`
-- Technical debt: `docs/exec-plans/tech-debt-tracker.md`
+## Engineering controls
 
-## Engineering Controls
+- [Locked Engineering Specifications](agent-guides/managed/index.md) and [Spec lock](.engineering/specs.lock.json).
+- [Quality score](QUALITY_SCORE.md), [Reliability](RELIABILITY.md), [Security](SECURITY.md).
+- [P0 protocol and limitations](architecture.md).
+- [Agent instructions](../AGENTS.md).
 
-- Quality score: `docs/QUALITY_SCORE.md`
-- Reliability: `docs/RELIABILITY.md`
-- Security: `docs/SECURITY.md`
-
-## Documentation Rules
-
-- Keep decisions in ADRs and implementation detail in Design Docs.
-- Keep active implementation context self-contained in its ExecPlan.
-- Treat generated indexes as rebuildable projections.
-- Mark unknown facts explicitly; do not turn scaffolds into false sources of truth.
+RepoFoundry generated index regions are projections: use the official designctl/epctl commands to create IDs, update statuses, rebuild indexes and archive evidence. Do not turn planned features into implementation claims.
