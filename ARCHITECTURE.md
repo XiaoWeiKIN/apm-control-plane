@@ -5,7 +5,7 @@ Last verified: 2026-10-19 (repository structure and existing CI, not production 
 
 ## System Purpose and boundary
 
-The service receives Open Agent Management Protocol (OpAMP) management messages from agents, maintains status and distributes per-instance sampling configuration. It is the **control plane** for a future custom OpenTelemetry Java Agent distribution. OTLP traces do not transit this control plane.
+The service receives Open Agent Management Protocol (OpAMP) management messages from agents, maintains status and distributes per-instance sampling configuration. Its **confirmed long-term scope** is a shared management control plane for Java, Go and Python APM Agent distributions, with a future Collector integration. The **first supported runtime** remains our custom OpenTelemetry Java Agent; no Go/Python or Collector adapter exists yet. OTLP traces do not transit this control plane.
 
 The current P0 implementation is an in-memory interoperability PoC. Proposed PostgreSQL Registry, policy revision management and Reconciler are **not implemented**; see [DD-001](docs/design-docs/dd-001_opamp-control-plane.md) and [EP-001](docs/exec-plans/active/ep-001_build-control-plane/EXECPLAN.md).
 
@@ -16,7 +16,7 @@ The current P0 implementation is an in-memory interoperability PoC. Proposed Pos
 - cmd/testagent/main.go — standalone HTTP polling OpAMP peer; validates a sampling JSON and reports APPLIED. This **does not** execute a JVM sampler.
 - docs/architecture.md — P0 protocol and threat-model limitations.
 - docs/requirements/APM_CONTROL_PLANE.md — FR-001 through FR-009 functional requirements.
-- docs/design-docs/dd-001_opamp-control-plane.md — future modular design (draft, unapproved).
+- docs/design-docs/dd-001_opamp-control-plane.md — proposed multi-Agent-Kind design with Java-first delivery (draft, unapproved).
 - docs/exec-plans/active/ep-001_build-control-plane/EXECPLAN.md — delivery plan (blocked on review and identity boundaries).
 
 ## Dependency direction (observed)
@@ -47,6 +47,10 @@ The protocol server uses the upstream opamp-go Server.Attach() callback interfac
 - RepoFoundryAI project Harness: .repo-foundry/skills/repo-foundry-ai/SKILL.md and docs/.engineering/specs.lock.json.
 - Design and execution authority: docs/DESIGN-DOCS.md, docs/DECISIONS.md, docs/PLANS.md.
 - CI: go test -race ./...; go vet ./...; RepoFoundry CLI validate.
+
+## Target-type boundary
+
+A future `AgentKind` and `Distribution` model separates APM service identity from runtime distribution identity. The proposed `AgentConfigAdapter` selects a configuration dialect by Agent Kind, version and capabilities: Java sampling JSON is not a universal OpAMP format. Collector and additional APM runtimes will require their own validated adapters, identity semantics and application lifecycle checks. This is a **proposed design constraint**, not current implementation behavior.
 
 ## Known gaps
 
