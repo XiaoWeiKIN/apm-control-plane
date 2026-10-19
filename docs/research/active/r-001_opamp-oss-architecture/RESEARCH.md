@@ -107,7 +107,8 @@ Allowed statuses: `open`, `answered`, `deferred`, `invalidated`.
 
 | ID | Status | Opened | Resolved | Missing capability | Impact | Unblock or resolution |
 |---|---|---|---|---|---|---|
-| — | — | — | — | No research-blocking gap at this stage. | P1 implementation still needs real DB testing. | EP-001 P1 |
+
+当前没有 Research 阶段的开放 Blocker。P1 双数据库验证作为 EP-001 交付门禁，不在这里伪称完成。
 
 ## Progress
 
