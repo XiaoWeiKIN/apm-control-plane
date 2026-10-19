@@ -145,8 +145,23 @@ func TestAgentRegistrationThroughOpAMPToDatabaseAndAPI(t *testing.T) {
 			spoofedRequest.Header.Set("Authorization", "Bearer other-long-agent-token")
 			spoofedRequest.Header.Set("Content-Type", "application/x-protobuf")
 			spoofedResponse, err := server.Client().Do(spoofedRequest)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
+			spoofedWire, readErr := io.ReadAll(spoofedResponse.Body)
 			_ = spoofedResponse.Body.Close()
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			var rejected protobufs.ServerToAgent
+			if err := proto.Unmarshal(spoofedWire, &rejected); err != nil {
+				t.Fatalf("decode rejected OpAMP response: %v", err)
+			}
+			if rejected.ErrorResponse == nil ||
+				rejected.ErrorResponse.Type != protobufs.ServerErrorResponseType_ServerErrorResponseType_Unknown ||
+				rejected.RemoteConfig != nil || rejected.Capabilities != 0 {
+				t.Fatalf("rejected identity must receive only OpAMP error_response: %+v", rejected)
+			}
 			code, state = get("long-admin-secret-for-test")
 			if code != http.StatusOK || state["service_name"] != "payments" {
 				t.Fatalf("credential takeover corrupted Inventory: %d %+v", code, state)
