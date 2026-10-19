@@ -42,7 +42,10 @@ func TestAgentRegistrationThroughOpAMPToDatabaseAndAPI(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = store.Close() })
 			reg := newRegistry(store, 1*time.Millisecond)
-			agentAuth := auth.New([]appconfig.Credential{{ID: "agent-a", TenantID: "team-one", Token: "long-agent-secret-for-test"}})
+			agentAuth := auth.New([]appconfig.Credential{
+				{ID: "agent-a", TenantID: "team-one", Token: "long-agent-secret-for-test"},
+				{ID: "agent-b", TenantID: "team-one", Token: "other-long-agent-token"},
+			})
 			adminAuth := auth.New([]appconfig.Credential{
 				{ID: "admin-a", TenantID: "team-one", Token: "long-admin-secret-for-test"},
 				{ID: "admin-b", TenantID: "team-two", Token: "other-long-admin-token"},
@@ -126,6 +129,29 @@ func TestAgentRegistrationThroughOpAMPToDatabaseAndAPI(t *testing.T) {
 			if code, _ := get("other-long-admin-token"); code != http.StatusNotFound {
 				t.Fatalf("cross tenant API leaked Agent: %d", code)
 			}
+			// Another authenticated credential in the same Tenant may not
+			// take over an existing Instance UID. Even if OpAMP's HTTP
+			// callback reports no per-message 403, the persisted owner and
+			// all Agent metadata must remain unchanged.
+			spoofed := proto.Clone(msg).(*protobufs.AgentToServer)
+			spoofed.SequenceNum = 2
+			spoofed.AgentDescription = &protobufs.AgentDescription{IdentifyingAttributes: []*protobufs.KeyValue{
+				{Key: "service.name", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: "spoofed"}}},
+			}}
+			spoofedBytes, err := proto.Marshal(spoofed)
+			if err != nil { t.Fatal(err) }
+			spoofedRequest, err := http.NewRequest(http.MethodPost, server.URL+"/v1/opamp", bytes.NewReader(spoofedBytes))
+			if err != nil { t.Fatal(err) }
+			spoofedRequest.Header.Set("Authorization", "Bearer other-long-agent-token")
+			spoofedRequest.Header.Set("Content-Type", "application/x-protobuf")
+			spoofedResponse, err := server.Client().Do(spoofedRequest)
+			if err != nil { t.Fatal(err) }
+			_ = spoofedResponse.Body.Close()
+			code, state = get("long-admin-secret-for-test")
+			if code != http.StatusOK || state["service_name"] != "payments" {
+				t.Fatalf("credential takeover corrupted Inventory: %d %+v", code, state)
+			}
+
 			if err := store.Close(); err != nil {
 				t.Fatal(err)
 			}
