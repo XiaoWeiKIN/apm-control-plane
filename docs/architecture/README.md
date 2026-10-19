@@ -201,6 +201,29 @@ type ReconcileQueue interface {
 
 接口必须保留无法支持配置的显式结果：`UnsupportedAgentKind`、`UnsupportedConfigDialect`、`MissingCapability`、`IncompatibleDistributionVersion`。这些是**平台错误分类建议**，不是 OpAMP 原生枚举。
 
+### 4.3 Control Plane 进程启动与停止（目标生命周期）
+
+Collector 的 [Internal Architecture](https://github.com/open-telemetry/opentelemetry-collector/blob/main/docs/internal-architecture.md) 不只介绍组件，还说明从启动入口到组件就绪的流程。本项目沿用这种写法，但具体步骤是**P1 的拟议启动合同**，不是当前主程序已经具备的流程。
+
+~~~mermaid
+flowchart TD
+    A["读取启动配置 / 验证 TLS 与认证参数"] --> B["连接 PostgreSQL / 校验 Schema Version"]
+    B --> C["构造 Repository、Registry、Config Adapter Registry"]
+    C --> D["构造 Policy / Release / Reconciler"]
+    D --> E["Attach OpAMP callbacks + Management Router"]
+    E --> F["启动 HTTP Listener"]
+    F --> G["从数据库恢复未完成 Desired Assignments"]
+    G --> H["启动 Reconciler 和健康探针"]
+    H --> I["Ready：接收受控发布与 Agent 请求"]
+    I --> J["收到 SIGTERM"]
+    J --> K["停止新发布 → 停止接入 → 协调器排空"]
+    K --> L["关闭活动会话 / 数据库连接"]
+~~~
+
+各阶段的失败条件必须明确。例如：数据库不可用或 Schema 不兼容时，不能启动一个“看起来 Ready”但无法持久化 Desired Config 的管理接口；应报告启动失败或维持 Not Ready。配置内容校验、权限系统尚未可用时，也不能为了让 HTTP Listener 可访问而绕过鉴权。
+
+关闭时应停止新的发布和数据写入、取消重试任务、为正在发送的连接提供有界关闭时间，并让未完成 Assignment 保留在数据库中供下次启动重新协调。**P0 目前只是通过 net/http 启动并 Shutdown；上述持久化恢复和排空行为还没有实现**。
+
 ## 5. OpAMP 协议与平台契约
 
 OpAMP 是供应商中立的 Agent 管理协议，支持 HTTP 和 WebSocket。它定义消息格式与能力协商，不定义 Java SDK Sampler、Go Agent 或 Collector 的实际配置文件语义。
@@ -381,6 +404,53 @@ PostgreSQL 保存长期的管理状态，Go 进程内存保存活动网络连接
 - 连接对象不写入数据库。未来 HA 需要明确 Gateway 节点的 Session 所有权以及转发机制，第一版不依赖 Redis/Kafka。
 - 不能把审计事件当作唯一状态源；Desired/Observed 当前视图要能从一致的事务写入恢复，事件用于解释变化。
 
+### 8.1 Management API 的目标资源形态
+
+管理 API 应暴露业务资源，而不是让用户直接构造 `ServerToAgent` Protobuf。建议的 API 形态如下，**除 P0 已列出的接口外均属于候选契约**；需要通过正式 API 设计和兼容性评审后实施。
+
+| Endpoint | 意图 | 当前状态 |
+| --- | --- | --- |
+| `GET /api/v1/agents` | 按已授权范围列出 Agent 实例及观察快照 | P0 已实现基础版本 |
+| `GET /api/v1/agents/{uid}` | 查看单 Agent 的配置与健康摘要 | P0 已实现基础版本 |
+| `PUT /api/v1/agents/{uid}/sampling` | 给单实例设置采样率 | P0 演示接口，长期是否保留需决定 |
+| `POST /api/v1/config-policies` | 创建某 AgentKind 可使用的业务策略 | 目标设计 |
+| `POST /api/v1/config-policies/{id}/revisions` | 添加不可变策略版本 | 目标设计 |
+| `POST /api/v1/config-releases` | 校验目标并启动一次受控发布 | 目标设计 |
+| `GET /api/v1/config-releases/{id}` | 查询目标数量、Applied/Failed/TimedOut、具体错误 | 目标设计 |
+| `POST /api/v1/config-releases/{id}/pause` | 暂停后续批次，不篡改已应用实例 | 目标设计 |
+| `POST /api/v1/config-releases/{id}/rollback` | 发起新发布操作，引用之前的有效 Revision | 目标设计 |
+
+对修改类 API 建议使用显式幂等键或版本条件，避免客户端超时重试引发两次不可区分的发布。请求校验和兼容性错误应返回明确的机器可识别错误类型；具体 HTTP 状态码、分页与过滤、RBAC action、请求/响应 Schema 尚未定稿，不能把表格误用为现有 REST 合同。
+
+一个目标发布请求可表达为以下**示意**（不保证可直接调用）：
+
+```json
+{
+  "policy_revision": "checkout-sampling@12",
+  "target": {
+    "agent_kind": "java-apm",
+    "environment": "prod",
+    "service_name": "checkout"
+  },
+  "rollout": {
+    "mode": "manual-batches"
+  }
+}
+```
+
+Server 应先验证调用者是否能控制相应 Tenant/Service，再在授权范围内解析 AgentKind 和 Selector。HTTP 成功响应仅说明发布意图已被持久化，不说明任一 Agent 已应用。
+
+### 8.2 不同 Agent Kind 的首期能力矩阵
+
+| Agent Kind | Inventory/Health 基础结构 | Java Sampling JSON | 当前交付 |
+| --- | --- | --- | --- |
+| 自定义 Java APM Agent | P1 通用模型适用 | P2 Java Config Adapter 目标 | 首期 |
+| Go APM Agent | 仅验证元数据模型可表示 | 不支持；需 Go Adapter 与 Runtime 验证 | 未来 |
+| Python APM Agent | 仅验证元数据模型可表示 | 不支持；需 Python Adapter 与 Runtime 验证 | 未来 |
+| OTel Collector | 仅预留 AgentKind/Distribution/Capabilities | 不支持；需独立配置所有权与运行时契约 | 未来 |
+
+能力判断不能只看 Agent Kind。即便两个 Java 发行版采用同一 Kind，版本不兼容或 Runtime 不支持动态字段，也必须拒绝对应配置，不能利用 `AcceptsRemoteConfig` 位标记推断能够安全应用。
+
 ## 9. 信任边界与安全
 
 远程配置具有修改采集行为、Exporter 目标甚至潜在数据访问范围的能力。OpAMP 规范将 Remote Configuration 视为需要特殊保护的能力。
@@ -493,6 +563,7 @@ go run ./cmd/server
 
 ```bash
 export APM_OPAMP_TOKEN='replace-with-a-test-agent-token'
+export APM_ADMIN_TOKEN='replace-with-a-different-admin-token'
 go run ./cmd/testagent -service checkout
 ```
 
