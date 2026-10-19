@@ -5,8 +5,9 @@ This is the index for the apm-control-plane codebase. Product capability and imp
 ## Start here
 
 - [README](../README.md) — start P0 and run the demonstration test agent.
+- [**APM Control Plane：开发者架构指南（中文）**](architecture/README.md) — complete developer-oriented architecture, lifecycle, state, protocol contracts, extension model and implementation map.
 - [ARCHITECTURE](../ARCHITECTURE.md) — source-backed P0 boundaries and proposed P1–P3 dependencies.
-- [Functional requirements](requirements/APM_CONTROL_PLANE.md) — FR-001 to FR-009 and testable acceptance.
+- [Functional requirements](requirements/APM_CONTROL_PLANE.md) — FR-001 to FR-012 and testable acceptance.
 - [Engineering workflow](PROJECT_WORKFLOW.md) — RepoFoundryAI v0.15.1 / EngineeringSpecifications v1.9.0.
 
 ## Governed engineering artifacts
