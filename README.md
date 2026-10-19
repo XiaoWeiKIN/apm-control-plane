@@ -1,6 +1,6 @@
 # APM Control Plane
 
-A Go-based **OpAMP control plane** for a future custom OpenTelemetry Java Agent distribution.
+A Go-based **OpAMP Agent Control Plane**. Long-term scope: Java, Go, Python and other APM Agent distributions, with a later path to Collector management. **First deliverable: a custom OpenTelemetry Java Agent**; the current code is only the Go P0 interoperability PoC.
 
 ## P0 scope
 
