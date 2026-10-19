@@ -5,17 +5,31 @@
   "documents": [
     {
       "base": "package",
-      "bytes": 906,
+      "bytes": 971,
       "path": "notes/README.md",
       "role": "entrypoint",
-      "sha256": "5ed7595de519e75ef0bc7910ed64cda0a815e49da1a57684b09c95ddce7a2eb0"
+      "sha256": "d320c80de9750b26c9a0d742fda108314b773e4409b3d0fb669faabda6968523"
     },
     {
       "base": "package",
-      "bytes": 1136,
+      "bytes": 9261,
+      "path": "notes/opensource-comparison.md",
+      "role": "document",
+      "sha256": "a5f217933029df0349802a5317e3dd56e9b8b72a23ed1af5b16b7e54c633f041"
+    },
+    {
+      "base": "package",
+      "bytes": 2136,
       "path": "rounds/rr-001_baseline.md",
       "role": "round",
-      "sha256": "60c2225b18b1315b8d842e21b6ba69660234507b29b01fc2e0d4c3633b539116"
+      "sha256": "c50ecc1f08c80636097863cbb5084f70be1daeda92361ecd5fac7de739c2554c"
+    },
+    {
+      "base": "package",
+      "bytes": 5172,
+      "path": "snapshots/synthesis-v001.md",
+      "role": "snapshot",
+      "sha256": "d4bb8bb47125c2f8c14c3dff0e8e3eb36b2c6c64ee1274ede00e3994abb7ab9b"
     }
   ],
   "entrypoints": [

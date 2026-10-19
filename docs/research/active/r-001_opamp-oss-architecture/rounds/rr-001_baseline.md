@@ -5,7 +5,7 @@ artifact_type: research-round
 id: RR-001
 parent_id: R-001
 title: "Open-source architecture patterns for OpAMP Control Plane — RR-001 Baseline investigation"
-status: active
+status: completed
 created: 2026-10-19
 updated: 2026-10-19
 author: "AI assistant"
@@ -43,5 +43,5 @@ create a new Research identity or independently authorize conclusion.
 
 ## Round Outcome
 
-本轮证据和推荐已写入 Synthesis，但由正式 RF 校验决定是否达到 review_ready。Research Owner 未授权 conclude。
+- 2026-10-19 — Completed for Synthesis review v1.
 

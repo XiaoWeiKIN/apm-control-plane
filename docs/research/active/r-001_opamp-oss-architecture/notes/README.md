@@ -15,7 +15,7 @@ flowchart LR
 ## Note inventory
 
 <!-- RCTL:NOTES:START -->
-- No note documents yet.
+- [四个开源项目的存储、配置与生命周期架构](./opensource-comparison.md)
 <!-- RCTL:NOTES:END -->
 
 The inventory between the `RCTL:NOTES` markers is maintained by `researchctl.py`.

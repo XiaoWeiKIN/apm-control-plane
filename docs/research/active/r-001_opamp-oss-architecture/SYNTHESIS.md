@@ -5,13 +5,13 @@ artifact_type: research-synthesis
 id: R-001-SYNTHESIS
 parent_id: R-001
 title: "Open-source architecture patterns for OpAMP Control Plane — Synthesis"
-status: draft
-revision: "0"
+status: review_ready
+revision: "1"
 created: 2026-10-19
 updated: 2026-10-19
 author: "AI assistant"
 owner: "Unassigned"
-payload_sha256:
+payload_sha256: aa500c228af59f1acbd92214a31dd78e9837d2fba6540561b7e095249d7b4679
 ---
 
 # Open-source architecture patterns for OpAMP Control Plane — Synthesis

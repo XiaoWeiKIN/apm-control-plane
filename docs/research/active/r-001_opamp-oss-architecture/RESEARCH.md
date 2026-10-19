@@ -5,7 +5,7 @@ artifact_type: research
 id: R-001
 title: "Open-source architecture patterns for OpAMP Control Plane"
 status: active
-maturity: exploratory
+maturity: review_ready
 research_type: comparative
 synthesis: SYNTHESIS.md
 manifest: RESEARCH_MANIFEST.json
@@ -14,7 +14,7 @@ updated: 2026-10-19
 owner: "Unassigned"
 author: "AI assistant"
 current_round: RR-001
-synthesis_revision: "0"
+synthesis_revision: "1"
 approved_by: ""
 approved_at: ""
 approval_ref: ""
@@ -38,9 +38,9 @@ permission to conclude or archive the Research.
 | Research Owner | Unassigned |
 | Author | AI assistant |
 | Lifecycle | active |
-| Maturity | exploratory |
+| Maturity | review_ready |
 | Current Round | RR-001 |
-| Synthesis Revision | v0 |
+| Synthesis Revision | v1 |
 | Approval | Pending |
 
 ## Purpose and Decision to Enable
@@ -62,7 +62,7 @@ documents.
 
 | Round | Focus | Status | Author | Started | Evidence and outcome |
 |---|---|---|---|---|---|
-| RR-001 | Baseline investigation | active | AI assistant | 2026-10-19 | `rounds/rr-001_baseline.md` |
+| RR-001 | Baseline investigation | completed | AI assistant | 2026-10-19 | `rounds/rr-001_baseline.md` |
 
 ## Scope and Non-goals
 
@@ -119,7 +119,7 @@ Allowed statuses: `open`, `answered`, `deferred`, `invalidated`.
 
 ## Outcome
 
-本 Research 得到可评审的候选结论，尚不代表 Research Owner 正式授权 Conclude；Synthesis 如进入 review_ready，也仍保持 active。双数据库 PoC 和 DD-001/EP-001 的未完成任务必须继续保留。
+Research is review-ready at Synthesis v1, but remains active. Milestone snapshot: `snapshots/synthesis-v001.md`. Only explicit Research Owner authorization may conclude it.
 
 ## Artifacts and Notes
 
@@ -133,4 +133,5 @@ Allowed statuses: `open`, `answered`, `deferred`, `invalidated`.
 
 - 2026-10-19T08:54:32Z — Initial Research package created by official researchctl.
 - 2026-10-19 — Added source-pinned Gitea/Grafana/Casdoor/Collector findings; pending official Research review.
+- 2026-10-19T09:01:33Z — Marked review-ready at Synthesis v1; Milestone snapshot: `snapshots/synthesis-v001.md`. Research remains active.
 

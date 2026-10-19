@@ -21,7 +21,7 @@ approval plus a sealed `SYNTHESIS.md`.
 <!-- RCTL:ACTIVE:START -->
 | ID | Title | Type | Status | Maturity | Owner | Updated | Synthesis | Path |
 |---|---|---|---|---|---|---|---|---|
-| R-001 | Open-source architecture patterns for OpAMP Control Plane | Comparative | active | exploratory | Unassigned | 2026-10-19 | [Synthesis](research/active/r-001_opamp-oss-architecture/SYNTHESIS.md) | [Research](research/active/r-001_opamp-oss-architecture/RESEARCH.md) |
+| R-001 | Open-source architecture patterns for OpAMP Control Plane | Comparative | active | review_ready | Unassigned | 2026-10-19 | [Synthesis](research/active/r-001_opamp-oss-architecture/SYNTHESIS.md) | [Research](research/active/r-001_opamp-oss-architecture/RESEARCH.md) |
 <!-- RCTL:ACTIVE:END -->
 
 ## Completed
