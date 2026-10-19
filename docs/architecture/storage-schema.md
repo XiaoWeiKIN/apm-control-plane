@@ -141,7 +141,7 @@ erDiagram
 | \`revoked_at\` | UTC Timestamp | NULL | 撤销时间 |
 | \`created_at\` | UTC Timestamp | NOT NULL | 建立绑定时间 |
 
-\`credential_ref\` 可在轮换时增加另一条指向**同一 Principal**；旧 Credential 被撤销不改变 Agent Instance 的所有权。**是否采用本地 Credential 表、外部 IAM 真源及撤销传播机制尚需安全评审**；此表是业务关系设计，不宣称已有 Token 轮换能力。
+\`credential_ref\` 可在轮换时增加另一条指向**同一 Principal**；旧 Credential 被撤销不改变 Agent Instance 的所有权。 对只传 Bearer Token 的 OpAMP 接入，认证系统必须能够从凭证**无歧义地反查可信 Tenant 和 Principal**，不能采用客户端自报 Tenant 来消除同名冲突；当前 P1.1 的启动配置已经禁止重复 Token。**是否采用本地 Credential 表、外部 IAM 真源及撤销传播机制尚需安全评审**；此表是业务关系设计，不宣称已有 Token 轮换能力。
 
 ### 3.4 \`agent_instances\` — Agent Inventory（已存在；目标为原位演进）
 
@@ -324,6 +324,8 @@ erDiagram
 | \`last_sent_at\` / \`next_retry_at\` | Nullable UTC Timestamp | 投递与重试调度 |
 | \`last_error\` | TEXT | 不泄漏配置正文或 Secret |
 | \`updated_at\` | UTC Timestamp | NOT NULL |
+
+**归属一致性**：建议 `(tenant_id,release_id,instance_uid)` 在 `agent_assignments` 中以复合 FK 指向 `release_targets`，确保当前 Assignment 确实属于这次发布的冻结目标。写入时还须检查 `config_revision_id`、`desired_generation` 与目标快照一致；必要时为 Target 建立含这些列的唯一键并设置相应复合 FK，而不是只在 Go 中分别验证独立 Release ID 与 ConfigRevision ID。
 
 **CAS 示例（伪 SQL，GORM 负责方言占位符）**：
 
