@@ -398,7 +398,15 @@ func makeGateway(reg *registry, agentAuth *auth.Authenticator, log *slog.Logger)
 					config, full, err := reg.update(ctx, principal, isWS, conn, msg)
 					if err != nil {
 						log.Warn("opamp status rejected", "error", err)
-						return out
+						// An invalid identity or competing connection must never receive
+						// a normal server capability response or RemoteConfig.
+						// The OpAMP callback API cannot set a per-message HTTP status;
+						// nil produces an empty HTTP response for polling clients.
+						// For persistent connections fail closed by disconnecting.
+						if isWS && conn != nil {
+							_ = conn.Disconnect()
+						}
+						return nil
 					}
 					if full {
 						out.Flags = uint64(protobufs.ServerToAgentFlags_ServerToAgentFlags_ReportFullState)
