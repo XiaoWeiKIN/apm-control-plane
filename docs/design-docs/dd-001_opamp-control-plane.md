@@ -103,7 +103,11 @@ flowchart TB
 
 ## Proposed Architecture
 
-**当前 P0**：cmd/server/main.go 同时承载协议、HTTP Admin API 和线程安全内存 Registry，cmd/testagent/main.go 模拟 OpAMP HTTP 拉取与 ACK。P0 仅测试通信路径，不应当宣称为生产控制平面。
+**P0 已合并基线**：原始 cmd/server/main.go 同时承载协议、HTTP Admin API 和内存 Registry；cmd/testagent/main.go 是 HTTP ACK 模拟 Agent。P0 不属于生产控制平面。
+
+**P1.1 工作分支（PR #3，待评审，不是已批准设计）**：新增 Koanf 启动配置、GORM PostgreSQL/MySQL Agent Inventory Store、Goose Migration、Tenant/Credential 到 Instance UID 的首次绑定、Admin Tenant 查询隔离；HTTP 活跃度由 LastSeen + TTL 计算，WS 单实例活跃会话禁止静默抢占。短期为保证 P0 REST/OpAMP 兼容，协议回调和运行时临时配置仍在 cmd/server；Domain 分层和 P2 版本化 Config 将继续迭代。
+
+**身份/会话方案仍为待评审提案**：Scoped Bearer Token 由环境变量/Secret 装载，CredentialID 在一个 Tenant 内首次绑定 UID；被不同 Credential 使用的同 UID 上报被拒绝。该策略能阻止凭证间冒领，但没有完成 Token 生命周期、mTLS、可信分布式会话 Generation/Fencing 或企业 IAM，因此不能称为生产认证方案。
 
 **目标模块（模块化单体）**：
 - cmd/server：装配依赖、启动/关闭与 HTTP Server 生命周期。
@@ -162,6 +166,8 @@ flowchart TB
 Single-file Design：本文件是 DD-001 的完整阅读入口；模块细节经批准后再独立拆分。
 
 ## Revision Notes
+
+- 2026-10-19 — P1.1 分支实现参考：PR #3 提交统一 GORM Agent Inventory、Koanf、Goose 与初步 Scoped Credential 身份绑定。此处仅记录 Draft 事实，不代表正式 Design Owner 批准。
 
 - 2026-10-19 — Draft revision 1, derived from explicit product requirements and current P0 source. Not yet approved.
 - 2026-10-19 — 用户确认未来统一管理 Java/Go/Python APM Agent 并扩展 Collector。将 AgentKind/Distribution/Capabilities/ConfigAdapter 作为类型边界加入工作草案；首期交付和未批准状态保持不变。

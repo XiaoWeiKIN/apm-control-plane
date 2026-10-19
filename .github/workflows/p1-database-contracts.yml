@@ -1,0 +1,78 @@
+name: P1 Database Contracts
+
+on:
+  pull_request:
+    paths:
+      - "cmd/server/**"
+      - "internal/**"
+      - "db/migrations/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/p1-database-contracts.yml"
+  push:
+    branches:
+      - main
+      - feat/p1-durable-agent-inventory
+    paths:
+      - "cmd/server/**"
+      - "internal/**"
+      - "db/migrations/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/p1-database-contracts.yml"
+
+jobs:
+  database-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: controlplane
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U app -d controlplane"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: rootpass
+          MYSQL_DATABASE: controlplane
+          MYSQL_USER: app
+          MYSQL_PASSWORD: testpass
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -prootpass"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+    env:
+      APM_TEST_POSTGRES_DSN: postgres://app:testpass@127.0.0.1:5432/controlplane?sslmode=disable
+      APM_TEST_MYSQL_DSN: "app:testpass@tcp(127.0.0.1:3306)/controlplane?parseTime=true&loc=UTC"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.9'
+          cache: true
+      - name: Install pinned Goose
+        shell: bash
+        run: |
+          set -euo pipefail
+          go install github.com/pressly/goose/v3/cmd/goose@v3.27.0
+      - name: Migrate PostgreSQL and MySQL schemas
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$HOME/go/bin/goose" -dir db/migrations/postgres postgres "$APM_TEST_POSTGRES_DSN" up
+          "$HOME/go/bin/goose" -dir db/migrations/mysql mysql "$APM_TEST_MYSQL_DSN" up
+      - name: Exercise identical real-engine repository contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -tags=integration -race -count=1 -v ./cmd/server ./internal/storage/gormrepo

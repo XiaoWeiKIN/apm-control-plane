@@ -40,11 +40,12 @@ This ExecPlan is a bounded living document. Keep current truth synchronized. Pre
 ## Current Snapshot
 
 - Latest checkpoint: none（本执行计划首次创建）。
-- Current milestone: **P1 — Durable Inventory and authenticated identity boundary**（尚未实现）。
+- Current milestone: **P1.1 — Durable Agent Inventory implementation (PR #3, under review)**；功能代码已提交，尚未完成 P1 全部身份方案与正式设计审批。
 - Verified baseline: PR #1 的 P0 Go 编译、单测（含 Race Detector）和 Vet 在 GitHub Actions 通过；测试 Agent 的实际双进程手工烟测未执行。
 - Next action: 评审 DD-001 中的凭证到实例/租户绑定模型，确定 PostgreSQL/MySQL 共通 Repository 契约和独立 Migration；增加 internal/storage 与 internal/registry，并在 PostgreSQL/MySQL 均执行重启恢复合同测试。
 - Confirmed product scope (2026-10-19): 多语言 APM Agent + 后续 Collector；P1–P3 只交付通用抽象和 Java 适配链路，不把其他语言或 Collector 执行能力算入验收。
 - Storage requirement (2026-10-19): 多数据库 Driver（至少 PostgreSQL 和 MySQL）是新增范围；技术候选与风险记录在 docs/architecture/technology-selection.md，必须有两数据库实际合同测试。
+- P1 draft evidence (2026-10-19): PR #3 feat/p1-durable-agent-inventory 已提交 Koanf/GORM/Goose、PostgreSQL/MySQL Migration、凭证范围与 Inventory 持久化。一次 GitHub Actions PostgreSQL/MySQL 合同测试已通过；最终 PR checks 和身份授权评审仍需完成。
 - Open: DD-001 尚未批准；没有 accepted ADR；生产 TLS/身份策略尚待明确。不能把这些条件标记为完成。
 
 ## Context and Orientation
@@ -153,6 +154,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 - [x] (2026-10-19) 既有 P0 代码和 RepoFoundryAI Harness/Specs 已存在于 PR #1；Go 和 RF 的既有 CI 校验通过（针对当时提交）。
 - [x] (2026-10-19) 建立 DD-001 工作草案和本次 EP-001 计划；当前尚未获得 Design Owner 批准。
+- [x] (2026-10-19) P1.1 代码草案：完成 Koanf 配置、GORM 双 Driver、Goose Schema、基本凭证到 Tenant/UID 绑定与持久化 Inventory；PR #3，非已批准生产实施。
 - [ ] M1：身份边界、PostgreSQL/MySQL Registry 及双数据库合同测试、断线恢复和验收。
 - [ ] M2：版本化策略、配置协调和 ACK 追踪。
 - [ ] M3：灰度批次、审计、失败隔离和回滚。
@@ -208,4 +210,5 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 - 2026-10-19 — 由 RF epctl 创建初始 active EP，基于用户确认的控制平面范围与 DD-001 工作草案；未假造审批和实现验收。
 - 2026-10-19 — 更新产品范围：通用 OpAMP Agent Control Plane，预留 Java/Go/Python APM Agent 和未来 Collector；本 EP 实施仍仅限 Java 适配与通用控制面，现有 blocked 状态和未完成验收保持不变。
 - 2026-10-19 — 同步关系型数据库多 Driver 需求；P1 需要验证 PostgreSQL 与 MySQL，保持 blocked 状态和未完成验收记录。
+- 2026-10-19 — P1.1 代码及数据库合同测试已经开始纳入 PR #3；DD-001 未获正式批准且生产身份/会话所有权未决，因此本计划继续 blocked，M1 不提前勾选。
 
