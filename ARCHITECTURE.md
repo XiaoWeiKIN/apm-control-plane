@@ -9,7 +9,7 @@ The service receives Open Agent Management Protocol (OpAMP) management messages 
 
 For a complete Chinese developer-oriented technical walkthrough, read [APM Control Plane：开发者架构指南](docs/architecture/README.md). It is an explanation based on repository facts and the proposed DD-001, not a newly approved normative design.
 
-The current P0 implementation is an in-memory interoperability PoC. Proposed PostgreSQL Registry, policy revision management and Reconciler are **not implemented**; see [DD-001](docs/design-docs/dd-001_opamp-control-plane.md) and [EP-001](docs/exec-plans/active/ep-001_build-control-plane/EXECPLAN.md).
+The current P0 implementation is an in-memory interoperability PoC. Proposed driver-neutral PostgreSQL/MySQL Registry, policy revision management and Reconciler are **not implemented**; see [DD-001](docs/design-docs/dd-001_opamp-control-plane.md) and [EP-001](docs/exec-plans/active/ep-001_build-control-plane/EXECPLAN.md).
 
 ## Code map
 
@@ -30,7 +30,7 @@ flowchart LR
     ADMIN --> CONFIG["Per-Agent Sampling JSON"]
     CONFIG --> OPAMP
     TEST["Test Agent · HTTP Polling"] <-->|"AgentToServer / ServerToAgent"| OPAMP
-    FUTURE["PostgreSQL + Policy / Reconciler"] -.->|"DD-001 proposed"| OPAMP
+    FUTURE["PostgreSQL/MySQL Adapters + Policy / Reconciler"] -.->|"DD-001 proposed"| OPAMP
 ~~~
 
 The protocol server uses the upstream opamp-go Server.Attach() callback interface; a shared net/http server routes management APIs separately. No real database, queue or external OTLP pipeline is started in this repository.
@@ -56,4 +56,4 @@ A future `AgentKind` and `Distribution` model separates APM service identity fro
 
 ## Known gaps
 
-PostgreSQL migrations, tenant-bound Agent identity, immutable policy revisions, config rollback, service-level selectors, race-safe proactive WS sending, production TLS, multi-instance ownership, production SLOs and real Java Agent dynamic sampling remain unimplemented or unverified. The future DD is not an accepted ADR or an approved Design.
+PostgreSQL/MySQL driver adapters and migrations, tenant-bound Agent identity, immutable policy revisions, config rollback, service-level selectors, race-safe proactive WS sending, production TLS, multi-instance ownership, production SLOs and real Java Agent dynamic sampling remain unimplemented or unverified. The future DD is not an accepted ADR or an approved Design.
