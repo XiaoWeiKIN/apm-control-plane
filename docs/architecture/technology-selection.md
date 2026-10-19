@@ -10,7 +10,7 @@
 
 ## 1. 总体结论
 
-选用**模块化 Go 单体 + `database/sql` + 分数据库 SQL Adapter + 多方言 Migration + 严格配置加载**。**一个部署实例只连接其配置指定的一种主数据库**，不是同时跨 MySQL、PostgreSQL 执行一个分布式事务。数据库类型在进程启动时确定；不支持运行时随意切换。
+选用**模块化 Go 单体 + GORM v2 + Goose + Koanf v2**。数据库访问以统一 GORM Repository 为主，只有确实存在方言差异时才写专用 SQL；不再采用双 sqlc 查询代码生成方案。**一个部署实例只连接其配置指定的一种主数据库**，不是同时跨 MySQL、PostgreSQL 执行一个分布式事务。数据库类型在进程启动时确定；不支持运行时随意切换。
 
 | 能力 | 推荐 | 阶段 | 取舍 |
 | --- | --- | --- | --- |
@@ -19,8 +19,8 @@
 | 应用配置 | `knadh/koanf/v2` | P1 | file + yaml + 显式 env 覆盖，强类型 Decode/Validate |
 | 通用 DB 接口/连接池 | **`database/sql` / `sql.DB` / `sql.Tx`** | P1 | 标准接口，连接池与事务统一 |
 | PostgreSQL 驱动 | **`jackc/pgx/v5/stdlib`** | P1 | 保留 pgx 生态驱动，但不通过 pgxpool 暴露到 Domain |
-| MySQL 驱动 | **`go-sql-driver/mysql`** | P1 | 实现 `database/sql/driver`，连接池由 sql.DB 管理 |
-| SQL 访问 | **`sqlc v1.30.0`**，2 份配置集 | P1 | 两种方言生成各自的 `database/sql` 查询代码 |
+| MySQL 驱动 | **`gorm.io/driver/mysql`** | P1 | GORM Dialector，底层复用 go-sql-driver/mysql |
+| ORM / SQL 访问 | **GORM v2 (`gorm.io/gorm`)** | P1 | 一套 CRUD Repository；CAS、事务和复杂查询显式处理 |
 | Migration | **`pressly/goose/v3 v3.27.0`** | P1 | 同一工具，数据库特定 SQL Migration |
 | 日志 | `log/slog` | 已有 | 结构化 JSON，不引入 Logrus/Zap |
 | Telemetry | OTel Go SDK + `otelhttp` + Repository Span | P1 | 不将 pgx-only tracing 注入通用存储端口 |
@@ -29,7 +29,7 @@
 | 集成测试 | **Testcontainers PostgreSQL + MySQL** | P1 | 两种引擎执行相同 Repository 合规测试 |
 | Redis/Kafka/ORM/DI 框架 | 不引入 | 非 P1 | 避免提前增加系统与一致性复杂度 |
 
-**推荐将 `database/sql` 限制在 `internal/storage` 及其驱动 Adapter 内**。Agent Registry、Policy、Reconciler 只消费领域 Repository 接口；不可跨层持有 `*sql.DB`、`*pgx.Conn`、`*sql.Tx` 或 MySQL 驱动错误类型。
+**推荐将 GORM 限制在 `internal/storage/gormrepo` 内**，领域只依赖业务 Repository/UnitOfWork 接口。Agent Registry、Policy、Reconciler 只消费领域 Repository 接口；不可跨层持有 `*sql.DB`、`*pgx.Conn`、`*sql.Tx` 或 MySQL 驱动错误类型。
 
 ## 2. 多数据库支持的准确含义
 
@@ -40,8 +40,8 @@ flowchart TB
     App["Registry / Config / Release / Reconciler"]
     Port["Repository / UnitOfWork Port"]
     Factory["Storage Factory<br/>配置 driver: postgres | mysql"]
-    PG["postgres Adapter<br/>sqlc generated queries"]
-    MY["mysql Adapter<br/>sqlc generated queries"]
+    PG["GORM PostgreSQL Dialector"]
+    MY["GORM MySQL Dialector"]
     SQL["Go database/sql"]
     PGDRV["pgx/v5/stdlib"]
     MYDRV["go-sql-driver/mysql"]
@@ -189,119 +189,41 @@ Koanf 负责 Providers/Parsers 与覆盖，**不代替业务验证**。验证必
 
 ## 4. Driver、SQL 生成和 Migration 的具体选型
 
-### 4.1 Driver：标准 database/sql + 两个实现
+### 4.1 GORM v2：统一 Repository
 
-| 候选 | 用途 | 选择 |
-| --- | --- | --- |
-| `database/sql`（Go 标准库） | DB/Tx/连接池/Context 接口 | **统一入口** |
-| `github.com/jackc/pgx/v5/stdlib` | PostgreSQL Driver（`sql.Open("pgx", dsn)`） | **PG Adapter 使用** |
-| `github.com/go-sql-driver/mysql` | MySQL Driver（`sql.Open("mysql", dsn)`） | **MySQL Adapter 使用** |
-| `pgxpool` | PostgreSQL 原生高性能连接池 | 不作为公共 Port；非首期必要 |
-| `sqlx` | `database/sql` 扩展工具 | 当前不引入；与 sqlc 职责重叠 |
-| GORM/ent | ORM/Schema Model | 当前不引入：SQL 方言和并发语义仍须显式验证 |
-
-Go `database/sql` 自带连接池：统一使用 `SetMaxOpenConns`、`SetMaxIdleConns`、`SetConnMaxLifetime`，`PingContext` 校验连接。注意 `sql.Open` 本身通常并不立即检查实际网络连接。**不同数据库驱动的连接参数格式不同**，Factory 按 Driver ID 显式分支，不能通过任意字符串 `sql.Open(cfg.Driver,cfg.DSN)` 允许未知实现静默进入。
-
-建议可执行的骨架方式（接口和包名为示例，不是已提交实现）：
+选用 `gorm.io/gorm` + `gorm.io/driver/postgres` + `gorm.io/driver/mysql`。GORM 通过 `database/sql` 管理连接池；Domain 不直接依赖 ORM 类型。P1 使用**一套 GORM Repository**，避免为简单 CRUD 重复编写 PostgreSQL/MySQL 查询代码。
 
 ```go
-import (
-    "database/sql"
-    _ "github.com/jackc/pgx/v5/stdlib"
-    _ "github.com/go-sql-driver/mysql"
-)
-
-func OpenDB(driver, dsn string) (*sql.DB, error) {
-    var sqlDriver string
-    switch driver {
-    case "postgres":
-        sqlDriver = "pgx"
-    case "mysql":
-        sqlDriver = "mysql"
-    default:
-        return nil, fmt.Errorf("unsupported database driver: %s", driver)
-    }
-    return sql.Open(sqlDriver, dsn)
+// 示例，具体版本和依赖在 P1 PoC 中锁定。
+switch cfg.Database.Driver {
+case "postgres":
+    db, err = gorm.Open(postgres.Open(cfg.Database.DSN), &gorm.Config{})
+case "mysql":
+    db, err = gorm.Open(mysql.Open(cfg.Database.DSN), &gorm.Config{})
+default:
+    return nil, ErrUnsupportedDriver
 }
 ```
 
-真实实现必须在建池后设置上限、完成 `PingContext` 与健康检查、保证关闭、处理 MySQL DSN 与 TLS。**以上仅显示 Driver 选择机制**，不应直接复制后当生产启动器。
+事务由 `db.Transaction` 管理，事务回调内所有 Repository 必须共享同一个 `*gorm.DB` 事务句柄。Agent UID 唯一性、发布原子性和 Assignment CAS 仍需显式约束及 `RowsAffected` 检查。GORM 的 `Save` 不等于乐观并发控制。仅在实际方言差异出现时引入局部 SQL，不预建两套完整 Repository。
 
-### 4.2 sqlc：两个方言、两个代码生成输出
+### 4.2 Migration：Goose
 
-`sqlc v1.30.0` 支持 Go 下 PostgreSQL、MySQL，推荐**生成两套 Repository 内部实现**，不将生成的 `DBTX` 或实体直接作为领域层 Port。
-
-建议 `sqlc.yaml`（未运行，PoC 时需要真实验证）：
-
-```yaml
-version: "2"
-sql:
-  - engine: "postgresql"
-    schema: "db/migrations/postgres"
-    queries: "db/queries/postgres"
-    gen:
-      go:
-        package: "pgqueries"
-        out: "internal/storage/postgres/pgqueries"
-        sql_package: "database/sql"
-  - engine: "mysql"
-    schema: "db/migrations/mysql"
-    queries: "db/queries/mysql"
-    gen:
-      go:
-        package: "mysqlqueries"
-        out: "internal/storage/mysql/mysqlqueries"
-        sql_package: "database/sql"
-```
-
-Migration 与 Query 分方言维护是**明确的技术成本**，但实现契约清晰；共通逻辑可以存在应用层和单独的合同测试中，而不是假设所有 SQL 字面量可通用。
-
-### 4.3 Migration：从 Tern 调整为 Goose
-
-**不再推荐 PostgreSQL 专用的 `tern/v2` 作为基础 Migration 工具。** 改为 `pressly/goose/v3 v3.27.0`，因为它能以同一 CLI 操作 PostgreSQL/MySQL。v3.27.0 的 `go.mod` 要求 Go 1.25，符合项目当前基线；后续 v3.28+ 已要求 Go 1.26，暂不采用。
-
-两套独立 Migration 目录中的**业务版本号对应，但文件 SQL 不必一致**：
+**不使用 GORM AutoMigrate 管理生产 Schema。** 采用 `pressly/goose/v3 v3.27.0`（Go 1.25 候选）统一迁移版本和执行入口。PostgreSQL/MySQL 的 DDL 允许按数据库分别维护：
 
 ```text
-db/
-  migrations/
-    postgres/
-      00001_initial.sql
-      00002_agent_observations.sql
-    mysql/
-      00001_initial.sql
-      00002_agent_observations.sql
-  queries/
-    postgres/
-      agents.sql
-      assignments.sql
-    mysql/
-      agents.sql
-      assignments.sql
+db/migrations/
+  postgres/
+    00001_initial.sql
+  mysql/
+    00001_initial.sql
 ```
 
-例如 PostgreSQL UID 用 `BYTEA`，MySQL 用 `BINARY(16)`；JSON 存储、Timestamp、索引、唯一约束和 Upsert 可分别设计。两个 Migration 目录均使用 Goose 注解：
+两种数据库的逻辑模型应等价，但列类型、索引和 DDL 不强制相同。MySQL DDL 可能隐式提交，Goose 不会使其自动具备 PostgreSQL 式事务回滚能力。应用启动只检查 Schema 版本，不让多个实例自动执行迁移。
 
-```sql
--- +goose Up
--- 方言专用 CREATE TABLE ...
+### 4.3 不采用 sqlc 的原因
 
--- +goose Down
--- 方言专用 DROP TABLE ...
-```
-
-**MySQL DDL 隐式提交**：对含 DDL 的迁移，需要按实际 MySQL/InnoDB 行为设计。Goose 支持 `NO TRANSACTION` 标记，但不能由此获得自动回滚；必须具备启动前备份/演练、迁移失败检测、人工或幂等前向修复流程。不能机械地在生产执行所有 `Down`。生产迁移采用 expand → backfill → contract，服务启动前检查 schema 版本兼容，不允许所有控制平面副本自行升级表结构。
-
-示意独立 CLI（验证前不能视为已执行命令）：
-
-```bash
-go install github.com/pressly/goose/v3/cmd/goose@v3.27.0
-
-goose -dir db/migrations/postgres postgres "$POSTGRES_DSN" up
-goose -dir db/migrations/mysql mysql "$MYSQL_DSN" up
-```
-
-项目实际部署只运行**所选目标 Driver 对应**的 Migration 命令，不会对两个数据库同时执行；CI 要同时检查两种方言。
+当前存储主要是 Inventory、Policy、Configuration、Release 和 Audit 的 CRUD 与简单条件更新。使用 sqlc 需要维护 PostgreSQL/MySQL 两套 SQL 查询及生成代码，投入与当前复杂度不匹配。若未来出现大量复杂查询或性能热点，再以真实 Profiling 和 SQL 证据评估局部引入，而不是提前构建双方言查询体系。
 
 ## 5. 服务、协议和模块装配：保留现状路线
 
@@ -337,7 +259,7 @@ HTTP 入口使用 OpenTelemetry Go SDK 与 `otelhttp`，数据库操作初期在
 
 | 维度 | PostgreSQL | MySQL | 最低验收 |
 | --- | --- | --- | --- |
-| SQL Generation | `sqlc v1.30.0` PG engine | `sqlc v1.30.0` MySQL engine | 两套生成代码编译，无漂移 |
+| SQL Generation | `不采用 sqlc` PG engine | `不采用 sqlc` MySQL engine | 两套生成代码编译，无漂移 |
 | Migration | Goose PG 目录 | Goose MySQL 目录 | 两库 Up、状态检查、受控失败及恢复 |
 | Testcontainers | `modules/postgres` | `modules/mysql` | 固定测试镜像版本与必要的网络权限 |
 | 连接生命周期 | `pgx/v5/stdlib` | `go-sql-driver/mysql` | Ping、取消、连接断开、超时和 Pool 关闭 |
@@ -370,10 +292,10 @@ internal/
     factory.go                   Driver allowlist and selection
     postgres/
       adapter.go
-      pgqueries/                 sqlc-generated PostgreSQL code
+      pgqueries/                 GORM 模型与查询
     mysql/
       adapter.go
-      mysqlqueries/              sqlc-generated MySQL code
+      mysqlqueries/              GORM 模型与查询
 db/
   migrations/
     postgres/
@@ -429,7 +351,7 @@ tests/
 ## 10. P1 最小技术验证计划
 
 1. **配置加载**：Koanf 读取 `driver=postgres/mysql`；非法 Driver 或缺少 DSN 必须在启动前报错；进程日志不打印凭证。
-2. **代码生成**：固定 `sqlc v1.30.0`，生成 PG/MySQL 各自的 `database/sql` 查询代码，Go 编译与生成文件一致；PostgreSQL 方言不能流入 MySQL 包。
+2. **代码生成**：固定 `不采用 sqlc`，生成 PG/MySQL 各自的 `database/sql` 查询代码，Go 编译与生成文件一致；PostgreSQL 方言不能流入 MySQL 包。
 3. **Migration**：Goose v3.27.0 分别运行两套 Migration；测试 MySQL DDL 失败后可诊断和恢复，不虚构事务性回滚。
 4. **Repository 契约**：同一测试套件在 PostgreSQL 和 MySQL 中验证 Agent Identity 唯一性、Tenant 范围、Upsert、Observation、当前 Desired、CAS、过期 ACK、事务原子发布和重启恢复。
 5. **OpAMP 集成**：两种 DB Driver 下，OpAMP Agent 的状态都能正确持久化；旧 P0 REST/协议行为保持兼容。
@@ -441,7 +363,7 @@ tests/
 
 - [Go `database/sql`](https://pkg.go.dev/database/sql)；[pgx stdlib](https://pkg.go.dev/github.com/jackc/pgx/v5/stdlib)
 - [go-sql-driver/mysql](https://github.com/go-sql-driver/mysql)
-- [sqlc v1.30.0 语言/数据库支持](https://docs.sqlc.dev/en/v1.30.0/reference/language-support.html)；[sqlc 配置](https://docs.sqlc.dev/en/v1.30.0/reference/config.html)
+- [不采用 sqlc 语言/数据库支持](https://docs.sqlc.dev/en/v1.30.0/reference/language-support.html)；[sqlc 配置](https://docs.sqlc.dev/en/v1.30.0/reference/config.html)
 - [Goose 文档](https://pressly.github.io/goose/)；[Goose SQL 注解](https://pressly.github.io/goose/documentation/annotations/)
 - [MySQL 隐式提交说明](https://dev.mysql.com/doc/refman/8.4/en/implicit-commit.html)
 - [Koanf v2](https://github.com/knadh/koanf)
