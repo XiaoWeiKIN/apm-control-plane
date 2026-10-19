@@ -72,6 +72,8 @@ This repository is bootstrapped with [RepoFoundryAI v0.15.1](https://github.com/
 - [Engineering workflow and installation](docs/PROJECT_WORKFLOW.md)
 - [Repository guide](AGENTS.md)
 - [Engineering specification routing index](docs/agent-guides/managed/index.md)
+- [DD-001: Control Plane architecture (draft)](docs/design-docs/dd-001_opamp-control-plane.md)
+- [EP-001: durable Control Plane delivery (blocked, review prerequisites)](docs/exec-plans/active/ep-001_build-control-plane/EXECPLAN.md)
 - [Decision index](docs/DECISIONS.md), [design index](docs/DESIGN-DOCS.md), [execution plans](docs/PLANS.md)
 
 A developer installs the CLI and professional Skills into **their own** environment using the official installer (see the engineering workflow). Project manifests, adapters and locked specifications are committed here. PRs automatically validate Harness, Spec and engineering lifecycle state, in addition to Go tests.
