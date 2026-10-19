@@ -1,8 +1,10 @@
 # APM Control Plane
 
-A Go-based **OpAMP Agent Control Plane**. Long-term scope: Java, Go, Python and other APM Agent distributions, with a later path to Collector management. **First deliverable: a custom OpenTelemetry Java Agent**; the current code is only the Go P0 interoperability PoC.
+A Go-based **OpAMP Agent Control Plane**. Long-term scope: Java, Go, Python and other APM Agent distributions, with a later path to Collector management. **First deliverable: a custom OpenTelemetry Java Agent**. P0 is a protocol interoperability PoC; branch feat/p1-durable-agent-inventory adds durable multi-database Agent Inventory and scoped credentials, pending PR review.
 
 ## Developer architecture documentation
+
+- [**P1.1 Durable Inventory runbook（中文）**](docs/architecture/p1-durable-inventory.md) — PostgreSQL/MySQL Migration、Scoped Credentials、实例持久化与当前限制。
 
 - [**RF Research R-001：开源项目架构对比**](docs/research/active/r-001_opamp-oss-architecture/RESEARCH.md) — Gitea / Grafana / Casdoor / Collector 的源码证据与迁移边界。
 
@@ -22,38 +24,42 @@ A Go-based **OpAMP Agent Control Plane**. Long-term scope: Java, Go, Python and 
 
 **P0 is a protocol interoperability PoC.** There is no durable database, global service-level policy rollout, or real JVM sampling change yet.
 
-## Local startup
+## Local startup (P1 feature branch)
 
-Requires Go 1.25+ and access to Go dependencies.
+Requires Go 1.25+, PostgreSQL or MySQL, and an explicit schema migration before running the service. Production migrations use **Goose**, not GORM AutoMigrate.
 
 ```bash
+go install github.com/pressly/goose/v3/cmd/goose@v3.27.0
+
+export APM_DB_DRIVER=postgres
+export APM_DATABASE_DSN='postgres://app:replace@127.0.0.1:5432/controlplane?sslmode=disable'
+goose -dir db/migrations/postgres postgres "$APM_DATABASE_DSN" up
+
 export APM_OPAMP_TOKEN='replace-with-long-random-agent-token'
 export APM_ADMIN_TOKEN='replace-with-a-different-long-admin-token'
 go run ./cmd/server
 ```
 
-Default listener: `127.0.0.1:4320`. Override with `APM_LISTEN_ADDR`. In another terminal:
+To use MySQL instead, set `APM_DB_DRIVER=mysql`, supply a MySQL DSN (with `parseTime=true&loc=UTC`) and run `goose -dir db/migrations/mysql mysql "$APM_DATABASE_DSN" up`.
+
+The two legacy token variables are still supported for local P0 compatibility, scoped to a single `default` tenant. For separate tenants, use `APM_AGENT_CREDENTIALS_JSON` and `APM_ADMIN_CREDENTIALS_JSON` with credential id, tenant id and token as described in the [P1 runbook](docs/architecture/p1-durable-inventory.md). Do not expose the development listener or plain HTTP to an untrusted network.
+
+Default listener: `127.0.0.1:4320`. Set `APM_CONFIG_FILE=configs/example.yaml` to load Koanf startup configuration. In another terminal:
 
 ```bash
 export APM_OPAMP_TOKEN='replace-with-long-random-agent-token'
 go run ./cmd/testagent -service checkout
 ```
 
-The test agent prints its 32-character `instance_uid`. Publish a per-instance policy:
+The test agent prints its 32-character `instance_uid`; this can now be queried through the tenant-scoped admin API and is retained after a server restart. The P0-only `PUT /api/v1/agents/{uid}/sampling` endpoint remains an **in-memory demo**, not durable P2 policy revision management.
 
 ```bash
 export APM_ADMIN_TOKEN='replace-with-a-different-long-admin-token'
-export UID_HEX='<uid-from-testagent>'
 curl -H "Authorization: Bearer $APM_ADMIN_TOKEN" http://127.0.0.1:4320/api/v1/agents
-curl -X PUT "http://127.0.0.1:4320/api/v1/agents/$UID_HEX/sampling" \
-  -H "Authorization: Bearer $APM_ADMIN_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"sampling_rate":0.1}'
 ```
 
-The test agent should print `Applied policy rate=0.100` after its next poll. The reported configuration hash and status are visible using `GET /api/v1/agents/{uid}`. The demo **only validates and acknowledges JSON**, without modifying any Java SDK sampler.
-
 ## Routes
+
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -71,7 +77,7 @@ go test -race ./...
 go vet ./...
 ```
 
-See [architecture, threat model, and P0 limitations](docs/architecture.md).
+See [P1 deployment guide](docs/architecture/p1-durable-inventory.md), [architecture](docs/architecture/README.md), and [P0 limitations](docs/architecture.md).
 
 ## Engineering governance (RepoFoundryAI)
 
