@@ -49,7 +49,7 @@ This ExecPlan is a bounded living document. Keep current truth synchronized. Pre
 
 ## Context and Orientation
 
-仓库入口为 cmd/server/main.go（当前把 OpAMP Gateway、API、内存 Agent 状态耦合在一个文件），cmd/testagent/main.go（HTTP 测试 Agent），cmd/server/main_test.go（协议/HTTP 基础单测），docs/requirements/APM_CONTROL_PLANE.md（FR-001…FR-009），docs/architecture.md（P0 边界）。
+仓库入口为 cmd/server/main.go（当前把 OpAMP Gateway、API、内存 Agent 状态耦合在一个文件），cmd/testagent/main.go（HTTP 测试 Agent），cmd/server/main_test.go（协议/HTTP 基础单测），docs/requirements/APM_CONTROL_PLANE.md（FR-001…FR-013），docs/architecture.md（P0 边界）。
 
 目标为“**Universal Control Plane ←OpAMP→ Java/Go/Python APM Agent，以及未来 Collector**”。本 EP 的代码路径只有自定义 Java Agent + HTTP Test Agent。通用控制面不得绑定 Java Sampler 接口：注册的 AgentKind/Distribution 与版本/Capabilities 必须独立于 service.name，配置下发经 AgentKind Adapter 编译。JVM 侧单独负责动态采样。管理 REST API 面向人/系统，OpAMP 面向 Agent；OTLP 数据不经过这里。
 
@@ -59,7 +59,7 @@ P1 首先拆模块并持久化；P2 在此基础上引入策略版本和协调�
 
 | Source | Required constraint | Check |
 | --- | --- | --- |
-| docs/requirements/APM_CONTROL_PLANE.md | FR-001…FR-012 与 P1–P3 范围 | 按 FR 做验收映射 |
+| docs/requirements/APM_CONTROL_PLANE.md | FR-001…FR-013 与 P1–P3 范围 | 按 FR 做验收映射 |
 | docs/design-docs/dd-001_opamp-control-plane.md | Proposed Design; NOT approved, no immutable evidence pin | 实施前逐项 review 并按结论更新 |
 | docs/.engineering/specs.lock.json | EngineeringSpecifications v1.9.0 lock | RF spec validate + 精确 Requirement 激活 |
 | cmd/server/main.go | 现有 opamp-go 回调、P0 Token、内存模型 | Go tests/race and protocol tests |
@@ -153,7 +153,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 - [x] (2026-10-19) 既有 P0 代码和 RepoFoundryAI Harness/Specs 已存在于 PR #1；Go 和 RF 的既有 CI 校验通过（针对当时提交）。
 - [x] (2026-10-19) 建立 DD-001 工作草案和本次 EP-001 计划；当前尚未获得 Design Owner 批准。
-- [ ] M1：身份边界、PostgreSQL Registry、断线恢复及验收。
+- [ ] M1：身份边界、PostgreSQL/MySQL Registry 及双数据库合同测试、断线恢复和验收。
 - [ ] M2：版本化策略、配置协调和 ACK 追踪。
 - [ ] M3：灰度批次、审计、失败隔离和回滚。
 - [ ] 完整验收、Design 决策批准、证据归档。
