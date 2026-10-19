@@ -1,0 +1,48 @@
+name: Generate RF Governed Design and ExecPlan
+on:
+  push:
+    branches: [feat/opamp-control-plane-p0]
+    paths:
+      - .github/workflows/create-governance.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/opamp-control-plane-p0
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned RepoFoundry
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/XiaoWeiKIN/RepoFoundryAI/v0.15.1/install.py -o "$RUNNER_TEMP/install.py"
+          python3 "$RUNNER_TEMP/install.py" --version 0.15.1 --host none
+      - name: Create and fill governed documents using official RF tools
+        run: python3 scripts/_governance_bootstrap.py
+      - name: Validate project harness
+        run: |
+          "$HOME/.local/bin/repofoundry" --repo . validate
+          "$HOME/.local/bin/repofoundry" --repo . spec validate
+      - name: Commit generated documentation and lifecycle indexes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs
+          if git diff --cached --quiet; then
+            echo 'No changes'
+          else
+            git commit -m 'docs: create governed DD and EP using RepoFoundryAI [skip ci]'
+            git push origin HEAD:feat/opamp-control-plane-p0
+          fi
