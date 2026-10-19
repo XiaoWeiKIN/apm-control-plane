@@ -37,9 +37,9 @@ managed package members share one review and approval boundary.
 
 Java APM Agent 的 Traces 仍通过 OTLP → Collector → Backend 发送；控制平面不转发任何 Span。Collector 将来作为 **被管理 Agent** 接入时，仍以其独立 OTLP 数据链路发送遥测数据，不能将 Collector 的控制连接与数据接收混为一谈。
 
-目前 P0 已有基于 opamp-go v0.25.0 的 HTTP/WebSocket 接入、内存 Registry、Agent 专属采样 JSON 和测试 Agent；CI 验证 Go 单测及 Vet。目标演进为持久 Desired State + Agent Observed State + 可恢复 Reconciler。设计状态是 **待评审草案**，不等于现有实现，也未获得 Design Owner 批准。
+目前 P0 已有基于 opamp-go v0.25.0 的 HTTP/WebSocket 接入、内存 Registry、Agent 专属采样 JSON 和测试 Agent；CI 验证 Go 单测及 Vet。目标演进为支持 PostgreSQL、MySQL 等关系型 Driver 的持久 Desired State + Agent Observed State + 可恢复 Reconciler。数据库选型可由部署配置切换，但不表示数据库 SQL 方言、DDL 或历史数据可以自动跨引擎迁移。设计状态是 **待评审草案**，不等于现有实现，也未获得 Design Owner 批准。
 
-主要代价：必须处理身份绑定、顺序与幂等、Agent 离线、WebSocket 单连接写序列化以及 HTTP 拉取场景。第一版单体部署并使用 PostgreSQL；HA 与发布性能目标需要测量后另行决定。
+主要代价：必须处理身份绑定、顺序与幂等、Agent 离线、WebSocket 单连接写序列化以及 HTTP 拉取场景。第一版采用模块化单体；存储通过 Repository/UnitOfWork Port 隔离数据库实现，**首批目标数据库为 PostgreSQL 和 MySQL**。两者均需运行真实引擎的 Repository 合同测试；数据库方言 SQL 与 Migration 允许分别维护。HA 与发布性能目标需要测量后另行决定。
 
 ## Goals and Non-goals
 
@@ -53,6 +53,7 @@ Java APM Agent 的 Traces 仍通过 OTLP → Collector → Backend 发送；控�
 - FR-010：将 Agent Kind、Distribution、版本、Capabilities、配置 Schema 能力建模为显式属性，避免将 Java SDK 语义写进通用注册和分发模块。
 - FR-011：平台可挂载多语言 APM Agent 和 Collector 的 Config Adapter，按每种 Agent 实际支持的配置格式和生效方式进行编译与能力校验；非 Java Adapter 不属于首期交付。
 - FR-012：区分 Service / Agent Instance / Agent Session；Service 级策略只作用于授权且实际匹配的 Agent，不把 Collector 的运行组件误当成 Java Service 实例。
+- 关系型数据库约束：Control Plane 能通过驱动配置在 PostgreSQL、MySQL 的 Storage Adapter 之间选择。无论具体存储引擎，Agent Identity/Desired/Observed、CAS、事务发布和重启恢复的业务语义必须一致；首期不能假定 PostgreSQL 专有功能可移植。
 
 **首期非目标**：不实现 Go/Python Agent Runtime Adapter、Collector 配置执行或 Collector Supervisor、OTLP 传输、Java Bytecode Instrumentation、二进制升级、Trace Retention/Tail Sampling、首期多活 HA，也不承诺无证据的吞吐量或采样准确率。**预留 Collector 适配能力不代表 Collector 已获得可用的配置管理能力。**
 
@@ -64,7 +65,7 @@ Java APM Agent 的 Traces 仍通过 OTLP → Collector → Backend 发送；控�
 
 **已确认的产品范围（2026-10-19 用户明确回答）**：未来统一管理 Java、Go、Python 等 APM Agent，后续可能管理 Collector；Java 是首个实际交付的 Agent Kind。这个确认属于设计输入，不代表本 DD 获得正式 Design approval 或已有 accepted ADR。
 
-**正式决定**：仓库当前没有 accepted ADR。本文比较候选架构，但不会把用户的实施授权记为 ADR 接受。数据库模式、Agent 凭证机制及批量灰度语义仍需审查；未来如涉及长期不可逆选择，应创建 proposed ADR 并由决策责任人明确接受。
+**正式决定**：仓库当前没有 accepted ADR。本文比较候选架构，但不会把用户的实施授权记为 ADR 接受。数据库支持范围与两类引擎的 Schema/Migration 方言、Agent 凭证机制及批量灰度语义仍需审查；未来如涉及长期不可逆选择，应创建 proposed ADR 并由决策责任人明确接受。
 
 ## System Context and Invariants
 
@@ -72,8 +73,10 @@ Java APM Agent 的 Traces 仍通过 OTLP → Collector → Backend 发送；控�
 flowchart TB
     UI["Management API / future UI"] --> P["Policy + Config Manager"]
     P --> C["Config Resolver + AgentKind Adapter"]
-    C --> PG[("PostgreSQL · Desired/Observed")]
+    C --> PG[("Relational Storage Port · Desired/Observed")]
     PG <--> R["Reconciler / Rollout"]
+    PG --> PSQL["PostgreSQL Adapter"]
+    PG --> MYSQL["MySQL Adapter"]
     R --> G["OpAMP Gateway · opamp-go"]
     G <-->|"OpAMP"| J["Java Agent · P0/P1 target"]
     G -.->|"Future OpAMP"| L["Go/Python Agent"]
@@ -95,6 +98,8 @@ flowchart TB
 8. `AgentKind`、`Distribution`、`CapabilitySet` 与 `ConfigDialect` 是显式的管理属性；`service.name` 是工作负载身份线索，不是所有 Collector 都必须具备的 Java 服务标识。
 9. Config Resolver 只能生成 Agent Kind 已支持的 RemoteConfig 内容。未知类型、未知 Schema、缺少 `AcceptsRemoteConfig` 或不能满足运行时语义时，必须明确返回 Unsupported/Rejected，不能推测为热更新成功。
 10. 有共同的 Config Delivery 状态机不代表不同 Agent 的配置解释、重启需求或采样语义相同。
+11. 数据库存储端口以业务语义为契约（AgentKey、Assignment、CAS、UnitOfWork），不得从 Domain 暴露 *sql.DB、pgxpool、方言 SQL 或 Driver 错误码。PostgreSQL 与 MySQL 的 Migration、查询和数据类型可以分别实现，但必须有同一套行为验收。
+12. 一个 Control Plane 实例在启动时选择一种主数据库；切换驱动不构成已实现的跨引擎数据迁移、双写或全局分布式事务。
 
 ## Proposed Architecture
 
@@ -107,10 +112,10 @@ flowchart TB
 - internal/policy：通用 Policy/Revision/Selector 与目标类型约束，首期只有 Java Head Sampling Policy；冲突采用显式优先级，优先级相同且内容不同直接拒绝发布，不能依赖遍历顺序。
 - internal/config：通用配置 Revision、Assignment、Config Release、ConfigHash、ConfigStatus；`AgentConfigAdapter` 按 AgentKind/Distribution/Schema/Capabilities 编译成不可变 AgentConfigMap。首期只有 `java-otel` 适配器；后续 Go/Python/Collector 适配器由各自配置契约提供，不复用 Java JSON 作为所有发行版的公共标准。
 - internal/reconcile：按 Agent desired hash 与 reported applied hash 协调，监听重连、发布、ACK 和失败重试。
-- internal/storage：PostgreSQL 数据模型和事务，避免把网络连接对象持久化。
+- internal/storage：驱动无关的 Repository/UnitOfWork 契约，采用 database/sql 的 DB/Tx/连接池抽象；通过 driver allowlist 在 PostgreSQL（pgx/v5/stdlib）与 MySQL（go-sql-driver/mysql）Adapter 之间装配。数据库物理 Schema、SQL、Migration、故障分类和事务差异由各自 Adapter 拥有；避免把网络连接对象持久化。
 - internal/api：查询 Agent、创建策略版本、发布与回滚请求；鉴权与租户授权在入口完成。
 
-**候选持久实体**：agent_instances（UID、AgentKind、Distribution、版本、已认证范围）、agent_observations（最后时间、Capabilities、Health、Observed Config）、apm_services（租户/环境/Namespace/Name）、policy_versions（不可变规则）、policy_bindings（Scope/Selector）、config_revisions（类型化配置正文）、config_releases（一次发布的目标/批次/审计）、agent_assignments（AgentUID、Desired revision/hash、Observed hash/status）、config_events（append-only 审计）。活动的 agent_sessions 不持久化 Connection 对象。逻辑实体可在 MVP 合并实现，但不能合并生命周期语义。这是一份待验证的数据模型，不是现有数据库表。
+**候选持久实体（逻辑模型，非 PostgreSQL 专有 Schema）**：agent_instances（UID、AgentKind、Distribution、版本、已认证范围）、agent_observations（最后时间、Capabilities、Health、Observed Config）、apm_services（租户/环境/Namespace/Name）、policy_versions（不可变规则）、policy_bindings（Scope/Selector）、config_revisions（类型化配置正文）、config_releases（一次发布的目标/批次/审计）、agent_assignments（AgentUID、Desired revision/hash、Observed hash/status）、config_events（append-only 审计）。活动的 agent_sessions 不持久化 Connection 对象。逻辑实体可在 MVP 合并实现，但不能合并生命周期语义。这是一份待验证的数据模型，不是现有数据库表。
 
 **首期 Java 配置契约**：RemoteConfig ConfigMap 的名为 `apm/sampling.json`，ContentType 为 `application/json`；Body 包含 `schema_version`、`sampling.type = parent_based_trace_id_ratio`、`sampling.rate ∈ [0,1]`。这只是我们对 Java 发行版的自定义契约，不代表 OpAMP 或其他语言 Agent 的规范字段。未来 Collector Adapter 必须输出它实际理解的配置对象，并明确 apply/restart 能力，不得把 Java 的动态采样能力外推到 Collector。
 
@@ -130,7 +135,7 @@ flowchart TB
 
 **3. 失败和回滚**
 
-- DB 提交失败不发配置；网络发送失败不回滚已提交 Desired；下次连接或定期 Reconcile 重试。
+- 任一所选数据库的发布事务提交失败都不得发送新配置；网络发送失败不回滚已提交 Desired；下次连接或定期 Reconcile 重试。MySQL DDL 的隐式提交与 PostgreSQL DDL 的事务行为不能被视为相同，Schema Migration 的失败修复必须独立设计。
 - Agent 报告拒绝或非法配置时保留最后一次已知适用版本，记录错误；若需恢复旧策略，创建新的发布动作指向已验证旧版本，记录发起人与审计事件。
 - 控制平台断线不能阻断业务 JVM 的 OTLP Exporter。HTTP 与 WebSocket 都必须做协议级端到端测试，不用 HTTP 轮询模拟 WebSocket 推送成功。
 
@@ -140,12 +145,15 @@ flowchart TB
 
 | 方案 | 优点 | 代价及当前处理 |
 | --- | --- | --- |
-| opamp-go + 单体 + PostgreSQL | 一套版本、易于事务协调；可先交付 P1/P2 | 单点扩容边界，HA 需再次设计 |
+| opamp-go + 模块化单体 + database/sql + PostgreSQL/MySQL Adapter | 统一 Domain/Release 语义，多种环境可配置关系型数据库 | 双方言 Migration/SQL 与一致性测试成本；HA 仍需设计 |
 | 直接 Fork 历史 Bindplane Server | 现成管理模型 | 上游历史过久，迁移及安全审计成本难估；不选 |
+| PostgreSQL-only pgxpool + Tern | PostgreSQL 原生功能更丰富，PG 方案可快速实现 | 不满足 MySQL 等多 Driver 的产品约束，不作为基础架构 |
 | Redis/Kafka + 多个 Gateway 服务 | 跨实例消息路由和吞吐扩展 | 当前没有规模证据，不引入 |
 | HTTP-only 管理 | 不需要驻留 WS 会话 | 配置只在轮询时生效；兼容保留但不能当推送 |
 
-**未决问题**：服务的命名与租户分组边界、AgentKind/Distribution 识别和能力来源、跨发行版版本兼容性、Collector 的配置职责与 Kubernetes Operator 之间的边界；Agent 身份绑定采用 mTLS 证书还是租户 Scoped Token；重复 UID 应如何换绑；Service/Environment Selector 的授权边界；严格回滚与 ACK timeout 默认值；生产规模和目标 SLO；Go Server v0.25.0 与 Java Client v0.14.0 规范差异。无法由当前 P0 单测证明这些约束。
+**数据库候选技术**：Go 标准库 database/sql + pgx/v5/stdlib + go-sql-driver/mysql + sqlc 双方言 + Goose 多数据库迁移，参见 [P1–P3 技术选型](../architecture/technology-selection.md)。这些仍是待验证的组件提议，不代表已批准的 ADR 或已在 go.mod 中引入。
+
+**未决问题**：PostgreSQL/MySQL 兼容范围与测试版本、MySQL DDL Migration 恢复、两库事务隔离级别/CAS 并发行为以及未来是否增加第三种 Driver；服务的命名与租户分组边界、AgentKind/Distribution 识别和能力来源、跨发行版版本兼容性、Collector 的配置职责与 Kubernetes Operator 之间的边界；Agent 身份绑定采用 mTLS 证书还是租户 Scoped Token；重复 UID 应如何换绑；Service/Environment Selector 的授权边界；严格回滚与 ACK timeout 默认值；生产规模和目标 SLO；Go Server v0.25.0 与 Java Client v0.14.0 规范差异。无法由当前 P0 单测证明这些约束。
 
 **重访条件**：出现多实例部署需求、经过测量的连线数量或下发尾延迟超出单体能力、跨租户配置泄漏风险、Java Client 互操作失败、真实 JVM 采样行为与反馈不一致。
 
@@ -157,4 +165,5 @@ Single-file Design：本文件是 DD-001 的完整阅读入口；模块细节经
 
 - 2026-10-19 — Draft revision 1, derived from explicit product requirements and current P0 source. Not yet approved.
 - 2026-10-19 — 用户确认未来统一管理 Java/Go/Python APM Agent 并扩展 Collector。将 AgentKind/Distribution/Capabilities/ConfigAdapter 作为类型边界加入工作草案；首期交付和未批准状态保持不变。
+- 2026-10-19 — 用户补充要求：Control Plane 必须允许多数据库驱动，可能选用 MySQL。更新 Storage Port、Adapter 和数据库兼容性边界。保持 Draft、未批准状态。
 
