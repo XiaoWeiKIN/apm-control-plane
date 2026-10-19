@@ -170,7 +170,7 @@ func (r *registry) update(ctx context.Context,p auth.Principal,isWS bool,conn ty
 	var status *gormrepo.ConfigStatus
 	if msg.RemoteConfigStatus!=nil {
 		raw:=msg.RemoteConfigStatus
-		status=&gormrepo.ConfigStatus{Hash:hex.EncodeToString(raw.LastRemoteConfigHash),Status:raw.Status.String(),Error:raw.ErrorMessage}
+		status=&gormrepo.ConfigStatus{Hash:hex.EncodeToString(raw.LastRemoteConfigHash),Status:strings.TrimPrefix(raw.Status.String(),"RemoteConfigStatuses_"),Error:raw.ErrorMessage}
 	}
 	_,err:=r.store.Observe(ctx,p,id,gormrepo.Observation{
 		SeenAt:time.Now().UTC(),
