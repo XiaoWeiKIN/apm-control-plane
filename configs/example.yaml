@@ -1,0 +1,14 @@
+# P1 Control Plane startup configuration (secrets must NOT be committed)
+server:
+  listen_address: "127.0.0.1:4320"
+  read_header_timeout: "5s"
+  http_polling_ttl: "30s"
+database:
+  driver: "postgres" # postgres | mysql
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_max_lifetime: "30m"
+
+# APM_DATABASE_DSN is read from the environment/Secret at startup.
+# APM_AGENT_CREDENTIALS_JSON and APM_ADMIN_CREDENTIALS_JSON contain
+# [{"id":"...","tenant_id":"...","token":"..."}] (env only, not YAML).
