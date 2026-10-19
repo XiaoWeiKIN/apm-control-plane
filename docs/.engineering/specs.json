@@ -1,0 +1,21 @@
+{
+  "catalog": {
+    "kind": "git",
+    "ref": "refs/tags/v1.9.0",
+    "url": "https://github.com/XiaoWeiKIN/EngineeringSpecifications.git"
+  },
+  "owner": "repo-foundry",
+  "project_specs": [],
+  "specs": [
+    "core/semantic-naming",
+    "core/data-boundaries",
+    "core/implementation-simplicity",
+    "languages/go",
+    "languages/go/performance",
+    "languages/go/functional-options",
+    "languages/go/factory-delegation",
+    "documentation/technical-documentation",
+    "documentation/derived-explanations"
+  ],
+  "version": 1
+}

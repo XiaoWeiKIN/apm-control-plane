@@ -1,0 +1,15 @@
+---
+name: repo-foundry-ai
+description: "Apply this repository's RepoFoundry workflow to changes, formal reviews, or Harness operations. Ordinary code explanation and navigation need no activation."
+---
+
+# RepoFoundry AI
+
+Do not auto-trigger for ordinary read-only code explanation or navigation.
+
+Read `.repo-foundry/skills/repo-foundry-ai/SKILL.md` completely, then follow
+that canonical repository-local workflow for this task.
+
+Treat this Claude project Skill as a discovery entrypoint only. The canonical
+Skill, Harness manifest, Engineering Specification lock, and activation engine
+remain shared repository state.
