@@ -1,4 +1,5 @@
 name: One-time P1 Dependency Bootstrap
+# Retry after correcting the initial mock Connection test implementation.
 on:
   push:
     branches: [feat/p1-durable-agent-inventory]
