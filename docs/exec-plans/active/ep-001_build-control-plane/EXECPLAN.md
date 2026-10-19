@@ -124,7 +124,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 1. RF 状态与范围：执行 repofoundry --repo . validate、repofoundry --repo . spec validate，读取 docs/requirements 和 DD-001；对 Go + security + data boundaries 精确激活适用规范。
 2. 验证起点：执行 go mod tidy、go test -race ./...、go vet ./...；查看 cmd/server/main.go 的现有接口，不静默修改其路由。
-3. M1：建立 Repository/UnitOfWork Port，使用 database/sql + GORM PostgreSQL/MySQL Dialector，GORM 统一 Repository和 Goose 两套 Migration；双方言执行 schema 升级、事务回滚、CAS、Agent Identity/Observation、断线重启及越权测试。
+3. M1：直接实现 Koanf 启动配置、GORM 统一 Repository/UnitOfWork、PostgreSQL/MySQL Dialector 和 Goose 两套 Migration，不再安排独立 ORM 选型 PoC；在功能交付过程中执行 schema 升级、事务回滚、CAS、Agent Identity/Observation、断线重启及越权测试。
 4. M2：实现 Policy Resolver、Immutable Revision、Reconciler 和 Config Status 归因。使用 cmd/testagent 做 HTTP 链路，再增加 WebSocket 测试客户端。
 5. M3：定义受控发布批次、审计和回滚。只在证据足够后确定默认超时、容量和 SLO。
 6. 每阶段更新本 EXECPLAN.md 的 Current Snapshot、Progress、验收结果、Revision Notes；执行 epctl validate、designctl validate 和 RF validate。
@@ -168,7 +168,8 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 - (2026-10-19, provenance: user direction) 先实现 Control Plane，后实现自定义 Java Agent；不将 Agent 发行版工作纳入本 EP 的完成门槛。
 - (2026-10-19, proposal only) 优先模块化 Go 单体 + PostgreSQL + opamp-go，待 DD-001 审阅；不把提案当成 accepted ADR。
 - (2026-10-19, delivery rule) 采用 Desired/Observed 双状态和 matching hash ACK，其他能力按 M1–M3 递增交付；SLO 尚未定义。
-- (2026-10-19, user scope) 数据库驱动可配置，可能采用 MySQL；新增 PostgreSQL/MySQL 双实现与真实合同测试，技术组件仍待验证和评审。
+- (2026-10-19, user scope) 数据库驱动可配置，可能采用 MySQL；新增 PostgreSQL/MySQL 双实现与真实合同测试。
+- (2026-10-19, implementation direction) 用户同意直接落地成熟的 GORM v2 + Goose + Koanf v2 方案，取消独立技术选型 PoC 前置阶段。数据库事务、CAS、迁移和重启恢复的测试仍是 P1 功能验收要求；此指令不等于 DD-001 正式批准或身份安全方案批准。
 - (2026-10-19, explicit user scope confirmation) Control Plane 长期面向 Java、Go、Python 等 APM Agent，未来支持 Collector；M1–M3 仅验证 Java 发行版的策略配置和其他 Kind 的类型安全注册，其他 Runtime Adapter 不在 EP-001 交付范围。这是产品范围确认，不是新的 accepted ADR，也不代表 DD-001 正式批准。
 
 ## Blockers
