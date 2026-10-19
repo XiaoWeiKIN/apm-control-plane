@@ -196,7 +196,7 @@ func (s *Store) Get(ctx context.Context, tenant, uid string) (AgentRecord, error
 func (s *Store) List(ctx context.Context, tenant string) ([]AgentRecord, error) {
 	var records []AgentRecord
 	err := s.db.WithContext(ctx).Where("tenant_id = ?", tenant).
-		Order("instance_uid ASC").Limit(5000).Find(&records).Error
+		Order("instance_uid ASC").Find(&records).Error
 	if records == nil {
 		records = []AgentRecord{}
 	}
