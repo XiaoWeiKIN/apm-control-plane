@@ -16,7 +16,6 @@ import (
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/auth"
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/storage/gormrepo"
 	"github.com/open-telemetry/opamp-go/protobufs"
-	"github.com/open-telemetry/opamp-go/server/types"
 )
 
 type fakeStore struct{
@@ -139,7 +138,7 @@ func TestTransportFreshnessAndIdentityFields(t *testing.T){
 	if err!=nil||item["connected"]!=false{t.Fatalf("polling freshness lost: %+v %v",item,err)}
 }
 
-type mockConnection struct{types.Connection}
+type mockConnection struct{}
 func (*mockConnection) Connection() net.Conn{return nil}
 func (*mockConnection) Send(context.Context,*protobufs.ServerToAgent) error{return nil}
 func (*mockConnection) Disconnect()error{return nil}
