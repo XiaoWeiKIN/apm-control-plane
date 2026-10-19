@@ -50,7 +50,7 @@ func main() {
 			AgentDescription: &protobufs.AgentDescription{IdentifyingAttributes: []*protobufs.KeyValue{
 				{Key: "service.name", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: *service}}},
 				{Key: "deployment.environment.name", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: "dev"}}},
-				{Key: "agent.kind", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: "java-apm"}}},
+				{Key: "agent.kind", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: "opamp-test-agent"}}},
 				{Key: "telemetry.distro.name", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: "opamp-test-agent"}}},
 				{Key: "telemetry.distro.version", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: "p1-demo"}}},
 				{Key: "service.version", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: "app-demo"}}},
