@@ -1,0 +1,227 @@
+{
+  "adapters": [
+    {
+      "enforcement": "native",
+      "id": "codex",
+      "version": "2.4.2"
+    },
+    {
+      "enforcement": "cli",
+      "id": "claude",
+      "version": "1.3.1"
+    },
+    {
+      "enforcement": "cli",
+      "id": "portable",
+      "version": "1.3.2"
+    }
+  ],
+  "applied_migrations": [],
+  "components": [
+    "engineering-design",
+    "engineering-execution-plan"
+  ],
+  "core": {
+    "version": "1.5.5"
+  },
+  "files": [
+    {
+      "installed_sha256": "9ad92fb7e4678851ce563336ebf19fdc9eda94033ee1f9c011b9235f495d8706",
+      "owner_kind": "core",
+      "ownership": "seeded",
+      "path": "ARCHITECTURE.md",
+      "template_id": "core/architecture",
+      "template_sha256": "9ad92fb7e4678851ce563336ebf19fdc9eda94033ee1f9c011b9235f495d8706",
+      "template_version": "1.5.5"
+    },
+    {
+      "installed_sha256": "8eeb6f0ac6677500c20e20ead4ec5c278dca5655101bc6878e3c48b0b95f89a9",
+      "owner_kind": "core",
+      "ownership": "seeded",
+      "path": "docs/index.md",
+      "template_id": "core/docs-index",
+      "template_sha256": "8eeb6f0ac6677500c20e20ead4ec5c278dca5655101bc6878e3c48b0b95f89a9",
+      "template_version": "1.5.5"
+    },
+    {
+      "installed_sha256": "a54b2bd9515712edbbe58696065493ebcfd33db6ff3d138ea08378c6aa95c3e7",
+      "owner_kind": "core",
+      "ownership": "seeded",
+      "path": "docs/QUALITY_SCORE.md",
+      "template_id": "core/quality-score",
+      "template_sha256": "a54b2bd9515712edbbe58696065493ebcfd33db6ff3d138ea08378c6aa95c3e7",
+      "template_version": "1.5.5"
+    },
+    {
+      "installed_sha256": "5505cd690ee3e5aea9390a221ec7057f66f67553d819da1225390a15bf4a853d",
+      "owner_kind": "core",
+      "ownership": "seeded",
+      "path": "docs/RELIABILITY.md",
+      "template_id": "core/reliability",
+      "template_sha256": "5505cd690ee3e5aea9390a221ec7057f66f67553d819da1225390a15bf4a853d",
+      "template_version": "1.5.5"
+    },
+    {
+      "installed_sha256": "0d292efbeae92df813bda0fe9c1c124885c69077c4cc12af77179c3a33430c38",
+      "owner_kind": "core",
+      "ownership": "seeded",
+      "path": "docs/SECURITY.md",
+      "template_id": "core/security",
+      "template_sha256": "0d292efbeae92df813bda0fe9c1c124885c69077c4cc12af77179c3a33430c38",
+      "template_version": "1.5.5"
+    },
+    {
+      "installed_sha256": "3bd79bac639cd9484370c00c406cfcc66559d1909a67260fa34345373b188bb6",
+      "owner_kind": "core",
+      "ownership": "seeded",
+      "path": "docs/design-docs/index.md",
+      "template_id": "core/design-docs-index",
+      "template_sha256": "3bd79bac639cd9484370c00c406cfcc66559d1909a67260fa34345373b188bb6",
+      "template_version": "1.5.5"
+    },
+    {
+      "installed_sha256": "db6d323c945c02fdaaed3fa61b259680cf3d78edf4dce061eca1daf83e0a5b13",
+      "owner_kind": "core",
+      "ownership": "seeded",
+      "path": ".repo-foundry/engineering-specs/spec_router.py",
+      "template_id": "core/engineering-specs-activation-engine",
+      "template_sha256": "db6d323c945c02fdaaed3fa61b259680cf3d78edf4dce061eca1daf83e0a5b13",
+      "template_version": "1.5.5"
+    },
+    {
+      "installed_sha256": "2fb52d8cd8c3c0a8783a866f3e4ea87dca39537a932164d50c75a31cfe5194bf",
+      "owner_kind": "core",
+      "ownership": "seeded",
+      "path": ".repo-foundry/skills/repo-foundry-ai/SKILL.md",
+      "template_id": "core/repo-foundry-ai-project-skill",
+      "template_sha256": "2fb52d8cd8c3c0a8783a866f3e4ea87dca39537a932164d50c75a31cfe5194bf",
+      "template_version": "1.5.5"
+    },
+    {
+      "installed_sha256": "769362f1b2c44f3a49b9bb05cd633194b7258be04aed0a7ac1161bdd7c961bf5",
+      "owner_id": "codex",
+      "owner_kind": "adapter",
+      "ownership": "seeded",
+      "path": "AGENTS.md",
+      "template_id": "codex/agents",
+      "template_sha256": "769362f1b2c44f3a49b9bb05cd633194b7258be04aed0a7ac1161bdd7c961bf5",
+      "template_version": "2.4.2"
+    },
+    {
+      "installed_sha256": "276ac0c2afac599469142e10726353d2d3124c0941294d96b41b870bca38c95a",
+      "owner_id": "codex",
+      "owner_kind": "adapter",
+      "ownership": "seeded",
+      "path": ".agents/skills/repo-foundry-ai/SKILL.md",
+      "template_id": "codex/repo-foundry-ai-project-skill",
+      "template_sha256": "276ac0c2afac599469142e10726353d2d3124c0941294d96b41b870bca38c95a",
+      "template_version": "2.4.2"
+    },
+    {
+      "installed_sha256": "4438e64131c012c07c14b7473776194258213ac20dcccb58f888a9333281fd79",
+      "owner_id": "codex",
+      "owner_kind": "adapter",
+      "ownership": "seeded",
+      "path": ".agents/skills/engineering-specs/SKILL.md",
+      "template_id": "codex/engineering-specs-skill",
+      "template_sha256": "4438e64131c012c07c14b7473776194258213ac20dcccb58f888a9333281fd79",
+      "template_version": "2.4.2"
+    },
+    {
+      "installed_sha256": "fcf6480b0a06531c8816d24df1b13721547ba965a7444e80beff83d00df189a5",
+      "owner_id": "codex",
+      "owner_kind": "adapter",
+      "ownership": "seeded",
+      "path": ".agents/skills/engineering-specs/agents/openai.yaml",
+      "template_id": "codex/engineering-specs-openai-metadata",
+      "template_sha256": "fcf6480b0a06531c8816d24df1b13721547ba965a7444e80beff83d00df189a5",
+      "template_version": "2.4.2"
+    },
+    {
+      "installed_sha256": "8e9a92e73d917755a2e5968123cda29753a6b128c73ec133fc4a4f8a513ab657",
+      "owner_id": "codex",
+      "owner_kind": "adapter",
+      "ownership": "seeded",
+      "path": ".agents/skills/engineering-specs/scripts/spec_router.py",
+      "template_id": "codex/engineering-specs-adapter",
+      "template_sha256": "8e9a92e73d917755a2e5968123cda29753a6b128c73ec133fc4a4f8a513ab657",
+      "template_version": "2.4.2"
+    },
+    {
+      "installed_sha256": "0ec638347f8849879b80e95c8cb985ee73cd9ec1aab82282cf0f1f0cce424e20",
+      "owner_id": "codex",
+      "owner_kind": "adapter",
+      "ownership": "seeded",
+      "path": ".codex/hooks.json",
+      "template_id": "codex/engineering-specs-hooks",
+      "template_sha256": "0ec638347f8849879b80e95c8cb985ee73cd9ec1aab82282cf0f1f0cce424e20",
+      "template_version": "2.4.2"
+    },
+    {
+      "installed_sha256": "c2143104e5e859b7955892c31e3c48293042fb88c541514cf878d26ac07b923b",
+      "owner_id": "claude",
+      "owner_kind": "adapter",
+      "ownership": "seeded",
+      "path": ".claude/skills/repo-foundry-ai/SKILL.md",
+      "template_id": "claude/repo-foundry-ai-project-skill",
+      "template_sha256": "c2143104e5e859b7955892c31e3c48293042fb88c541514cf878d26ac07b923b",
+      "template_version": "1.3.1"
+    },
+    {
+      "installed_sha256": "9df507bd7f635397a14e453d50ee1e95cde248e746ea3a6b200619f5bf47984b",
+      "owner_id": "claude",
+      "owner_kind": "adapter",
+      "ownership": "seeded",
+      "path": ".claude/skills/engineering-specs/SKILL.md",
+      "template_id": "claude/engineering-specs-skill",
+      "template_sha256": "9df507bd7f635397a14e453d50ee1e95cde248e746ea3a6b200619f5bf47984b",
+      "template_version": "1.3.1"
+    },
+    {
+      "installed_sha256": "4ac6c03001853441fb01a3ef16b9fabe6fc04c12e9608a138736be475bff86c0",
+      "owner_id": "portable",
+      "owner_kind": "adapter",
+      "ownership": "seeded",
+      "path": "docs/agent-guides/README.md",
+      "template_id": "portable/agent-guide",
+      "template_sha256": "4ac6c03001853441fb01a3ef16b9fabe6fc04c12e9608a138736be475bff86c0",
+      "template_version": "1.3.2"
+    }
+  ],
+  "governance": {
+    "policy_schema": 1,
+    "profile": "adaptive"
+  },
+  "instruction_files": [
+    {
+      "max_lines": 120,
+      "path": ".repo-foundry/skills/repo-foundry-ai/SKILL.md"
+    },
+    {
+      "max_lines": 100,
+      "path": "AGENTS.md"
+    },
+    {
+      "max_lines": 80,
+      "path": ".agents/skills/repo-foundry-ai/SKILL.md"
+    },
+    {
+      "max_lines": 80,
+      "path": ".claude/skills/repo-foundry-ai/SKILL.md"
+    },
+    {
+      "max_lines": 120,
+      "path": ".claude/skills/engineering-specs/SKILL.md"
+    },
+    {
+      "max_lines": 120,
+      "path": "docs/agent-guides/README.md"
+    }
+  ],
+  "owner": "repo-foundry",
+  "producer": {
+    "name": "repo-foundry",
+    "version": "0.15.1"
+  },
+  "schema_version": 3
+}

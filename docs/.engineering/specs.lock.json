@@ -1,0 +1,146 @@
+{
+  "catalog": {
+    "catalog_id": "io.github.xiaoweikin.engineering-specifications",
+    "catalog_version": "1.9.0",
+    "resolved_revision": "b0719f806615c0bb4f3d496931f14b6dc29df7e6",
+    "sha256": "58a29e2e6c7d0388511023adaaa18d38ca9aeef441ead935f4b4e3d3acd04285",
+    "source": {
+      "kind": "git",
+      "ref": "refs/tags/v1.9.0",
+      "url": "https://github.com/XiaoWeiKIN/EngineeringSpecifications.git"
+    }
+  },
+  "owner": "repo-foundry",
+  "specs": [
+    {
+      "applies_to": [
+        "**/*"
+      ],
+      "description": "Load when changing shared names, semantic verbs such as Normalize or Extract, cross-surface mappings, units, states, or naming compatibility",
+      "id": "core/semantic-naming",
+      "installed_path": "docs/agent-guides/managed/core/semantic-naming.md",
+      "requires": [],
+      "sha256": "b190713f27efc11eba59551d4026036d87f30027dd624b17e62d6627e5814c83",
+      "source_path": "specification/core/semantic-naming.md",
+      "version": "1.2.0"
+    },
+    {
+      "applies_to": [
+        "**/*"
+      ],
+      "description": "Load when consuming external data, parsing weak shapes, crossing trust boundaries, or gating effects",
+      "id": "core/data-boundaries",
+      "installed_path": "docs/agent-guides/managed/core/data-boundaries.md",
+      "requires": [
+        "core/semantic-naming"
+      ],
+      "sha256": "4a6a68d93110ff3853a825ec4ce78d1f8731bd1fe635b7aaa1eccb64a56819e9",
+      "source_path": "specification/core/data-boundaries.md",
+      "version": "0.2.1"
+    },
+    {
+      "applies_to": [
+        "**/*"
+      ],
+      "description": "Load when designing, implementing, refactoring, or reviewing code complexity, common paths, validation, abstractions, or performance",
+      "id": "core/implementation-simplicity",
+      "installed_path": "docs/agent-guides/managed/core/implementation-simplicity.md",
+      "requires": [],
+      "sha256": "271be3ff8bd46a8fdac85da77337252766215cac2de5edcf7c9e09f5c4928a13",
+      "source_path": "specification/core/implementation-simplicity.md",
+      "version": "0.2.0"
+    },
+    {
+      "applies_to": [
+        "**/*.go",
+        "**/go.mod",
+        "**/go.sum",
+        "**/go.work",
+        "**/vendor/modules.txt"
+      ],
+      "description": "Load when changing hand-written Go code, module or generator state, APIs, names, boundaries, lifecycle, or tests",
+      "id": "languages/go",
+      "installed_path": "docs/agent-guides/managed/languages/go.md",
+      "requires": [
+        "core/semantic-naming",
+        "core/data-boundaries"
+      ],
+      "sha256": "ea35e19b6b8f22d2965d4a6aee58a7cdc493c807b905cee676a08ad4348f681d",
+      "source_path": "specification/languages/go.md",
+      "version": "0.6.0"
+    },
+    {
+      "applies_to": [
+        "**/*.go",
+        "**/*.s"
+      ],
+      "description": "Load when diagnosing or changing Go performance, profiles, benchmarks, allocation or GC behavior, or architecture-specific fast paths",
+      "id": "languages/go/performance",
+      "installed_path": "docs/agent-guides/managed/languages/go/performance.md",
+      "requires": [
+        "languages/go"
+      ],
+      "sha256": "7c1399228a609af8671fa7e8df982ac1a8744cc588ab01de9bec5c4f77b3fe22",
+      "source_path": "specification/languages/go/performance.md",
+      "version": "0.1.0"
+    },
+    {
+      "applies_to": [
+        "**/*.go"
+      ],
+      "description": "Load when designing, changing, or reviewing Go functional-option APIs, including defaults, application order, conflicts, validation, or migration",
+      "id": "languages/go/functional-options",
+      "installed_path": "docs/agent-guides/managed/languages/go/functional-options.md",
+      "requires": [
+        "languages/go"
+      ],
+      "sha256": "dfc7660f9663286e1df592b557abb09f1d1f445c1a5d10cc2aa9c0250a8f2d1c",
+      "source_path": "specification/languages/go/functional-options.md",
+      "version": "0.2.1"
+    },
+    {
+      "applies_to": [
+        "**/*.go"
+      ],
+      "description": "Load when building or evolving Go capability factories from optional named delegates, including absence, interface evolution, concurrency, or lifecycle",
+      "id": "languages/go/factory-delegation",
+      "installed_path": "docs/agent-guides/managed/languages/go/factory-delegation.md",
+      "requires": [
+        "languages/go/functional-options"
+      ],
+      "sha256": "f12b2bcfa0f9a74ad8103690ffa3e86c5ff76a6041684bf60f0ad14f0f2e4436",
+      "source_path": "specification/languages/go/factory-delegation.md",
+      "version": "0.2.0"
+    },
+    {
+      "applies_to": [
+        "**/*.md",
+        "**/*.mdx"
+      ],
+      "description": "Load when writing or reviewing engineering documentation, procedures, architecture explanations, or evidence-backed technical claims",
+      "id": "documentation/technical-documentation",
+      "installed_path": "docs/agent-guides/managed/documentation/technical-documentation.md",
+      "requires": [
+        "core/semantic-naming"
+      ],
+      "sha256": "22a3325883a37df48f5d0040c18be8c5fdc6079315265d733a540d0efc38d1ba",
+      "source_path": "specification/documentation/technical-documentation.md",
+      "version": "0.1.0"
+    },
+    {
+      "applies_to": [
+        "**/*"
+      ],
+      "description": "Load when generating or reviewing diagrams, interactive views, presentations, simulations, or video that explain engineering facts",
+      "id": "documentation/derived-explanations",
+      "installed_path": "docs/agent-guides/managed/documentation/derived-explanations.md",
+      "requires": [
+        "documentation/technical-documentation"
+      ],
+      "sha256": "e4ce1cab5143b645185854781de93f6e5e5416c6be3faad2aa14a2cadc864ec8",
+      "source_path": "specification/documentation/derived-explanations.md",
+      "version": "0.1.1"
+    }
+  ],
+  "version": 1
+}

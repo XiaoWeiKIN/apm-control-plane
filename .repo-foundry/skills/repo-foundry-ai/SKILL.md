@@ -1,0 +1,120 @@
+---
+name: repo-foundry-ai
+description: "Apply this repository's RepoFoundry workflow to changes, formal reviews, or Harness operations. Ordinary code explanation and navigation need no activation."
+---
+
+# RepoFoundry AI project workflow
+
+Use this Skill for repository changes, formal review, defect diagnosis,
+engineering contracts, Harness operations, or explicit RepoFoundry requests.
+Treat repository state as the source of truth; do not depend on a user-home installation path.
+
+## Choose the activation depth
+
+- Do not auto-trigger for ordinary read-only code explanation, navigation,
+  call-chain tracing, or behavior summaries; do not start the full Harness workflow. Read
+  only the code and repository documents needed to answer. Do not run Harness
+  validation, activate Engineering Specifications, create governed artifacts,
+  or require the five-label handoff solely for that analysis.
+- For a formal code review, contract assessment, security or reliability
+  analysis, or defect diagnosis, use the relevant repository contracts. Activate
+  Engineering Specifications for code review or explicit Spec-conformance work,
+  but do not bootstrap, migrate, or create Research/ExecPlan artifacts merely
+  because the work is read-only.
+- For repository mutation, read the Harness profile and classify the risk first.
+  Adaptive Explore permits bounded reversible local edits and tests without the
+  full contract setup. Build/Governed use the applicable contracts and Specs.
+  Escalate only when the requested scope crosses a risk boundary.
+
+## Establish the Harness contract
+
+1. Work from the repository root and read `docs/.engineering/harness.json` when it exists.
+2. Validate the Harness when changing it or diagnosing its integrity. A missing
+   Harness does not authorize setup: continue work supported by repository facts,
+   and bootstrap only when requested. Ask for adapters only if that choice is missing.
+3. Read architecture or governance documents when the affected boundary requires
+   them; use `docs/index.md` to locate unknown context. Local edits need only the
+   relevant files and checks. Preserve repository-owned customizations.
+4. Preview every Harness or Specification mutation before passing `--apply`.
+   Resolve conflicts explicitly; never overwrite an unknown managed path. If
+   a Specification update reports `selection_decision.status=required` and the
+   current session has no explicit selection, show
+   every candidate's ID, description, and dependencies, then ask the maintainer
+   to choose the complete `--spec` set, `--required-only`, or
+   `--keep-selection`. Do not apply or infer a selection before they answer.
+
+## Route engineering work
+
+- Read `governance.profile` from the Harness. Missing policy means strict
+  compatibility; strict stays Governed. Adaptive starts Explore.
+- Explore covers bounded reversible inspection, experiments, local edits, and
+  tests without persistent governance artifacts or a Spec receipt.
+- Promote to Build for bounded production work. Keep a concise intent, path,
+  acceptance, and compatibility contract; activate applicable Specs.
+- Promote to Governed for public contracts, security, data, irreversible
+  operations, reliability claims, release, or durable decisions. Use Research,
+  Design Package, ADR, ExecPlan, and sealed Benchmark only when their trigger
+  applies. Research establishes evidence; Design specifies how the system works;
+  ADR authorizes durable choices; ExecPlan governs delivery.
+- Route ADR corpus reduction to the Engineering Execution Plan workflow. Semantic
+  consolidation remains an authorized ADR lifecycle change; physical compaction
+  may only use its explicit lossless terminal History Pack preview/apply and exact
+  unpack contract. A Harness upgrade never packs ADRs automatically.
+- Resolve the active `engineering-execution-plan` Skill and run its
+  `epctl.py --repo . adr-maintenance` after a successful ADR lifecycle or storage
+  mutation and before a Governed handoff. Treat `review_due` and
+  `action_required` as typed maintenance work, not mutation authority. Scheduled
+  CI may use `--check`; it must not copy the policy into an adapter.
+- Use the case-study workflow only after implementation evidence exists.
+- Continue authorized implementation through relevant checks and corrections.
+  Request approval for a concrete authority decision, not for routine local work.
+
+Authority, destructive or external actions, security, data integrity, locked
+content, sealed evidence, and honest verification remain hard in every mode.
+
+Use available professional Skills instead of reproducing their lifecycle rules.
+Before writing, revising, or reviewing engineering prose, read the owning
+professional Skill's `references/controlled-writing.md`, relative to that Skill,
+not this repository. This is STE-inspired guidance, not full ASD-STE100 conformance.
+If the Skill or guide is unavailable, report the gap and follow project conventions;
+do not install Skills or create artifacts solely for writing style.
+
+## Classify and activate Engineering Specifications
+
+Before modifying a scoped path, performing formal code review, or evaluating explicit
+Spec conformance, use `.repo-foundry/engineering-specs/spec_router.py`, the canonical repository engine:
+
+1. Establish one stable adapter, session, and turn identity with `begin`.
+2. Continue bounded Explore work, or use `classify --mode build|governed
+   --reason <risk>` before crossing that boundary. Mode decreases are invalid.
+3. In Build or Governed, inspect path-matched choices with `candidates --path <path>` and decide Spec
+   Applicability.
+4. Use `requirements` for bounded cards, then `activate` exact direct IDs with
+   one task-specific reason each; code resolves their context dependencies.
+5. Use reasoned whole-Spec fallback only for legacy/migration/audit work, or
+   `--none` with a reason when no Spec applies.
+6. Keep the exact digest-verified capsule in context; run `rehydrate` after a
+   context reset rather than summarizing normative text.
+7. Run `audit` before completion so changed paths and the handoff are checked
+   against the recorded receipt.
+
+If the engine is absent, report that project Spec activation is unavailable; do not silently claim that no Specification applies.
+
+## Complete with evidence
+
+Lead with outcomes, changes since a known baseline, and decision or verification
+gaps. Use clear, consistent terms; link claims to source revisions and evidence,
+noting dirty changes. Expand detail as needed; label assumptions in optional
+diagrams or interactive views. Run checks proportional to risk. Explore uses
+normal prose; Build and Governed retain these audit labels:
+
+- `Activated specifications:`
+- `Activated requirements:`
+- `Verification:`
+- `Exceptions:`
+- `Compatibility or migration:`
+
+Only mark plans complete with required checks and evidence at the verified
+revision. Include the latest ADR maintenance state in Governed handoffs when
+its control plane exists. Summaries and visuals grant no authority and add no
+required artifacts; recheck them when their sources change.
