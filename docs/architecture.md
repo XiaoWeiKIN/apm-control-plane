@@ -1,5 +1,7 @@
 # Control plane architecture
 
+For the full Chinese developer guide, see [APM Control Plane：开发者架构指南](architecture/README.md). This file documents the narrower P0 implementation boundary.
+
 ## P0: protocol interoperability
 
 - The server is a modular starting point based on `opamp-go/server.Attach()` and a shared `net/http` server.
