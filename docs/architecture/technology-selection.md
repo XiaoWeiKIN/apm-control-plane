@@ -10,7 +10,7 @@
 
 ## 研究证据与适用边界
 
-本次选型有正式 RF 研究输入：[R-001 开源架构比较](../research/active/r-001_opamp-oss-architecture/RESEARCH.md)、[源码对照报告](../research/active/r-001_opamp-oss-architecture/notes/opensource-comparison.md) 和 [Synthesis](../research/active/r-001_opamp-oss-architecture/SYNTHESIS.md)。Gitea、Grafana、Casdoor 的核对源码主要采用 XORM，**不是 GORM**。选择 GORM 是基于本项目 CRUD 简单、多数据库目标和维护成本的独立技术判断，仍须 P1 双数据库 PoC 验证。
+本次选型有正式 RF 研究输入：[R-001 开源架构比较](../research/active/r-001_opamp-oss-architecture/RESEARCH.md)、[源码对照报告](../research/active/r-001_opamp-oss-architecture/notes/opensource-comparison.md) 和 [Synthesis](../research/active/r-001_opamp-oss-architecture/SYNTHESIS.md)。Gitea、Grafana、Casdoor 的核对源码主要采用 XORM，**不是 GORM**。选择 GORM 是基于本项目 CRUD 简单、多数据库目标和维护成本的独立技术判断，无需独立的选型 PoC；数据库正确性通过 P1 功能实现时的自动化测试验收。
 
 ## 1. 总体结论
 
@@ -130,7 +130,7 @@ type Repos interface {
 }
 ```
 
-`UnitOfWork` 必须保证回调中的所有 Repository 使用**同一个数据库事务**；不能让每个 Repository 偷偷使用自己的 `*sql.DB`，也不能把已经关闭的 `*sql.Tx` 留在全局变量中。Go API 类型名属于推荐草图，实际签名将在 PoC 和 DD 审查后确定。
+`UnitOfWork` 必须保证回调中的所有 Repository 使用**同一个数据库事务**；不能让每个 Repository 偷偷使用自己的 `*sql.DB`，也不能把已经关闭的 `*sql.Tx` 留在全局变量中。Go API 类型名属于推荐草图，实际签名在 P1 实施和 DD 审查中确定。
 
 ## 3. 配置加载：Koanf v2
 
@@ -198,7 +198,7 @@ Koanf 负责 Providers/Parsers 与覆盖，**不代替业务验证**。验证必
 选用 `gorm.io/gorm` + `gorm.io/driver/postgres` + `gorm.io/driver/mysql`。GORM 通过 `database/sql` 管理连接池；Domain 不直接依赖 ORM 类型。P1 使用**一套 GORM Repository**，避免为简单 CRUD 重复编写 PostgreSQL/MySQL 查询代码。
 
 ```go
-// 示例，具体版本和依赖在 P1 PoC 中锁定。
+// 示例，具体版本和依赖在 P1 实施 PR 中锁定。
 switch cfg.Database.Driver {
 case "postgres":
     db, err = gorm.Open(postgres.Open(cfg.Database.DSN), &gorm.Config{})
@@ -296,7 +296,7 @@ GORM 的实体模型不直接作为公开 API；Domain 不依赖 ORM 结构体�
 
 ## 8. 版本兼容性核验
 
-项目目前固定 Go 1.25。GORM v2、PostgreSQL/MySQL Dialector 的官方模块声明兼容 Go 1.25 基线，但仍须在 P1 PoC 中锁定相互兼容的具体版本并运行完整依赖图测试。
+项目目前固定 Go 1.25。GORM v2、PostgreSQL/MySQL Dialector 的官方模块声明兼容 Go 1.25 基线，在 P1 实施 PR 中锁定相互兼容的具体版本，执行依赖解析、编译和常规测试。
 
 | 组件 | 选型状态 |
 | --- | --- |
@@ -326,7 +326,9 @@ GORM 的实体模型不直接作为公开 API；Domain 不依赖 ORM 结构体�
 
 **多驱动≠跨引擎在线迁移**：从 PostgreSQL 切到 MySQL 需要专门的数据迁移、停写/回填、校验与回退方案；不能通过把 `database.driver` 从 postgres 改成 mysql 就让已有数据自动移动。
 
-## 10. P1 最小技术验证计划
+## 10. P1 直接实施与工程验收
+
+不设置独立 ORM/数据库选型 PoC 阶段，直接进入 P1 功能实现；以下为功能交付时的必要验收，不是选型前置实验。
 
 1. Koanf YAML + 白名单环境变量覆盖、非法 Driver/DSN/TLS 校验和敏感信息脱敏。
 2. GORM 同一套 Repository 在 PostgreSQL/MySQL 上执行 CRUD、唯一性约束、CAS、事务原子性与旧 ACK 测试。
