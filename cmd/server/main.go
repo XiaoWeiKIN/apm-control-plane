@@ -184,7 +184,7 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 	if rt == nil {
 		rt = &runtimeAgent{}
 	}
-	if isWS && rt.conn != nil && rt.conn != conn {
+	if rt.conn != nil && rt.conn != conn {
 		return nil, false, fmt.Errorf("concurrent session for agent %s", id)
 	}
 	first := rt.sequence == 0
