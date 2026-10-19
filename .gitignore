@@ -3,3 +3,8 @@
 *.log
 /bin/
 /coverage.out
+
+# RepoFoundry transient process locks
+/docs/.engineering/lock
+/docs/.epctl/lock
+/docs/.designctl/lock
