@@ -55,6 +55,10 @@ func newRegistry(store AgentStore, ttl time.Duration) *registry {
 	return &registry{store: store, sessions: make(map[string]*runtimeAgent), pollTTL: ttl}
 }
 
+// ErrSessionConflict means an existing live WebSocket owns this Instance UID.
+// No other connection is allowed to overwrite that runtime session.
+var errSessionConflict = errors.New("agent instance already has an active session")
+
 func key(tenant, uid string) string { return tenant + "/" + uid }
 
 func validUID(id string) bool {
@@ -185,7 +189,7 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 		rt = &runtimeAgent{}
 	}
 	if rt.conn != nil && rt.conn != conn {
-		return nil, false, fmt.Errorf("concurrent session for agent %s", id)
+		return nil, false, errSessionConflict
 	}
 	first := rt.sequence == 0
 	full := (first && msg.AgentDescription == nil) || (rt.sequence != 0 && msg.SequenceNum != rt.sequence+1)
@@ -376,6 +380,31 @@ func adminHandler(reg *registry, creds *auth.Authenticator) http.Handler {
 	return mux
 }
 
+// processingErrorResponse follows OpAMP's status-report contract: when
+// processing failed the reply must carry error_response, and must not advertise
+// capabilities or contain a RemoteConfig payload.
+func processingErrorResponse(uid []byte, err error) *protobufs.ServerToAgent {
+	kind := protobufs.ServerErrorResponseType_ServerErrorResponseType_Unavailable
+	message := "server temporarily unable to process agent status"
+	switch {
+	case errors.Is(err, gormrepo.ErrOwnership):
+		kind = protobufs.ServerErrorResponseType_ServerErrorResponseType_Unknown
+		message = "agent instance identity conflict"
+	case errors.Is(err, errSessionConflict):
+		message = "another connection currently owns this agent instance"
+	case strings.Contains(err.Error(), "instance_uid must be"):
+		kind = protobufs.ServerErrorResponseType_ServerErrorResponseType_BadRequest
+		message = "invalid agent instance UID"
+	}
+	return &protobufs.ServerToAgent{
+		InstanceUid: uid,
+		ErrorResponse: &protobufs.ServerErrorResponse{
+			Type: kind,
+			ErrorMessage: message,
+		},
+	}
+}
+
 func makeGateway(reg *registry, agentAuth *auth.Authenticator, log *slog.Logger) (opampsrv.HTTPHandlerFunc, opampsrv.ConnContext, error) {
 	gateway := opampsrv.New(nil)
 	return gateway.Attach(opampsrv.Settings{MaxMessageSize: 4 << 20, Callbacks: types.Callbacks{
@@ -398,15 +427,7 @@ func makeGateway(reg *registry, agentAuth *auth.Authenticator, log *slog.Logger)
 					config, full, err := reg.update(ctx, principal, isWS, conn, msg)
 					if err != nil {
 						log.Warn("opamp status rejected", "error", err)
-						// An invalid identity or competing connection must never receive
-						// a normal server capability response or RemoteConfig.
-						// The OpAMP callback API cannot set a per-message HTTP status;
-						// nil produces an empty HTTP response for polling clients.
-						// For persistent connections fail closed by disconnecting.
-						if isWS && conn != nil {
-							_ = conn.Disconnect()
-						}
-						return nil
+						return processingErrorResponse(msg.InstanceUid, err)
 					}
 					if full {
 						out.Flags = uint64(protobufs.ServerToAgentFlags_ServerToAgentFlags_ReportFullState)
