@@ -10,6 +10,8 @@
 
 第一次接触本项目，建议依次阅读「系统概览 → 三条主要流程 → 核心概念 → 模块与契约」。准备开发新功能时，再阅读「并发与一致性 → 安全与故障 → 扩展一个 Agent 类型 → 源码地图」。
 
+P1 的框架、配置加载、数据库和测试技术建议见 [P1–P3 技术选型（待评审）](technology-selection.md)；选型结论需要 PoC 和独立的 RF 设计/决策流程，不因本文链接而自动批准。
+
 本项目的业务需求以 [FR-001～FR-012](../requirements/APM_CONTROL_PLANE.md) 为准；架构审批与版本身份由 [DD-001](../design-docs/dd-001_opamp-control-plane.md) 管理；里程碑和验证由 [EP-001](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) 管理。
 
 ## 1. 系统要解决什么问题
