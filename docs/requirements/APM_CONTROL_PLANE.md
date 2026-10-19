@@ -22,11 +22,12 @@ Build a **general OpAMP Agent Control Plane** that can eventually manage **Java,
 | FR-010 | Represent Agent Kind, Distribution, Distribution Version and advertised Capabilities independently of the workload service identity. | Inventory can distinguish Java, Go, Python and Collector-shaped test agents without treating `service.name` or `service.version` as universal agent-version or authorization fields. |
 | FR-011 | Resolve and compile configuration through Agent-Kind/Distribution-aware adapters and reject unsupported configuration or runtime semantics. | A Java sampling policy compiles only for compatible Java targets; an incompatible or Collector-shaped Agent is reported UNSUPPORTED without receiving Java-specific JSON. Other adapters remain future work. |
 | FR-012 | Separate Service, Agent Instance and Agent Session identities and lifecycles. | A service may map to multiple APM Agent instances, each with changing sessions; Collector identity does not require a Java service grouping. HTTP polling uses last-seen freshness, not persistent WebSocket connection state. |
+| FR-013 | Select a relational database driver at Control Plane startup and support PostgreSQL and MySQL without coupling domain semantics to a specific SQL dialect. | Both drivers pass the same repository/transaction/CAS and restart-recovery contract suite on real PostgreSQL and MySQL; unknown drivers fail configuration validation; switching drivers does not imply automatic data migration. |
 
 ## Delivery phases
 
 - **P0 (existing PR)**: OpAMP transport, ephemeral inventory, per-instance test policy and simulated status acknowledgement. Not a real Java sampler integration.
-- **P1**: Durable Registry with generic Agent Kind/Distribution/Capabilities, identity/security boundary, PostgreSQL and reconnect. Only Java Agent integration is required.
+- **P1**: Durable Registry with generic Agent Kind/Distribution/Capabilities, identity/security boundary, PostgreSQL/MySQL storage adapters, selected-driver configuration and reconnect. Both databases require contract tests; only Java Agent runtime integration is required.
 - **P2**: Generic immutable configuration revision/assignment/reconciliation core with a single Java Sampling Config Adapter; future Agent Kind adapters are contracts only.
 - **P3**: Agent-kind-aware release targets and batch rollout, change history, rollback and readiness verification, exercised first with Java/test agents.
 - **Java distribution**: separate workstream after control-plane contract stabilizes.
@@ -39,6 +40,10 @@ No Go/Python agent runtime integration or Collector configuration/lifecycle exec
 ## Confirmed target scope
 
 On 2026-10-19, the product direction was confirmed as multi-language APM Agent management with a future Collector extension. This is a scope input to DD-001 and EP-001, **not an approved design revision or accepted ADR**. Initial feature acceptance still tests the Java distribution first.
+
+## Relational storage requirement
+
+The product needs more than one database driver and may use MySQL. Database selection is a deployment parameter, not a runtime data migration facility. PostgreSQL/MySQL have different SQL and DDL behavior, so store-level dialects and migrations can be separate while required business invariants remain consistent. The proposed technology stack is described in [P1–P3 technology selection](../architecture/technology-selection.md); compatibility remains unverified until real database CI tests pass.
 
 ## Evidence and authority
 
