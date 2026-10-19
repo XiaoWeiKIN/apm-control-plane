@@ -53,7 +53,7 @@ Java APM Agent 的 Traces 仍通过 OTLP → Collector → Backend 发送；控�
 - FR-010：将 Agent Kind、Distribution、版本、Capabilities、配置 Schema 能力建模为显式属性，避免将 Java SDK 语义写进通用注册和分发模块。
 - FR-011：平台可挂载多语言 APM Agent 和 Collector 的 Config Adapter，按每种 Agent 实际支持的配置格式和生效方式进行编译与能力校验；非 Java Adapter 不属于首期交付。
 - FR-012：区分 Service / Agent Instance / Agent Session；Service 级策略只作用于授权且实际匹配的 Agent，不把 Collector 的运行组件误当成 Java Service 实例。
-- 关系型数据库约束：Control Plane 能通过驱动配置在 PostgreSQL、MySQL 的 Storage Adapter 之间选择。无论具体存储引擎，Agent Identity/Desired/Observed、CAS、事务发布和重启恢复的业务语义必须一致；首期不能假定 PostgreSQL 专有功能可移植。
+- FR-013：关系型数据库约束：Control Plane 能通过驱动配置在 PostgreSQL、MySQL 的 Storage Adapter 之间选择。无论具体存储引擎，Agent Identity/Desired/Observed、CAS、事务发布和重启恢复的业务语义必须一致；首期不能假定 PostgreSQL 专有功能可移植。
 
 **首期非目标**：不实现 Go/Python Agent Runtime Adapter、Collector 配置执行或 Collector Supervisor、OTLP 传输、Java Bytecode Instrumentation、二进制升级、Trace Retention/Tail Sampling、首期多活 HA，也不承诺无证据的吞吐量或采样准确率。**预留 Collector 适配能力不代表 Collector 已获得可用的配置管理能力。**
 
