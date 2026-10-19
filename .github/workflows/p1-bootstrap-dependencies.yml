@@ -43,5 +43,7 @@ jobs:
           git add go.mod go.sum cmd internal
           if ! git diff --cached --quiet; then
             git commit -m 'build: lock GORM and Koanf dependencies, format P1 implementation'
+            git fetch origin feat/p1-durable-agent-inventory
+            git rebase origin/feat/p1-durable-agent-inventory
             git push origin HEAD:feat/p1-durable-agent-inventory
           fi
