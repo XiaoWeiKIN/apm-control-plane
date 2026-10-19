@@ -2,6 +2,11 @@
 
 A Go-based **OpAMP Agent Control Plane**. Long-term scope: Java, Go, Python and other APM Agent distributions, with a later path to Collector management. **First deliverable: a custom OpenTelemetry Java Agent**; the current code is only the Go P0 interoperability PoC.
 
+## Developer architecture documentation
+
+- [**APM Control Plane：开发者架构指南（中文）**](docs/architecture/README.md) — end-to-end control flow, concepts, module contracts, OpAMP messaging, desired/observed state, persistence, security, extension points, and source navigation.
+- [DD-001 governed design (draft)](docs/design-docs/dd-001_opamp-control-plane.md) — design authority and unresolved decisions; the developer guide does not imply approval.
+
 ## P0 scope
 
 - Official `opamp-go` HTTP/WebSocket server at `/v1/opamp`
