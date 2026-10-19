@@ -150,7 +150,7 @@ OpenTelemetry [Instrumentation Agent Guidelines](https://github.com/open-telemet
 | Config Release / Rollout | 目标集合、Revision、批次策略 | 可审计发布、分批进度、暂停与回滚意图 | 不把 `SENT` 当成 `APPLIED` |
 | Reconciler | Desired/Observed、会话可用性 | 重试、失步修复、下一次发送决策 | 不修改规范性业务策略 |
 | OpAMP Gateway | HTTP/WS、AgentToServer/ServerToAgent | 协议编解码、认证入口、回调、单连接发送 | 不保存唯一的业务事实源 |
-| Storage | 事务、版本、事件 | PostgreSQL/MySQL Adapter 持久化，统一 Repository/UnitOfWork 业务语义 | 不保存活着的网络连接 |
+| Storage | 事务、版本、事件 | GORM PostgreSQL/MySQL Dialector 持久化，统一 Repository/UnitOfWork 业务语义 | 不保存活着的网络连接 |
 | Agent Config Adapter | Agent Kind + 版本与能力 + 规则 | 输出某类 Agent 能理解的配置并声明应用限制 | 不假设所有 Agent 能热更新 |
 
 ### 4.1 建议的依赖方向
