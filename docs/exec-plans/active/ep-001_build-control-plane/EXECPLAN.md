@@ -35,7 +35,7 @@ This ExecPlan is a bounded living document. Keep current truth synchronized. Pre
 
 ## Purpose / Big Picture
 
-交付持久化的 **通用 Go OpAMP Agent Control Plane**：长期可管理 Java、Go、Python APM Agent 并预留 Collector 接入；本 EP 只实现 Java Agent 场景的控制端。运维人员可查询 AgentKind/Distribution 及实例健康，按 Service/Environment 发布 Java 采样策略，并准确区分配置传输与 Agent 实际应用结果。HTTP/WS 断线重连及服务器重启不应丢失 Desired State。用户验证接口为 Management API、数据库状态、OpAMP RemoteConfig 与 ACK；真实 JVM 采样更新在另一个工作流验收。
+交付持久化的 **通用 Go OpAMP Agent Control Plane**：长期可管理 Java、Go、Python APM Agent 并预留 Collector 接入；本 EP 只实现 Java Agent 场景的控制端。运维人员可查询 AgentKind/Distribution 及实例健康，按 Service/Environment 发布 Java 采样策略，并准确区分配置传输与 Agent 实际应用结果。HTTP/WS 断线重连及服务器重启不应丢失 Desired State。部署时选择 PostgreSQL 或 MySQL 作为单一主关系型数据库，不承诺只改 Driver 配置就自动完成历史数据跨引擎迁移。用户验证接口为 Management API、数据库状态、OpAMP RemoteConfig 与 ACK；真实 JVM 采样更新在另一个工作流验收。
 
 ## Current Snapshot
 
@@ -44,6 +44,7 @@ This ExecPlan is a bounded living document. Keep current truth synchronized. Pre
 - Verified baseline: PR #1 的 P0 Go 编译、单测（含 Race Detector）和 Vet 在 GitHub Actions 通过；测试 Agent 的实际双进程手工烟测未执行。
 - Next action: 评审 DD-001 中的凭证到实例/租户绑定模型，确定 PostgreSQL/MySQL 共通 Repository 契约和独立 Migration；增加 internal/storage 与 internal/registry，并在 PostgreSQL/MySQL 均执行重启恢复合同测试。
 - Confirmed product scope (2026-10-19): 多语言 APM Agent + 后续 Collector；P1–P3 只交付通用抽象和 Java 适配链路，不把其他语言或 Collector 执行能力算入验收。
+- Storage requirement (2026-10-19): 多数据库 Driver（至少 PostgreSQL 和 MySQL）是新增范围；技术候选与风险记录在 docs/architecture/technology-selection.md，必须有两数据库实际合同测试。
 - Open: DD-001 尚未批准；没有 accepted ADR；生产 TLS/身份策略尚待明确。不能把这些条件标记为完成。
 
 ## Context and Orientation
@@ -63,8 +64,9 @@ P1 首先拆模块并持久化；P2 在此基础上引入策略版本和协调�
 | docs/.engineering/specs.lock.json | EngineeringSpecifications v1.9.0 lock | RF spec validate + 精确 Requirement 激活 |
 | cmd/server/main.go | 现有 opamp-go 回调、P0 Token、内存模型 | Go tests/race and protocol tests |
 | docs/SECURITY.md | 未知项不虚构；严禁未认证范围下发 | 负向权限测试 |
+| docs/architecture/technology-selection.md | 多 Driver 技术候选及双方言实现/验证 | PostgreSQL/MySQL Contract Suite |
 
-不变量：Desired 和 Observed 分离；配置 Hash 与 Revision 分离；Agent 成功接收消息不等于 APPLIED；身份声明属性无授权力；相同配置下发幂等；控制故障不影响 OTLP。AgentKind 不代表能力：必须按 Capabilities + ConfigDialect + 发行版版本解析，缺少能力时拒绝 Java 专有策略。
+不变量：数据库 Domain Port 与具体 Driver 解耦；PostgreSQL/MySQL 的提交原子性和 CAS 行为必须经合同测试证明。Desired 和 Observed 分离；配置 Hash 与 Revision 分离；Agent 成功接收消息不等于 APPLIED；身份声明属性无授权力；相同配置下发幂等；控制故障不影响 OTLP。AgentKind 不代表能力：必须按 Capabilities + ConfigDialect + 发行版版本解析，缺少能力时拒绝 Java 专有策略。
 
 ## Research and Architecture Inputs
 
@@ -79,7 +81,7 @@ P1 首先拆模块并持久化；P2 在此基础上引入策略版本和协调�
 
 | ADR constraint or architecture input | Implementation or preservation | Verification |
 | --- | --- | --- |
-| docs/design-docs/dd-001_opamp-control-plane.md | Preserve Control/Data separation, credential-bound Agent identity, immutable policy versions, Desired vs Observed state, capability checks, AgentKind/Distribution-aware configuration adapters, and HTTP/WS delivery semantics; Java remains the only first-delivery config dialect, all proposals provisional until Design approval | Protocol integration tests, database restart test, role-boundary negative tests, stale ACK/concurrency tests |
+| docs/design-docs/dd-001_opamp-control-plane.md | Preserve Control/Data separation, credential-bound Agent identity, immutable policy versions, Desired vs Observed state, capability checks, AgentKind/Distribution-aware configuration adapters, and HTTP/WS delivery semantics; Java remains the only first-delivery config dialect, all proposals provisional until Design approval | Protocol integration tests, PostgreSQL/MySQL shared Repository contract suite, restart and role-boundary negative tests, stale ACK/concurrency tests |
 
 There are no accepted ADR constraints to map. docs/design-docs/index.md is the navigation entrypoint, not an extra normative constraint row.
 
@@ -134,7 +136,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 - [ ] **P1 Identity**：从仓库根执行 go test -race ./...，并在 PostgreSQL 与 MySQL 运行同一套 Agent Registry/Repository 合同测试；期待凭证隔离、重复 UID 检测和重启后记录可恢复。证据：CI Job URL + test output。
 - [ ] **P1 Compatibility**：GET /api/v1/agents 与 GET /api/v1/agents/{uid} 保持兼容；非法 UID/越权返回 4xx；Java/Go/Python/Collector 身份样本应正确区分 AgentKind、Distribution 与业务 Service；不声称四种 Agent 都可实际连接。证据：HTTP contract + Registry tests。
 - [ ] **P2 Policy**：发布 rate=0.1，测试 Agent 在下一次轮询收到 schema=1 的 JSON；相同 Hash 的 APPLIED 更新 Observed，旧 ACK 不覆盖新 Desired。证据：OpAMP integration trace + DB assertions。
-- [ ] **P2 Reconciliation**：先发布后断开 Agent、重启控制平面、重新接入；期待 Desired Revision 未丢、自动重发并最终收敛。证据：CI/PostgreSQL integration logs。
+- [ ] **P2 Reconciliation**：先发布后断开 Agent、重启控制平面、重新接入；期待 Desired Revision 未丢、自动重发并最终收敛。证据：PostgreSQL/MySQL CI integration logs。
 - [ ] **P2 Capabilities/Concurrency**：不支持 RemoteConfig 或不兼容 Java 配置 Schema 的 Agent 均不下发 Java Sampling JSON，且明确返回 UNSUPPORTED；WebSocket 每连接串行推送，HTTP 模式不谎称实时 WS 推送。证据：race test + protocol tests。
 - [ ] **P3 Release**：灰度组失败阻断下一批、回滚产生新审计、跨租户发策略被拒绝；Release 目标 AgentKind 与实例分配一一对应，混合 Kind 下不能错发 Java 配置。证据：批次故障注入和审计记录。
 - [ ] **RF Contract**：执行 repofoundry --repo . validate 与 Spec validate、designctl validate、epctl validate；期待零 error。设计批准和 completion 需以后续真实审批、真实 revision 与证据为依据。
