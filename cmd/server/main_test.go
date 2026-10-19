@@ -138,7 +138,7 @@ func TestTransportFreshnessAndIdentityFields(t *testing.T){
 	if err!=nil||item["connected"]!=false{t.Fatalf("polling freshness lost: %+v %v",item,err)}
 }
 
-type mockConnection struct{}
+type mockConnection struct{ id int }
 func (*mockConnection) Connection() net.Conn{return nil}
 func (*mockConnection) Send(context.Context,*protobufs.ServerToAgent) error{return nil}
 func (*mockConnection) Disconnect()error{return nil}
@@ -147,7 +147,7 @@ func TestWebsocketSessionExclusion(t *testing.T){
 	reg:=newRegistry(newFakeStore(),time.Second)
 	id,_:=uid(4)
 	p:=principal("t1","c1")
-	connA,connB:=&mockConnection{},&mockConnection{}
+	connA,connB:=&mockConnection{id:1},&mockConnection{id:2}
 	msg:=&protobufs.AgentToServer{InstanceUid:id,SequenceNum:1}
 	if _,_,err:=reg.update(context.Background(),p,true,connA,msg);err!=nil {t.Fatal(err)}
 	if _,_,err:=reg.update(context.Background(),p,true,connB,msg);err==nil {t.Fatal("concurrent WS session must be rejected")}
