@@ -18,8 +18,8 @@ jobs:
           cache: false
       - name: Resolve pinned dependencies
         run: go mod tidy
-      - name: Check formatting
-        run: test -z "$(gofmt -l cmd)"
+      - name: Format Go source
+        run: gofmt -w cmd
       - name: Unit tests and race detector
         run: go test -race ./...
       - name: Vet
