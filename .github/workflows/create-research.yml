@@ -38,6 +38,7 @@ jobs:
           if [[ ! -f docs/research/active/r-001_opamp-oss-architecture/RESEARCH.md ]]; then
             python3 "$RF_ROOT" --repo . new-research --slug opamp-oss-architecture --title "Open-source architecture patterns for OpAMP Control Plane" --research-type comparative --author "AI assistant" --owner "Unassigned"
           else
+            mkdir -p docs/research/active/r-001_opamp-oss-architecture/{snapshots,artifacts}
             python3 "$RF_ROOT" --repo . sync-research R-001
             python3 "$RF_ROOT" --repo . validate
             python3 "$RF_ROOT" --repo . mark-review-ready R-001 --snapshot
