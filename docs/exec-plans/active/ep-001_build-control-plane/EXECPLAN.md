@@ -35,7 +35,7 @@ This ExecPlan is a bounded living document. Keep current truth synchronized. Pre
 
 ## Purpose / Big Picture
 
-交付持久化的 Go OpAMP Control Plane，使运维人员能够查询 Java APM Agent 实例及健康状态、按 Service/Environment 发布不可变采样策略，并准确看到目标配置是否被 Agent 应用。HTTP/WS 断线重连及服务器重启不应丢失 Desired State。用户验证接口为 Management API、数据库状态、OpAMP RemoteConfig 与 ACK；真实 JVM 采样更新在另一个工作流验收。
+交付持久化的 **通用 Go OpAMP Agent Control Plane**：长期可管理 Java、Go、Python APM Agent 并预留 Collector 接入；本 EP 只实现 Java Agent 场景的控制端。运维人员可查询 AgentKind/Distribution 及实例健康，按 Service/Environment 发布 Java 采样策略，并准确区分配置传输与 Agent 实际应用结果。HTTP/WS 断线重连及服务器重启不应丢失 Desired State。用户验证接口为 Management API、数据库状态、OpAMP RemoteConfig 与 ACK；真实 JVM 采样更新在另一个工作流验收。
 
 ## Current Snapshot
 
@@ -43,13 +43,14 @@ This ExecPlan is a bounded living document. Keep current truth synchronized. Pre
 - Current milestone: **P1 — Durable Inventory and authenticated identity boundary**（尚未实现）。
 - Verified baseline: PR #1 的 P0 Go 编译、单测（含 Race Detector）和 Vet 在 GitHub Actions 通过；测试 Agent 的实际双进程手工烟测未执行。
 - Next action: 评审 DD-001 中的凭证到实例/租户绑定模型，确定 PostgreSQL 最小迁移；然后增加 internal/storage 与 internal/registry 并使用 Docker/PostgreSQL 做重启恢复集成测试。
+- Confirmed product scope (2026-10-19): 多语言 APM Agent + 后续 Collector；P1–P3 只交付通用抽象和 Java 适配链路，不把其他语言或 Collector 执行能力算入验收。
 - Open: DD-001 尚未批准；没有 accepted ADR；生产 TLS/身份策略尚待明确。不能把这些条件标记为完成。
 
 ## Context and Orientation
 
 仓库入口为 cmd/server/main.go（当前把 OpAMP Gateway、API、内存 Agent 状态耦合在一个文件），cmd/testagent/main.go（HTTP 测试 Agent），cmd/server/main_test.go（协议/HTTP 基础单测），docs/requirements/APM_CONTROL_PLANE.md（FR-001…FR-009），docs/architecture.md（P0 边界）。
 
-目标为“Control Plane ←OpAMP→ 自定义 Java Agent”，JVM 侧单独负责动态采样。管理 REST API 面向人/系统，OpAMP 接口面向 Agent；OTLP 数据不经过这里。
+目标为“**Universal Control Plane ←OpAMP→ Java/Go/Python APM Agent，以及未来 Collector**”。本 EP 的代码路径只有自定义 Java Agent + HTTP Test Agent。通用控制面不得绑定 Java Sampler 接口：注册的 AgentKind/Distribution 与版本/Capabilities 必须独立于 service.name，配置下发经 AgentKind Adapter 编译。JVM 侧单独负责动态采样。管理 REST API 面向人/系统，OpAMP 面向 Agent；OTLP 数据不经过这里。
 
 P1 首先拆模块并持久化；P2 在此基础上引入策略版本和协调器；P3 实现发布与可审计回滚。三个阶段是独立可验收增量，不能以文档完成替代协议结果。
 
@@ -57,18 +58,18 @@ P1 首先拆模块并持久化；P2 在此基础上引入策略版本和协调�
 
 | Source | Required constraint | Check |
 | --- | --- | --- |
-| docs/requirements/APM_CONTROL_PLANE.md | FR-001…FR-009 与 P1–P3 范围 | 按 FR 做验收映射 |
+| docs/requirements/APM_CONTROL_PLANE.md | FR-001…FR-012 与 P1–P3 范围 | 按 FR 做验收映射 |
 | docs/design-docs/dd-001_opamp-control-plane.md | Proposed Design; NOT approved, no immutable evidence pin | 实施前逐项 review 并按结论更新 |
 | docs/.engineering/specs.lock.json | EngineeringSpecifications v1.9.0 lock | RF spec validate + 精确 Requirement 激活 |
 | cmd/server/main.go | 现有 opamp-go 回调、P0 Token、内存模型 | Go tests/race and protocol tests |
 | docs/SECURITY.md | 未知项不虚构；严禁未认证范围下发 | 负向权限测试 |
 
-不变量：Desired 和 Observed 分离；配置 Hash 与 Revision 分离；Agent 成功接收消息不等于 APPLIED；身份声明属性无授权力；相同配置下发幂等；控制故障不影响 OTLP。
+不变量：Desired 和 Observed 分离；配置 Hash 与 Revision 分离；Agent 成功接收消息不等于 APPLIED；身份声明属性无授权力；相同配置下发幂等；控制故障不影响 OTLP。AgentKind 不代表能力：必须按 Capabilities + ConfigDialect + 发行版版本解析，缺少能力时拒绝 Java 专有策略。
 
 ## Research and Architecture Inputs
 
 - Research gate: not_required。已经由明确用户路线、现有 P0 实现及 opamp-go 公开接口建立实施初始事实，不虚构 concluded Research。
-- Architecture decision gate: not_required for plan creation。Go + opamp-go + 自定义 Java Agent 和先交付 Control Plane 已由用户选择；本计划不接受未批准 ADR。若 mTLS/Token、重复 UID 或 HA 的长期方案需要正式选择，先创建 proposed ADR 并经 Owner 接受再实施该部分。
+- Architecture decision gate: not_required for plan creation。Go + opamp-go + 首期自定义 Java Agent 和先交付 Control Plane 已由用户选择；2026-10-19 用户进一步确认未来多语言 APM Agent 及 Collector 的产品范围；本计划不接受未批准 ADR。若 mTLS/Token、重复 UID 或 HA 的长期方案需要正式选择，先创建 proposed ADR 并经 Owner 接受再实施该部分。
 - Architecture compliance: applicable。精确 Design 输入路径为 docs/design-docs/dd-001_opamp-control-plane.md，architecture entrypoint 为 docs/design-docs/index.md。DD-001 为 draft，并不构成 approved revision；未批准时本 EP 不能归档 completed。
 - ADR references: []；ADR constraint evidence: []；approved Design evidence: []。不存在不得虚构。
 - Source-backed evidence: PR #1 的 P0 代码及 GitHub Actions 绿色 Go / RF 校验，只能证明当前范围的测试通过。
@@ -78,7 +79,7 @@ P1 首先拆模块并持久化；P2 在此基础上引入策略版本和协调�
 
 | ADR constraint or architecture input | Implementation or preservation | Verification |
 | --- | --- | --- |
-| docs/design-docs/dd-001_opamp-control-plane.md | Preserve Control/Data separation, credential-bound Agent identity, immutable policy versions, Desired vs Observed state, capability checks and HTTP/WS delivery semantics; all are provisional until Design approval | Protocol integration tests, database restart test, role-boundary negative tests, stale ACK/concurrency tests |
+| docs/design-docs/dd-001_opamp-control-plane.md | Preserve Control/Data separation, credential-bound Agent identity, immutable policy versions, Desired vs Observed state, capability checks, AgentKind/Distribution-aware configuration adapters, and HTTP/WS delivery semantics; Java remains the only first-delivery config dialect, all proposals provisional until Design approval | Protocol integration tests, database restart test, role-boundary negative tests, stale ACK/concurrency tests |
 
 There are no accepted ADR constraints to map. docs/design-docs/index.md is the navigation entrypoint, not an extra normative constraint row.
 
@@ -89,27 +90,29 @@ There are no accepted ADR constraints to map. docs/design-docs/index.md is the n
 
 ## Plan of Work
 
-先锁定 P0 测试行为与安全缺口，把当前 main.go 分拆为 HTTP 装配、OpAMP Gateway、Agent Registry 与 Admin API，保持现有路由兼容。P1 用 PostgreSQL 事务存储 Agent Identity 和 Observed Snapshot，保留会话在内存，明确实例/凭证绑定与重连覆盖条件。
+先锁定 P0 测试行为与安全缺口，把当前 main.go 分拆为 HTTP 装配、OpAMP Gateway、通用 Agent Registry 与 Admin API，保持现有路由兼容。通用 Agent Identity 包含 AgentKind/Distribution/Version/Capabilities，避免把业务 Service 版本当 Agent 发行版版本。P1 用 PostgreSQL 事务存储 Agent Identity 和 Observed Snapshot，保留会话在内存，明确实例/凭证绑定与重连覆盖条件。
 
-P2 将采样策略建立为不可变 PolicyVersion，按 service/environment/instance 解析分配并存入 Desired State，Reconciler 对接 opamp-go，区分 HTTP 拉取与 WebSocket 推送，使用 ACK Hash 更新 Observed。P3 追加带审计的受控 rollout、失败隔离、显式 rollback 发布和必要的容量测量。
+P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；通过可显式拒绝不兼容目标的 `AgentConfigAdapter` 把 Java Head Sampling 规则编译为 `apm/sampling.json`。按 service/environment/instance 解析分配并存入 Desired State，Reconciler 对接 opamp-go，区分 HTTP 拉取与 WebSocket 推送，使用 ACK Hash 更新 Observed。P3 追加带审计的受控 rollout、失败隔离、显式 rollback 发布和必要的容量测量。
 
 ## Milestones
 
 ### M1 — P1 Durable Agent Inventory / Identity
 
-修改 internal/opamp、internal/registry、internal/storage、migrations 和 cmd/server 的装配。可观察结果：已认证 Agent 的状态持久化；数据库或服务端重启后保留身份与 Last Seen；重复 UID 和租户越权请求被拒绝或明确标记。保持现有 P0 API 兼容。
+修改 internal/opamp、internal/registry、internal/storage、migrations 和 cmd/server 的装配。新增 AgentKind/DistributionVersion/Capabilities 字段与服务身份映射（Collector 不强制关联 Java Service）。可观察结果：已认证 Agent 的状态持久化；数据库或服务端重启后保留身份与 Last Seen；重复 UID 和租户越权请求被拒绝或明确标记。保持现有 P0 API 兼容。
+
+验证范围：使用 Java、Go、Python、Collector 的**身份元数据样本**验证 Registry 通用性；不要求后三类 Agent 运行时真实接入。
 
 验收：执行 go test -race ./...；在可用 PostgreSQL 的本地/CI 集成环境启动 Agent、重启服务、查询 GET /api/v1/agents/{uid}，验证对应记录未消失并可回连；运行未认证与跨租户负向用例。保存测试结果/CI Run URL。
 
 ### M2 — P2 Sampling Policy + Reconciler
 
-修改 internal/policy、internal/config、internal/reconcile、storage migrations、Management API，增加 immutable revision 与 deterministic hash。可观察结果：在 Admin API 发布 rate 0.1 后，在线 HTTP Test Agent 下一次轮询收到 Config；匹配 Hash 的 APPLIED 将状态变为 APPLIED；服务端重启后待下发任务被恢复；不支持 RemoteConfig 的 Agent 不被误标成功。
+修改 internal/policy、internal/config、internal/reconcile、storage migrations、Management API，增加不可变通用 ConfigRevision、ConfigRelease/Assignment 与 deterministic hash，并只实现 Java Sampling AgentConfigAdapter。可观察结果：在 Admin API 发布 rate 0.1 后，在线 HTTP Test Agent 下一次轮询收到 Config；匹配 Hash 的 APPLIED 将状态变为 APPLIED；服务端重启后待下发任务被恢复；不支持 RemoteConfig 或不兼容 Java ConfigDialect 的 Agent 不会收到 Java JSON，也不被误标成功。
 
 验收：Go 集成测试覆盖 stale ACK、重复 ACK、配置冲突、离线/重连、错误配置、WS writer 序列化及 HTTP polling，使用真实 OpAMP Client/Server 对话而非仅 mock。
 
 ### M3 — P3 Audited Rollout / Recovery
 
-增加发布批次、并发上限、进度统计、失败阈值与显式回滚，以及审计事件。可观察结果：小批量 Agent 先确认，再进入后续批次；失败时停止扩散；指向旧版本的回滚有独立审计记录。
+增加发布批次、并发上限、进度统计、失败阈值与显式回滚，以及审计事件；Release 必须记录目标 AgentKind、具体配置 Schema 及目标集合，不跨不同 Agent Kind 默认复制同一策略。可观察结果：小批量 Agent 先确认，再进入后续批次；失败时停止扩散；指向旧版本的回滚有独立审计记录。
 
 验收：故障注入与回滚回放；持久性/权限测试；新建的 Benchmark Scenario 必须先声明再执行，不得事后调整门槛。
 
@@ -129,11 +132,11 @@ P2 将采样策略建立为不可变 PolicyVersion，按 service/environment/ins
 ## Validation and Acceptance
 
 - [ ] **P1 Identity**：从仓库根执行 go test -race ./...，并运行 PostgreSQL 支持的 Agent Registry 集成测试；期待凭证隔离、重复 UID 检测和重启后记录可恢复。证据：CI Job URL + test output。
-- [ ] **P1 Compatibility**：GET /api/v1/agents 与 GET /api/v1/agents/{uid} 保持兼容；非法 UID/越权返回 4xx。证据：HTTP contract tests。
+- [ ] **P1 Compatibility**：GET /api/v1/agents 与 GET /api/v1/agents/{uid} 保持兼容；非法 UID/越权返回 4xx；Java/Go/Python/Collector 身份样本应正确区分 AgentKind、Distribution 与业务 Service；不声称四种 Agent 都可实际连接。证据：HTTP contract + Registry tests。
 - [ ] **P2 Policy**：发布 rate=0.1，测试 Agent 在下一次轮询收到 schema=1 的 JSON；相同 Hash 的 APPLIED 更新 Observed，旧 ACK 不覆盖新 Desired。证据：OpAMP integration trace + DB assertions。
 - [ ] **P2 Reconciliation**：先发布后断开 Agent、重启控制平面、重新接入；期待 Desired Revision 未丢、自动重发并最终收敛。证据：CI/PostgreSQL integration logs。
-- [ ] **P2 Capabilities/Concurrency**：不支持 RemoteConfig 时不下发；WebSocket 每连接串行推送，HTTP 模式不谎称实时 WS 推送。证据：race test + protocol tests。
-- [ ] **P3 Release**：灰度组失败阻断下一批、回滚产生新审计、跨租户发策略被拒绝。证据：批次故障注入和审计记录。
+- [ ] **P2 Capabilities/Concurrency**：不支持 RemoteConfig 或不兼容 Java 配置 Schema 的 Agent 均不下发 Java Sampling JSON，且明确返回 UNSUPPORTED；WebSocket 每连接串行推送，HTTP 模式不谎称实时 WS 推送。证据：race test + protocol tests。
+- [ ] **P3 Release**：灰度组失败阻断下一批、回滚产生新审计、跨租户发策略被拒绝；Release 目标 AgentKind 与实例分配一一对应，混合 Kind 下不能错发 Java 配置。证据：批次故障注入和审计记录。
 - [ ] **RF Contract**：执行 repofoundry --repo . validate 与 Spec validate、designctl validate、epctl validate；期待零 error。设计批准和 completion 需以后续真实审批、真实 revision 与证据为依据。
 
 尚未完成任何新里程碑；这些复选框都保持未勾选。完成归档必须由 RF epctl archive-ep 写入 verified_revision、verification_evidence 和 seal。
@@ -163,6 +166,7 @@ P2 将采样策略建立为不可变 PolicyVersion，按 service/environment/ins
 - (2026-10-19, provenance: user direction) 先实现 Control Plane，后实现自定义 Java Agent；不将 Agent 发行版工作纳入本 EP 的完成门槛。
 - (2026-10-19, proposal only) 优先模块化 Go 单体 + PostgreSQL + opamp-go，待 DD-001 审阅；不把提案当成 accepted ADR。
 - (2026-10-19, delivery rule) 采用 Desired/Observed 双状态和 matching hash ACK，其他能力按 M1–M3 递增交付；SLO 尚未定义。
+- (2026-10-19, explicit user scope confirmation) Control Plane 长期面向 Java、Go、Python 等 APM Agent，未来支持 Collector；M1–M3 仅验证 Java 发行版的策略配置和其他 Kind 的类型安全注册，其他 Runtime Adapter 不在 EP-001 交付范围。这是产品范围确认，不是新的 accepted ADR，也不代表 DD-001 正式批准。
 
 ## Blockers
 
@@ -182,6 +186,7 @@ P2 将采样策略建立为不可变 PolicyVersion，按 service/environment/ins
 ## Interfaces and Dependencies
 
 - Go toolchain 1.25+；github.com/open-telemetry/opamp-go v0.25.0；当前既有 API 入口为 cmd/server/main.go。
+- 目标控制面类型：AgentKind、Distribution、DistributionVersion、CapabilitySet、ConfigDialect、AgentConfigAdapter（拟定接口，尚未存在于代码）；Java Adapter 首先支持 `apm/sampling.json`，Go/Python/Collector Adapter 明确 defer。
 - Management endpoints：/api/v1/agents、/api/v1/agents/{uid}、/api/v1/agents/{uid}/sampling；保持 P0 功能兼容，扩展 service-level policy endpoints 时引入版本化契约测试。
 - OpAMP transport：/v1/opamp（HTTP + WS），AgentToServer、ServerToAgent.RemoteConfig、RemoteConfigStatus 和 AgentCapabilities。
 - PostgreSQL（P1 才引入，当前不存在）：Repository、AgentInstances、PolicyVersions、Assignments、ConfigEvents；应用只持有逻辑 Session 句柄，不把连接对象入库。
@@ -197,4 +202,5 @@ P2 将采样策略建立为不可变 PolicyVersion，按 service/environment/ins
 ## Revision Notes
 
 - 2026-10-19 — 由 RF epctl 创建初始 active EP，基于用户确认的控制平面范围与 DD-001 工作草案；未假造审批和实现验收。
+- 2026-10-19 — 更新产品范围：通用 OpAMP Agent Control Plane，预留 Java/Go/Python APM Agent 和未来 Collector；本 EP 实施仍仅限 Java 适配与通用控制面，现有 blocked 状态和未完成验收保持不变。
 
