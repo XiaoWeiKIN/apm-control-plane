@@ -11,6 +11,10 @@ This is the index for the apm-control-plane codebase. Product capability and imp
 - [Functional requirements](requirements/APM_CONTROL_PLANE.md) — FR-001 to FR-013 and testable acceptance.
 - [Engineering workflow](PROJECT_WORKFLOW.md) — RepoFoundryAI v0.15.1 / EngineeringSpecifications v1.9.0.
 
+## Source-backed engineering research
+
+- [R-001 — Gitea / Grafana / Casdoor / Collector 架构对比](research/active/r-001_opamp-oss-architecture/RESEARCH.md) — 固定提交的源码证据、反证与技术选型 Synthesis，未归档结论。
+
 ## Governed engineering artifacts
 
 - [DD-001 OpAMP Control Plane (draft)](design-docs/dd-001_opamp-control-plane.md) — proposed persistent architecture; not approved.
