@@ -7,6 +7,8 @@ Last verified: 2026-10-19 (repository structure and existing CI, not production 
 
 The service receives Open Agent Management Protocol (OpAMP) management messages from agents, maintains status and distributes per-instance sampling configuration. Its **confirmed long-term scope** is a shared management control plane for Java, Go and Python APM Agent distributions, with a future Collector integration. The **first supported runtime** remains our custom OpenTelemetry Java Agent; no Go/Python or Collector adapter exists yet. OTLP traces do not transit this control plane.
 
+For a complete Chinese developer-oriented technical walkthrough, read [APM Control Plane：开发者架构指南](docs/architecture/README.md). It is an explanation based on repository facts and the proposed DD-001, not a newly approved normative design.
+
 The current P0 implementation is an in-memory interoperability PoC. Proposed PostgreSQL Registry, policy revision management and Reconciler are **not implemented**; see [DD-001](docs/design-docs/dd-001_opamp-control-plane.md) and [EP-001](docs/exec-plans/active/ep-001_build-control-plane/EXECPLAN.md).
 
 ## Code map
