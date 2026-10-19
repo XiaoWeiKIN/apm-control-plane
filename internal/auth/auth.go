@@ -23,9 +23,13 @@ func New(credentials []appconfig.Credential) *Authenticator {
 
 // Authenticate never trusts a tenant or identity provided in AgentDescription.
 func (a *Authenticator) Authenticate(header string) (Principal, bool) {
-	if !strings.HasPrefix(header, "Bearer ") { return Principal{}, false }
+	if !strings.HasPrefix(header, "Bearer ") {
+		return Principal{}, false
+	}
 	token := strings.TrimPrefix(header, "Bearer ")
-	if token == "" || strings.ContainsAny(token, " \t\r\n") { return Principal{}, false }
+	if token == "" || strings.ContainsAny(token, " \t\r\n") {
+		return Principal{}, false
+	}
 	actual := sha256.Sum256([]byte(token))
 	for _, cred := range a.creds {
 		expected := sha256.Sum256([]byte(cred.Token))

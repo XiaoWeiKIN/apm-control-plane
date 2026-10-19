@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("agent not found")
+	ErrNotFound  = errors.New("agent not found")
 	ErrOwnership = errors.New("agent instance owned by a different credential")
 )
 
@@ -44,7 +44,7 @@ type AgentRecord struct {
 func (AgentRecord) TableName() string { return "agent_instances" }
 
 type Description struct {
-	Kind, Distribution, DistributionVersion string
+	Kind, Distribution, DistributionVersion         string
 	Service, Namespace, Environment, ServiceVersion string
 }
 
@@ -75,16 +75,23 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 		return nil, fmt.Errorf("unsupported database driver %q", cfg.Driver)
 	}
 	db, err := gorm.Open(dialector, &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
+		Logger:                 logger.Default.LogMode(logger.Silent),
 		SkipDefaultTransaction: true,
 	})
-	if err != nil { return nil, fmt.Errorf("open database: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
 	sqlDB, err := db.DB()
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	sqlDB.SetMaxOpenConns(cfg.MaxOpen)
 	sqlDB.SetMaxIdleConns(cfg.MaxIdle)
 	sqlDB.SetConnMaxLifetime(cfg.MaxLifetime)
-	if err := sqlDB.PingContext(ctx); err != nil { _ = sqlDB.Close(); return nil, fmt.Errorf("ping database: %w", err) }
+	if err := sqlDB.PingContext(ctx); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
 	if !db.Migrator().HasTable(&AgentRecord{}) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("agent_instances schema missing: run Goose migrations for %s", cfg.Driver)
@@ -94,7 +101,9 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 
 func (s *Store) Close() error {
 	db, err := s.db.DB()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return db.Close()
 }
 
@@ -102,8 +111,12 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 	if p.TenantID == "" || p.CredentialID == "" || len(uid) != 32 || obs.SeenAt.IsZero() {
 		return AgentRecord{}, fmt.Errorf("invalid agent identity or observation")
 	}
-	if obs.Capabilities > math.MaxInt64 { return AgentRecord{}, fmt.Errorf("unsupported capabilities bitmask") }
-	if obs.Transport != "http" && obs.Transport != "websocket" { return AgentRecord{}, fmt.Errorf("unsupported transport") }
+	if obs.Capabilities > math.MaxInt64 {
+		return AgentRecord{}, fmt.Errorf("unsupported capabilities bitmask")
+	}
+	if obs.Transport != "http" && obs.Transport != "websocket" {
+		return AgentRecord{}, fmt.Errorf("unsupported transport")
+	}
 	seenAt := obs.SeenAt.UTC()
 	seed := AgentRecord{
 		TenantID: p.TenantID, InstanceUID: uid, CredentialID: p.CredentialID,
@@ -118,7 +131,10 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 		seed.Environment = obs.Description.Environment
 		seed.ServiceVersion = obs.Description.ServiceVersion
 	}
-	if obs.Healthy != nil { value := *obs.Healthy; seed.Healthy = &value }
+	if obs.Healthy != nil {
+		value := *obs.Healthy
+		seed.Healthy = &value
+	}
 	seed.Capabilities = int64(obs.Capabilities)
 	if obs.Config != nil {
 		seed.ReportedHash, seed.ConfigStatus, seed.ConfigError = obs.Config.Hash, obs.Config.Status, obs.Config.Error
@@ -127,13 +143,19 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Atomic insert-if-absent preserves the original credential binding,
 		// including under concurrent first registration from different tokens.
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&seed).Error; err != nil { return err }
-		if err := tx.Where("tenant_id = ? AND instance_uid = ?", p.TenantID, uid).Take(&result).Error; err != nil { return err }
-		if result.CredentialID != p.CredentialID { return ErrOwnership }
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&seed).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("tenant_id = ? AND instance_uid = ?", p.TenantID, uid).Take(&result).Error; err != nil {
+			return err
+		}
+		if result.CredentialID != p.CredentialID {
+			return ErrOwnership
+		}
 		fields := map[string]any{
-			"last_seen": seenAt,
+			"last_seen":      seenAt,
 			"last_transport": obs.Transport,
-			"capabilities": int64(obs.Capabilities),
+			"capabilities":   int64(obs.Capabilities),
 		}
 		if obs.Description != nil {
 			fields["agent_kind"] = obs.Description.Kind
@@ -144,7 +166,9 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 			fields["environment"] = obs.Description.Environment
 			fields["service_version"] = obs.Description.ServiceVersion
 		}
-		if obs.Healthy != nil { fields["healthy"] = *obs.Healthy }
+		if obs.Healthy != nil {
+			fields["healthy"] = *obs.Healthy
+		}
 		if obs.Config != nil {
 			fields["reported_hash"] = obs.Config.Hash
 			fields["config_status"] = obs.Config.Status
@@ -152,7 +176,9 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 		}
 		if err := tx.Model(&AgentRecord{}).
 			Where("tenant_id = ? AND instance_uid = ? AND credential_id = ?", p.TenantID, uid, p.CredentialID).
-			Updates(fields).Error; err != nil { return err }
+			Updates(fields).Error; err != nil {
+			return err
+		}
 		return tx.Where("tenant_id = ? AND instance_uid = ?", p.TenantID, uid).Take(&result).Error
 	})
 	return result, err
@@ -161,7 +187,9 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 func (s *Store) Get(ctx context.Context, tenant, uid string) (AgentRecord, error) {
 	var a AgentRecord
 	err := s.db.WithContext(ctx).Where("tenant_id = ? AND instance_uid = ?", tenant, uid).Take(&a).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) { return a, ErrNotFound }
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return a, ErrNotFound
+	}
 	return a, err
 }
 
@@ -169,6 +197,8 @@ func (s *Store) List(ctx context.Context, tenant string) ([]AgentRecord, error) 
 	var records []AgentRecord
 	err := s.db.WithContext(ctx).Where("tenant_id = ?", tenant).
 		Order("instance_uid ASC").Limit(5000).Find(&records).Error
-	if records == nil { records = []AgentRecord{} }
+	if records == nil {
+		records = []AgentRecord{}
+	}
 	return records, err
 }
