@@ -51,7 +51,7 @@ flowchart TB
       Reconciler --> Gateway["OpAMP Gateway"]
     end
 
-    Registry <--> DB[("PostgreSQL · 目标设计")]
+    Registry <--> DB[("Relational DB · PostgreSQL/MySQL 目标设计")]
     Policy <--> DB
     Release <--> DB
     Reconciler <--> DB
@@ -65,7 +65,7 @@ flowchart TB
     Collector --> Backend["APM Backend / ClickHouse"]
 ~~~
 
-上图描述**目标拓扑**，不是当前已部署系统。当前 P0 只有 `cmd/server` 的内存 Registry、OpAMP Gateway 和管理接口；PostgreSQL、Release、Reconciler 仍未实现。所谓“未来 Collector”是**被管理对象**，不能与图中的 OTLP Receiver 自动视为同一个实例。
+上图描述**目标拓扑**，不是当前已部署系统。当前 P0 只有 `cmd/server` 的内存 Registry、OpAMP Gateway 和管理接口；PostgreSQL/MySQL Storage Adapter、Release、Reconciler 仍未实现。所谓“未来 Collector”是**被管理对象**，不能与图中的 OTLP Receiver 自动视为同一个实例。
 
 ## 2. 从一次采样策略发布理解系统
 
@@ -83,7 +83,7 @@ flowchart TB
 sequenceDiagram
     participant U as 管理调用者
     participant API as Management API
-    participant DB as PostgreSQL
+    participant DB as Relational Storage
     participant RC as Reconciler
     participant GW as OpAMP Gateway
     participant JA as Java Agent
@@ -150,7 +150,7 @@ OpenTelemetry [Instrumentation Agent Guidelines](https://github.com/open-telemet
 | Config Release / Rollout | 目标集合、Revision、批次策略 | 可审计发布、分批进度、暂停与回滚意图 | 不把 `SENT` 当成 `APPLIED` |
 | Reconciler | Desired/Observed、会话可用性 | 重试、失步修复、下一次发送决策 | 不修改规范性业务策略 |
 | OpAMP Gateway | HTTP/WS、AgentToServer/ServerToAgent | 协议编解码、认证入口、回调、单连接发送 | 不保存唯一的业务事实源 |
-| Storage | 事务、版本、事件 | PostgreSQL 持久化、索引、提交/回滚 | 不保存活着的网络连接 |
+| Storage | 事务、版本、事件 | PostgreSQL/MySQL Adapter 持久化，统一 Repository/UnitOfWork 业务语义 | 不保存活着的网络连接 |
 | Agent Config Adapter | Agent Kind + 版本与能力 + 规则 | 输出某类 Agent 能理解的配置并声明应用限制 | 不假设所有 Agent 能热更新 |
 
 ### 4.1 建议的依赖方向
@@ -161,11 +161,11 @@ flowchart LR
     OpAMP["opamp adapter"] --> Domain
     Reconcile["reconcile"] --> Domain
     Domain --> Ports["domain interfaces"]
-    Storage["storage/postgres"] -.->|"实现"| Ports
+    Storage["storage/postgres + storage/mysql"] -.->|"实现"| Ports
     AgentAdapters["config adapters"] -.->|"实现"| Ports
 ~~~
 
-协议模型与业务模型必须隔离：上游 `protobufs.AgentToServer` 可以进入 OpAMP Adapter，但不应直接成为 Policy Manager 或 PostgreSQL Repository 的核心类型。这一点与 Collector 社区通过 Component/Factory 接口隔离具体实现的设计风格类似，**借鉴的是模块边界，不是照搬 Collector 的 Receiver–Processor–Exporter Pipeline**。
+协议模型与业务模型必须隔离：上游 `protobufs.AgentToServer` 可以进入 OpAMP Adapter，但不应直接成为 Policy Manager 或数据库无关 Repository Port 的核心类型。这一点与 Collector 社区通过 Component/Factory 接口隔离具体实现的设计风格类似，**借鉴的是模块边界，不是照搬 Collector 的 Receiver–Processor–Exporter Pipeline**。
 
 ### 4.2 核心接口示意
 
@@ -209,7 +209,7 @@ Collector 的 [Internal Architecture](https://github.com/open-telemetry/opentele
 
 ~~~mermaid
 flowchart TD
-    A["读取启动配置 / 验证 TLS 与认证参数"] --> B["连接 PostgreSQL / 校验 Schema Version"]
+    A["读取启动配置 / 验证 TLS 与认证参数"] --> B["按 Driver 连接 PostgreSQL/MySQL / 校验 Schema Version"]
     B --> C["构造 Repository、Registry、Config Adapter Registry"]
     C --> D["构造 Policy / Release / Reconciler"]
     D --> E["Attach OpAMP callbacks + Management Router"]
@@ -382,7 +382,7 @@ Rollout Controller 将发布目标分成可审计批次。每批使用匹配 Has
 
 ## 8. 数据与一致性模型（目标设计）
 
-PostgreSQL 保存长期的管理状态，Go 进程内存保存活动网络连接。以下表是**逻辑模型**，不是已落库的 Migration，字段和索引须在 P1/P2 做实际评审。
+部署时选择 PostgreSQL 或 MySQL 作为单一主数据库，保存长期的管理状态；Go 进程内存保存活动网络连接。两种存储实现须满足相同的领域契约，但 Schema/Migration/SQL 方言独立，不能只更改 Driver 就自动迁移历史数据。以下表是**逻辑模型**，不是已落库的 Migration，字段和索引须在 P1/P2 做实际评审。
 
 | 逻辑实体 | 关键字段/关系 | 写入时机 |
 | --- | --- | --- |
@@ -479,7 +479,7 @@ Agent 凭证最终采用 Scoped Token 还是 mTLS、以及重复 UID 的转移�
 | Agent 不可达 | 保留 Desired，状态显示 Pending/Offline；重连重新协调 | 断网/重连集成测试 |
 | HTTP 请求结束 | 不直接认定进程死亡 | LastSeen 与轮询活跃度测试 |
 | WebSocket 发送失败 | 不撤销已提交 Desired，串行重试或等待重连 | 并发发送与断线测试 |
-| PostgreSQL 不可用 | 拒绝无法持久化的配置发布；不谎称发布成功 | 事务故障注入 |
+| 当前选用的 PostgreSQL/MySQL 不可用 | 拒绝无法持久化的配置发布；不谎称发布成功 | 双数据库事务故障注入 |
 | ConfigHash 不匹配 | 保留旧 ACK 历史，不认定新发布成功 | 旧回执乱序测试 |
 | Agent 报告 FAILED | 记录错误并暂停相关批次或按明确策略重试 | 错误配置模拟 |
 | Agent 能力变化 | 重新编译或标记 Unsupported，不能继续发送不兼容配置 | Capability 变化测试 |
@@ -541,10 +541,13 @@ internal/
   config/                   ConfigRevision、Resolver、AgentConfigAdapter
   release/                  ConfigRelease、批次、审计
   reconcile/                Desired/Observed 对账、重试
-  storage/postgres/         Repository 实现、事务
+  storage/                  Driver-neutral Repository/UnitOfWork Port
+    postgres/                PostgreSQL SQL Adapter
+    mysql/                   MySQL SQL Adapter
   api/                      管理接口与授权边界
-migrations/                 PostgreSQL Schema 迁移
-tests/integration/          OpAMP + PostgreSQL 场景
+db/migrations/postgres/     PostgreSQL Goose Migration
+db/migrations/mysql/        MySQL Goose Migration
+tests/integration/          OpAMP + PostgreSQL/MySQL 合同测试
 ```
 
 目标 Package 分解仅用于说明**允许的依赖方向**。目前的 `cmd/server/main.go` 仍是 P0 的集中实现，不能把上述目录当作已存在的代码。
@@ -604,7 +607,7 @@ repofoundry --repo . spec validate
 | Config Adapter | Schema 兼容、canonical hash、Unsupported、拒绝未知字段 |
 | Reconciler | 旧 ACK、重复 ACK、Agent 断线、DB 重启、连续版本发布 |
 | Rollout | 目标冻结、失败阈值、回滚新事件、并发发布冲突 |
-| Storage | Migration、事务回滚、幂等、重启恢复、并发写入 |
+| Storage | PostgreSQL/MySQL 分方言 Migration、事务/CAS、幂等、重启恢复、并发写入及 MySQL DDL 隐式提交恢复 |
 | Java Runtime（后续） | 真正 JVM 不重启时 Sampler 更新、ParentBased 传播与采样观测 |
 
 ## 14. 当前未解决的问题
@@ -618,6 +621,8 @@ repofoundry --repo . spec validate
 - **一致性等级**：单 Gateway 到多副本后，如何管理活动 Session、数据库 CAS、消息转发与有界重试。
 - **容量目标**：预期实例数、连接比例、发布规模、延迟、可用性和资源预算尚未有经过授权的数值。
 - **采样语义**：跨进程 ParentBased 传播、头采样与尾采样的组合，以及数据面验证方法。
+
+数据库层新增架构要求（2026-10-19）：支持多种关系型 Driver，至少 PostgreSQL 与 MySQL；公共 Domain 只看 Repository/UnitOfWork Port，具体 SQL 和 Migration 分方言实现。详见 [P1–P3 技术选型](technology-selection.md)，该方案尚未通过双数据库真实 PoC。
 
 这些问题应通过 RepoFoundry 的 Research、Design 和必要的 proposed ADR 逐步解决。**在 Design Owner 批准之前，本文只描述目标方案和可检验的工程约束；不能把这些问题当成已解决。**
 
