@@ -112,7 +112,7 @@ flowchart TB
 - internal/policy：通用 Policy/Revision/Selector 与目标类型约束，首期只有 Java Head Sampling Policy；冲突采用显式优先级，优先级相同且内容不同直接拒绝发布，不能依赖遍历顺序。
 - internal/config：通用配置 Revision、Assignment、Config Release、ConfigHash、ConfigStatus；`AgentConfigAdapter` 按 AgentKind/Distribution/Schema/Capabilities 编译成不可变 AgentConfigMap。首期只有 `java-otel` 适配器；后续 Go/Python/Collector 适配器由各自配置契约提供，不复用 Java JSON 作为所有发行版的公共标准。
 - internal/reconcile：按 Agent desired hash 与 reported applied hash 协调，监听重连、发布、ACK 和失败重试。
-- internal/storage：驱动无关的 Repository/UnitOfWork 契约，使用 GORM v2 统一 CRUD 和事务，通过 gorm.io/driver/postgres 与 gorm.io/driver/mysql 选择驱动，连接池使用 database/sql。数据库物理 Schema、SQL、Migration、故障分类和事务差异由各自 Adapter 拥有；避免把网络连接对象持久化。
+- internal/storage：驱动无关的 Repository/UnitOfWork 契约，使用 GORM v2 统一 CRUD 和事务，通过 gorm.io/driver/postgres 与 gorm.io/driver/mysql 选择驱动，连接池使用 database/sql。数据库物理 Schema 和 Migration 可以按方言区分；普通 CRUD 由一套 GORM Repository 实现，必要的方言差异和错误分类在存储层局部处理；避免把网络连接对象持久化。
 - internal/api：查询 Agent、创建策略版本、发布与回滚请求；鉴权与租户授权在入口完成。
 
 **候选持久实体（逻辑模型，非 PostgreSQL 专有 Schema）**：agent_instances（UID、AgentKind、Distribution、版本、已认证范围）、agent_observations（最后时间、Capabilities、Health、Observed Config）、apm_services（租户/环境/Namespace/Name）、policy_versions（不可变规则）、policy_bindings（Scope/Selector）、config_revisions（类型化配置正文）、config_releases（一次发布的目标/批次/审计）、agent_assignments（AgentUID、Desired revision/hash、Observed hash/status）、config_events（append-only 审计）。活动的 agent_sessions 不持久化 Connection 对象。逻辑实体可在 MVP 合并实现，但不能合并生命周期语义。这是一份待验证的数据模型，不是现有数据库表。
@@ -145,7 +145,7 @@ flowchart TB
 
 | 方案 | 优点 | 代价及当前处理 |
 | --- | --- | --- |
-| opamp-go + 模块化单体 + database/sql + GORM PostgreSQL/MySQL Dialector | 统一 Domain/Release 语义，多种环境可配置关系型数据库 | 双方言 Migration/SQL 与一致性测试成本；HA 仍需设计 |
+| opamp-go + 模块化单体 + database/sql + GORM PostgreSQL/MySQL Dialector | 统一 Domain/Release 语义，多种环境可配置关系型数据库 | 双方言 Migration 与一致性测试成本；HA 仍需设计 |
 | 直接 Fork 历史 Bindplane Server | 现成管理模型 | 上游历史过久，迁移及安全审计成本难估；不选 |
 | PostgreSQL-only pgxpool + Tern | PostgreSQL 原生功能更丰富，PG 方案可快速实现 | 不满足 MySQL 等多 Driver 的产品约束，不作为基础架构 |
 | Redis/Kafka + 多个 Gateway 服务 | 跨实例消息路由和吞吐扩展 | 当前没有规模证据，不引入 |
