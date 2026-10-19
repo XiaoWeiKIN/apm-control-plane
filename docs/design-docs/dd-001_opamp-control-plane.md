@@ -112,7 +112,7 @@ flowchart TB
 - internal/policy：通用 Policy/Revision/Selector 与目标类型约束，首期只有 Java Head Sampling Policy；冲突采用显式优先级，优先级相同且内容不同直接拒绝发布，不能依赖遍历顺序。
 - internal/config：通用配置 Revision、Assignment、Config Release、ConfigHash、ConfigStatus；`AgentConfigAdapter` 按 AgentKind/Distribution/Schema/Capabilities 编译成不可变 AgentConfigMap。首期只有 `java-otel` 适配器；后续 Go/Python/Collector 适配器由各自配置契约提供，不复用 Java JSON 作为所有发行版的公共标准。
 - internal/reconcile：按 Agent desired hash 与 reported applied hash 协调，监听重连、发布、ACK 和失败重试。
-- internal/storage：驱动无关的 Repository/UnitOfWork 契约，采用 database/sql 的 DB/Tx/连接池抽象；通过 driver allowlist 在 PostgreSQL（pgx/v5/stdlib）与 MySQL（go-sql-driver/mysql）Adapter 之间装配。数据库物理 Schema、SQL、Migration、故障分类和事务差异由各自 Adapter 拥有；避免把网络连接对象持久化。
+- internal/storage：驱动无关的 Repository/UnitOfWork 契约，使用 GORM v2 统一 CRUD 和事务，通过 gorm.io/driver/postgres 与 gorm.io/driver/mysql 选择驱动，连接池使用 database/sql。数据库物理 Schema、SQL、Migration、故障分类和事务差异由各自 Adapter 拥有；避免把网络连接对象持久化。
 - internal/api：查询 Agent、创建策略版本、发布与回滚请求；鉴权与租户授权在入口完成。
 
 **候选持久实体（逻辑模型，非 PostgreSQL 专有 Schema）**：agent_instances（UID、AgentKind、Distribution、版本、已认证范围）、agent_observations（最后时间、Capabilities、Health、Observed Config）、apm_services（租户/环境/Namespace/Name）、policy_versions（不可变规则）、policy_bindings（Scope/Selector）、config_revisions（类型化配置正文）、config_releases（一次发布的目标/批次/审计）、agent_assignments（AgentUID、Desired revision/hash、Observed hash/status）、config_events（append-only 审计）。活动的 agent_sessions 不持久化 Connection 对象。逻辑实体可在 MVP 合并实现，但不能合并生命周期语义。这是一份待验证的数据模型，不是现有数据库表。
@@ -145,13 +145,13 @@ flowchart TB
 
 | 方案 | 优点 | 代价及当前处理 |
 | --- | --- | --- |
-| opamp-go + 模块化单体 + database/sql + PostgreSQL/MySQL Adapter | 统一 Domain/Release 语义，多种环境可配置关系型数据库 | 双方言 Migration/SQL 与一致性测试成本；HA 仍需设计 |
+| opamp-go + 模块化单体 + database/sql + GORM PostgreSQL/MySQL Dialector | 统一 Domain/Release 语义，多种环境可配置关系型数据库 | 双方言 Migration/SQL 与一致性测试成本；HA 仍需设计 |
 | 直接 Fork 历史 Bindplane Server | 现成管理模型 | 上游历史过久，迁移及安全审计成本难估；不选 |
 | PostgreSQL-only pgxpool + Tern | PostgreSQL 原生功能更丰富，PG 方案可快速实现 | 不满足 MySQL 等多 Driver 的产品约束，不作为基础架构 |
 | Redis/Kafka + 多个 Gateway 服务 | 跨实例消息路由和吞吐扩展 | 当前没有规模证据，不引入 |
 | HTTP-only 管理 | 不需要驻留 WS 会话 | 配置只在轮询时生效；兼容保留但不能当推送 |
 
-**数据库候选技术**：Go 标准库 database/sql + pgx/v5/stdlib + go-sql-driver/mysql + sqlc 双方言 + Goose 多数据库迁移，参见 [P1–P3 技术选型](../architecture/technology-selection.md)。这些仍是待验证的组件提议，不代表已批准的 ADR 或已在 go.mod 中引入。
+**数据库候选技术**：GORM v2 + PostgreSQL/MySQL Dialectors + Goose Migration + Koanf v2，参见 [P1–P3 技术选型](../architecture/technology-selection.md)。这些仍是待验证的组件提议，不代表已批准的 ADR 或已在 go.mod 中引入。
 
 **未决问题**：PostgreSQL/MySQL 兼容范围与测试版本、MySQL DDL Migration 恢复、两库事务隔离级别/CAS 并发行为以及未来是否增加第三种 Driver；服务的命名与租户分组边界、AgentKind/Distribution 识别和能力来源、跨发行版版本兼容性、Collector 的配置职责与 Kubernetes Operator 之间的边界；Agent 身份绑定采用 mTLS 证书还是租户 Scoped Token；重复 UID 应如何换绑；Service/Environment Selector 的授权边界；严格回滚与 ACK timeout 默认值；生产规模和目标 SLO；Go Server v0.25.0 与 Java Client v0.14.0 规范差异。无法由当前 P0 单测证明这些约束。
 
