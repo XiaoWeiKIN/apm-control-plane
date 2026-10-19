@@ -92,7 +92,7 @@ There are no accepted ADR constraints to map. docs/design-docs/index.md is the n
 
 ## Plan of Work
 
-先锁定 P0 测试行为与安全缺口，把当前 main.go 分拆为 HTTP 装配、OpAMP Gateway、通用 Agent Registry 与 Admin API，保持现有路由兼容。通用 Agent Identity 包含 AgentKind/Distribution/Version/Capabilities，避免把业务 Service 版本当 Agent 发行版版本。P1 使用 database/sql 的 Repository/UnitOfWork Port + PostgreSQL/MySQL Adapter 存储 Agent Identity 与 Observed Snapshot；双方言使用独立 SQL/Migration，同一业务行为合同测试；Session 保留在内存。
+先锁定 P0 测试行为与安全缺口，把当前 main.go 分拆为 HTTP 装配、OpAMP Gateway、通用 Agent Registry 与 Admin API，保持现有路由兼容。通用 Agent Identity 包含 AgentKind/Distribution/Version/Capabilities，避免把业务 Service 版本当 Agent 发行版版本。P1 使用 database/sql 的 Repository/UnitOfWork Port + GORM PostgreSQL/MySQL Dialector 存储 Agent Identity 与 Observed Snapshot；双方言使用独立 SQL/Migration，同一业务行为合同测试；Session 保留在内存。
 
 P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；通过可显式拒绝不兼容目标的 `AgentConfigAdapter` 把 Java Head Sampling 规则编译为 `apm/sampling.json`。按 service/environment/instance 解析分配并存入 Desired State，Reconciler 对接 opamp-go，区分 HTTP 拉取与 WebSocket 推送，使用 ACK Hash 更新 Observed。P3 追加带审计的受控 rollout、失败隔离、显式 rollback 发布和必要的容量测量。
 
@@ -100,7 +100,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 ### M1 — P1 Durable Agent Inventory / Identity
 
-修改 internal/opamp、internal/registry、internal/storage（Repository Port + PostgreSQL/MySQL Adapter）、db/migrations/postgres、db/migrations/mysql 和 cmd/server 的装配。新增 AgentKind/DistributionVersion/Capabilities 字段与服务身份映射（Collector 不强制关联 Java Service）。可观察结果：已认证 Agent 的状态持久化；数据库或服务端重启后保留身份与 Last Seen；重复 UID 和租户越权请求被拒绝或明确标记。保持现有 P0 API 兼容。
+修改 internal/opamp、internal/registry、internal/storage（Repository Port + GORM PostgreSQL/MySQL Dialector）、db/migrations/postgres、db/migrations/mysql 和 cmd/server 的装配。新增 AgentKind/DistributionVersion/Capabilities 字段与服务身份映射（Collector 不强制关联 Java Service）。可观察结果：已认证 Agent 的状态持久化；数据库或服务端重启后保留身份与 Last Seen；重复 UID 和租户越权请求被拒绝或明确标记。保持现有 P0 API 兼容。
 
 验证范围：使用 Java、Go、Python、Collector 的**身份元数据样本**验证 Registry 通用性；不要求后三类 Agent 运行时真实接入。
 
@@ -124,7 +124,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 1. RF 状态与范围：执行 repofoundry --repo . validate、repofoundry --repo . spec validate，读取 docs/requirements 和 DD-001；对 Go + security + data boundaries 精确激活适用规范。
 2. 验证起点：执行 go mod tidy、go test -race ./...、go vet ./...；查看 cmd/server/main.go 的现有接口，不静默修改其路由。
-3. M1：建立 Repository/UnitOfWork Port，使用 database/sql + PostgreSQL/MySQL Adapter，SQLC 双方言生成和 Goose 两套 Migration；双方言执行 schema 升级、事务回滚、CAS、Agent Identity/Observation、断线重启及越权测试。
+3. M1：建立 Repository/UnitOfWork Port，使用 database/sql + GORM PostgreSQL/MySQL Dialector，GORM 统一 Repository和 Goose 两套 Migration；双方言执行 schema 升级、事务回滚、CAS、Agent Identity/Observation、断线重启及越权测试。
 4. M2：实现 Policy Resolver、Immutable Revision、Reconciler 和 Config Status 归因。使用 cmd/testagent 做 HTTP 链路，再增加 WebSocket 测试客户端。
 5. M3：定义受控发布批次、审计和回滚。只在证据足够后确定默认超时、容量和 SLO。
 6. 每阶段更新本 EXECPLAN.md 的 Current Snapshot、Progress、验收结果、Revision Notes；执行 epctl validate、designctl validate 和 RF validate。
@@ -192,7 +192,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 - 目标控制面类型：AgentKind、Distribution、DistributionVersion、CapabilitySet、ConfigDialect、AgentConfigAdapter（拟定接口，尚未存在于代码）；Java Adapter 首先支持 `apm/sampling.json`，Go/Python/Collector Adapter 明确 defer。
 - Management endpoints：/api/v1/agents、/api/v1/agents/{uid}、/api/v1/agents/{uid}/sampling；保持 P0 功能兼容，扩展 service-level policy endpoints 时引入版本化契约测试。
 - OpAMP transport：/v1/opamp（HTTP + WS），AgentToServer、ServerToAgent.RemoteConfig、RemoteConfigStatus 和 AgentCapabilities。
-- PostgreSQL/MySQL（P1 才引入，当前均不存在）：Repository/UnitOfWork Port、两种 SQL Adapter、独立 Migration。候选实体 AgentInstances、PolicyVersions、Assignments、ConfigEvents；活动 Session 不入库。
+- PostgreSQL/MySQL（P1 才引入，当前均不存在）：Repository/UnitOfWork Port、一套 GORM Repository、独立 Migration。候选实体 AgentInstances、PolicyVersions、Assignments、ConfigEvents；活动 Session 不入库。
 - Java Agent（后续独立实施）：必须支持 schema_version=1 的 apm/sampling.json 和 matching config hash 应用回报；本 EP 不实现 JVM Sampler。
 
 ## Artifacts and Notes
