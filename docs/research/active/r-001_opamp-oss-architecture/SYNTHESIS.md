@@ -1,0 +1,60 @@
+---
+schema_version: "1.2"
+metadata_schema: "1"
+artifact_type: research-synthesis
+id: R-001-SYNTHESIS
+parent_id: R-001
+title: "Open-source architecture patterns for OpAMP Control Plane — Synthesis"
+status: draft
+revision: "0"
+created: 2026-10-19
+updated: 2026-10-19
+author: "AI assistant"
+owner: "Unassigned"
+payload_sha256:
+---
+
+# Open-source architecture patterns for OpAMP Control Plane — Synthesis
+
+This Synthesis is the bounded, living decision interface between a
+multi-document Research corpus and downstream decisions or plans.
+Each `review_ready` revision is content-addressed but does not conclude the
+parent Research. Selected milestones are preserved as complete, deduplicated
+files under `snapshots/`; once sealed, changing the body invalidates the
+recorded SHA-256.
+
+## Executive Conclusion
+
+<!-- REQUIRED: Answer the research purpose directly and state whether the evidence is decision-ready. Lead with the answer, confidence limits, and conditions that could change the recommendation. When a known Round or revision provides a comparison, explain material evidence and conclusion changes without inventing a baseline. -->
+
+## Supported Findings
+
+<!-- REQUIRED: List the findings that materially affect the decision, with confidence and manifest evidence paths. -->
+
+| Finding | Confidence | Evidence |
+|---|---|---|
+| `<supported conclusion>` | `<high, medium, or low>` | `<manifest document>` |
+
+## Rejected Hypotheses
+
+<!-- REQUIRED: Record disproven or unsupported hypotheses and the evidence that rejected them. Write "None" when applicable. -->
+
+## Remaining Unknowns
+
+<!-- REQUIRED: State every remaining unknown, why it does not block the recommendation, or where it must become a blocker or acceptance item. -->
+
+## Options Comparison
+
+<!-- REQUIRED: Compare viable options against the decision drivers. Preserve material disadvantages and uncertainty. -->
+
+## Recommendation and Preconditions
+
+<!-- REQUIRED: Recommend an option, state why it ranks highest, and list conditions required for the recommendation to remain valid. -->
+
+## Handoff to ADR and ExecPlan
+
+<!-- REQUIRED: State durable decisions, implementation constraints, remaining validations, and which evidence is audit-only. -->
+
+## Revision Notes
+
+- 2026-10-19T08:54:32Z — Draft Synthesis created with R-001.

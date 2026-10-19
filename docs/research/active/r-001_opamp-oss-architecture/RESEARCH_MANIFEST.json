@@ -1,0 +1,62 @@
+{
+  "artifact_type": "research-manifest",
+  "author": "AI assistant",
+  "created": "2026-10-19",
+  "documents": [
+    {
+      "base": "package",
+      "bytes": 906,
+      "path": "notes/README.md",
+      "role": "entrypoint",
+      "sha256": "5ed7595de519e75ef0bc7910ed64cda0a815e49da1a57684b09c95ddce7a2eb0"
+    },
+    {
+      "base": "package",
+      "bytes": 1136,
+      "path": "rounds/rr-001_baseline.md",
+      "role": "round",
+      "sha256": "60c2225b18b1315b8d842e21b6ba69660234507b29b01fc2e0d4c3633b539116"
+    }
+  ],
+  "entrypoints": [
+    {
+      "base": "package",
+      "path": "notes/README.md"
+    }
+  ],
+  "id": "R-001-MANIFEST",
+  "metadata_schema": "1",
+  "mode": "managed",
+  "owner": "Unassigned",
+  "payload_sha256": "",
+  "research_id": "R-001",
+  "roots": [
+    {
+      "base": "package",
+      "include": [
+        "**/*.md"
+      ],
+      "path": "notes"
+    },
+    {
+      "base": "package",
+      "include": [
+        "**/*.md"
+      ],
+      "path": "rounds",
+      "role": "round"
+    },
+    {
+      "base": "package",
+      "include": [
+        "**/*.md"
+      ],
+      "path": "snapshots",
+      "role": "snapshot"
+    }
+  ],
+  "schema_version": "1.1",
+  "status": "active",
+  "title": "Open-source architecture patterns for OpAMP Control Plane — Research manifest",
+  "updated": "2026-10-19"
+}
