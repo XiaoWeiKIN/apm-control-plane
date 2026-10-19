@@ -64,6 +64,18 @@ go vet ./...
 
 See [architecture, threat model, and P0 limitations](docs/architecture.md).
 
+## Engineering governance (RepoFoundryAI)
+
+This repository is bootstrapped with [RepoFoundryAI v0.15.1](https://github.com/XiaoWeiKIN/RepoFoundryAI/releases/tag/v0.15.1) and the locked [EngineeringSpecifications v1.9.0](https://github.com/XiaoWeiKIN/EngineeringSpecifications/releases/tag/v1.9.0). The versioned project Harness includes Codex, Claude Code and portable adapters. The active governance profile is **adaptive**.
+
+- [Requirements and acceptance criteria](docs/requirements/APM_CONTROL_PLANE.md)
+- [Engineering workflow and installation](docs/PROJECT_WORKFLOW.md)
+- [Repository guide](AGENTS.md)
+- [Engineering specification routing index](docs/agent-guides/managed/index.md)
+- [Decision index](docs/DECISIONS.md), [design index](docs/DESIGN-DOCS.md), [execution plans](docs/PLANS.md)
+
+A developer installs the CLI and professional Skills into **their own** environment using the official installer (see the engineering workflow). Project manifests, adapters and locked specifications are committed here. PRs automatically validate Harness, Spec and engineering lifecycle state, in addition to Go tests.
+
 ## Upstream
 
 - [OpAMP specification](https://github.com/open-telemetry/opamp-spec)
