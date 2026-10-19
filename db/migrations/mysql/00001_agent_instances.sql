@@ -1,3 +1,4 @@
+-- +goose NO TRANSACTION
 -- +goose Up
 CREATE TABLE agent_instances (
     tenant_id VARCHAR(96) NOT NULL,
