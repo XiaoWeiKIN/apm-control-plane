@@ -15,6 +15,7 @@ This file is the repository entry point and index for persistent ExecPlans. Each
 <!-- EPCTL:ACTIVE:START -->
 | ID | Title | Status | Updated | Path |
 |---|---|---|---|---|
+| EP-001 | Deliver durable OpAMP Control Plane | blocked | 2026-10-19 | [EXECPLAN](exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) |
 <!-- EPCTL:ACTIVE:END -->
 
 ## Completed
