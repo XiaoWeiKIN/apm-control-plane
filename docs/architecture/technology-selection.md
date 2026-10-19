@@ -8,6 +8,10 @@
 >
 > **不变的业务范围**：长期管理 Java、Go、Python 等 APM Agent，未来可能管理 Collector；首个可执行的 Agent Runtime 契约仍为 Java Agent。
 
+## 研究证据与适用边界
+
+本次选型有正式 RF 研究输入：[R-001 开源架构比较](../research/active/r-001_opamp-oss-architecture/RESEARCH.md)、[源码对照报告](../research/active/r-001_opamp-oss-architecture/notes/opensource-comparison.md) 和 [Synthesis](../research/active/r-001_opamp-oss-architecture/SYNTHESIS.md)。Gitea、Grafana、Casdoor 的核对源码主要采用 XORM，**不是 GORM**。选择 GORM 是基于本项目 CRUD 简单、多数据库目标和维护成本的独立技术判断，仍须 P1 双数据库 PoC 验证。
+
 ## 1. 总体结论
 
 选用**模块化 Go 单体 + GORM v2 + Goose + Koanf v2**。数据库访问以统一 GORM Repository 为主，只有确实存在方言差异时才写专用 SQL；不再采用双 sqlc 查询代码生成方案。**一个部署实例只连接其配置指定的一种主数据库**，不是同时跨 MySQL、PostgreSQL 执行一个分布式事务。数据库类型在进程启动时确定；不支持运行时随意切换。
