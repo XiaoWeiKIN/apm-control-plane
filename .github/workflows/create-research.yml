@@ -1,4 +1,5 @@
 name: One-time RF Open Source Research
+# Second invocation: sync authored corpus, validate and mark review-ready (not concluded).
 on:
   push:
     branches: [docs/p1-technology-selection]
