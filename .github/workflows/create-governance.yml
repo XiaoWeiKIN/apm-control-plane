@@ -4,6 +4,7 @@ on:
     branches: [feat/opamp-control-plane-p0]
     paths:
       - .github/workflows/create-governance.yml
+      - scripts/_governance_bootstrap.py
   workflow_dispatch:
 
 permissions:
