@@ -81,7 +81,7 @@ P1 首先拆模块并持久化；P2 在此基础上引入策略版本和协调�
 
 | ADR constraint or architecture input | Implementation or preservation | Verification |
 | --- | --- | --- |
-| docs/design-docs/dd-001_opamp-control-plane.md | Preserve Control/Data separation, credential-bound Agent identity, immutable policy versions, Desired vs Observed state, capability checks, AgentKind/Distribution-aware configuration adapters, and HTTP/WS delivery semantics; Java remains the only first-delivery config dialect, all proposals provisional until Design approval | Protocol integration tests, PostgreSQL/MySQL shared Repository contract suite, restart and role-boundary negative tests, stale ACK/concurrency tests |
+| docs/design-docs/dd-001_opamp-control-plane.md | Preserve Control/Data separation, credential-bound Agent identity, immutable policy versions, Desired vs Observed state, driver-neutral Repository/UnitOfWork with PostgreSQL/MySQL storage adapters, capability checks, AgentKind/Distribution-aware configuration adapters, and HTTP/WS delivery semantics; Java remains the only first-delivery config dialect, all proposals provisional until Design approval | Protocol integration tests, PostgreSQL/MySQL shared Repository contract suite, restart and role-boundary negative tests, stale ACK/concurrency tests |
 
 There are no accepted ADR constraints to map. docs/design-docs/index.md is the navigation entrypoint, not an extra normative constraint row.
 
@@ -110,7 +110,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 修改 internal/policy、internal/config、internal/reconcile、storage migrations、Management API，增加不可变通用 ConfigRevision、ConfigRelease/Assignment 与 deterministic hash，并只实现 Java Sampling AgentConfigAdapter。可观察结果：在 Admin API 发布 rate 0.1 后，在线 HTTP Test Agent 下一次轮询收到 Config；匹配 Hash 的 APPLIED 将状态变为 APPLIED；服务端重启后待下发任务被恢复；不支持 RemoteConfig 或不兼容 Java ConfigDialect 的 Agent 不会收到 Java JSON，也不被误标成功。
 
-验收：Go 集成测试覆盖 stale ACK、重复 ACK、配置冲突、离线/重连、错误配置、WS writer 序列化及 HTTP polling，使用真实 OpAMP Client/Server 对话而非仅 mock。
+验收：Go 集成测试覆盖 stale ACK、重复 ACK、配置冲突、离线/重连、错误配置、WS writer 序列化及 HTTP polling，使用真实 OpAMP Client/Server 对话而非仅 mock，并在 PostgreSQL/MySQL 各运行同一业务场景。
 
 ### M3 — P3 Audited Rollout / Recovery
 
@@ -124,7 +124,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 1. RF 状态与范围：执行 repofoundry --repo . validate、repofoundry --repo . spec validate，读取 docs/requirements 和 DD-001；对 Go + security + data boundaries 精确激活适用规范。
 2. 验证起点：执行 go mod tidy、go test -race ./...、go vet ./...；查看 cmd/server/main.go 的现有接口，不静默修改其路由。
-3. M1：创建迁移、Repository/Transaction Interface、数据库集成测试与身份证明绑定；执行 postgres 启动、schema migration、断线/重启 API 测试。
+3. M1：建立 Repository/UnitOfWork Port，使用 database/sql + PostgreSQL/MySQL Adapter，SQLC 双方言生成和 Goose 两套 Migration；双方言执行 schema 升级、事务回滚、CAS、Agent Identity/Observation、断线重启及越权测试。
 4. M2：实现 Policy Resolver、Immutable Revision、Reconciler 和 Config Status 归因。使用 cmd/testagent 做 HTTP 链路，再增加 WebSocket 测试客户端。
 5. M3：定义受控发布批次、审计和回滚。只在证据足够后确定默认超时、容量和 SLO。
 6. 每阶段更新本 EXECPLAN.md 的 Current Snapshot、Progress、验收结果、Revision Notes；执行 epctl validate、designctl validate 和 RF validate。
@@ -145,7 +145,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 ## Idempotence and Recovery
 
-数据库 migration 必须可回滚或提供演练过的前向修复方案；Schema 操作独立于 OpAMP 网络写。重复策略发布按 canonical body hash 幂等，拒绝相同优先级冲突的 Selector。网络中断/配置拒绝不覆盖上次已生效观测值。旧 ACK 只更新历史记录，不更新当前版本完成状态。
+数据库 Migration 应为 PostgreSQL/MySQL 分别提供演练过的前向修复/受控回退措施；MySQL DDL 隐式提交不能被误认为有 PostgreSQL 等价的事务回滚语义。Schema 操作独立于 OpAMP 网络写。重复策略发布按 canonical body hash 幂等，拒绝相同优先级冲突的 Selector。网络中断/配置拒绝不覆盖上次已生效观测值。旧 ACK 只更新历史记录，不更新当前版本完成状态。
 
 若 M1/P2 实现失败，先停止发布入口、保留 DB Desired 状态与 audit，然后将服务切回已验证兼容版本；不能在回滚时删除未应用历史。若需要反向发布旧 PolicyVersion，应通过新的 Audit Event 执行。不要以手工修改 RF 已批准制品修复校验错误。
 
@@ -168,6 +168,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 - (2026-10-19, provenance: user direction) 先实现 Control Plane，后实现自定义 Java Agent；不将 Agent 发行版工作纳入本 EP 的完成门槛。
 - (2026-10-19, proposal only) 优先模块化 Go 单体 + PostgreSQL + opamp-go，待 DD-001 审阅；不把提案当成 accepted ADR。
 - (2026-10-19, delivery rule) 采用 Desired/Observed 双状态和 matching hash ACK，其他能力按 M1–M3 递增交付；SLO 尚未定义。
+- (2026-10-19, user scope) 数据库驱动可配置，可能采用 MySQL；新增 PostgreSQL/MySQL 双实现与真实合同测试，技术组件仍待验证和评审。
 - (2026-10-19, explicit user scope confirmation) Control Plane 长期面向 Java、Go、Python 等 APM Agent，未来支持 Collector；M1–M3 仅验证 Java 发行版的策略配置和其他 Kind 的类型安全注册，其他 Runtime Adapter 不在 EP-001 交付范围。这是产品范围确认，不是新的 accepted ADR，也不代表 DD-001 正式批准。
 
 ## Blockers
@@ -205,4 +206,5 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 - 2026-10-19 — 由 RF epctl 创建初始 active EP，基于用户确认的控制平面范围与 DD-001 工作草案；未假造审批和实现验收。
 - 2026-10-19 — 更新产品范围：通用 OpAMP Agent Control Plane，预留 Java/Go/Python APM Agent 和未来 Collector；本 EP 实施仍仅限 Java 适配与通用控制面，现有 blocked 状态和未完成验收保持不变。
+- 2026-10-19 — 同步关系型数据库多 Driver 需求；P1 需要验证 PostgreSQL 与 MySQL，保持 blocked 状态和未完成验收记录。
 
