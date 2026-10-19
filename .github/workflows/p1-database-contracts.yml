@@ -75,4 +75,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go test -tags=integration -race -count=1 -v ./internal/storage/gormrepo
+          go test -tags=integration -race -count=1 -v ./cmd/server ./internal/storage/gormrepo
