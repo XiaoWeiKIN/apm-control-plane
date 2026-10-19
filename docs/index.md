@@ -6,6 +6,7 @@ This is the index for the apm-control-plane codebase. Product capability and imp
 
 - [README](../README.md) — start P0 and run the demonstration test agent.
 - [**P1–P3 技术选型（待评审）**](architecture/technology-selection.md) — 技术栈与 Go 1.25 兼容性矩阵。
+- [**P1.1 Durable Agent Inventory（开发和部署指南）**](architecture/p1-durable-inventory.md) — GORM / Goose、PostgreSQL/MySQL、身份绑定、运行和验收。
 - [**APM Control Plane：开发者架构指南（中文）**](architecture/README.md) — complete developer-oriented architecture, lifecycle, state, protocol contracts, extension model and implementation map.
 - [ARCHITECTURE](../ARCHITECTURE.md) — source-backed P0 boundaries and proposed P1–P3 dependencies.
 - [Functional requirements](requirements/APM_CONTROL_PLANE.md) — FR-001 to FR-013 and testable acceptance.
