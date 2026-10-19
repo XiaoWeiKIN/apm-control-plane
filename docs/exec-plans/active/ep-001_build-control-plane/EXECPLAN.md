@@ -92,7 +92,7 @@ There are no accepted ADR constraints to map. docs/design-docs/index.md is the n
 
 ## Plan of Work
 
-先锁定 P0 测试行为与安全缺口，把当前 main.go 分拆为 HTTP 装配、OpAMP Gateway、通用 Agent Registry 与 Admin API，保持现有路由兼容。通用 Agent Identity 包含 AgentKind/Distribution/Version/Capabilities，避免把业务 Service 版本当 Agent 发行版版本。P1 使用 database/sql 的 Repository/UnitOfWork Port + GORM PostgreSQL/MySQL Dialector 存储 Agent Identity 与 Observed Snapshot；双方言使用独立 SQL/Migration，同一业务行为合同测试；Session 保留在内存。
+先锁定 P0 测试行为与安全缺口，把当前 main.go 分拆为 HTTP 装配、OpAMP Gateway、通用 Agent Registry 与 Admin API，保持现有路由兼容。通用 Agent Identity 包含 AgentKind/Distribution/Version/Capabilities，避免把业务 Service 版本当 Agent 发行版版本。P1 使用 database/sql 的 Repository/UnitOfWork Port + GORM PostgreSQL/MySQL Dialector 存储 Agent Identity 与 Observed Snapshot；统一使用 GORM Repository，只有 Migration DDL 分方言；同一业务行为合同测试；Session 保留在内存。
 
 P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；通过可显式拒绝不兼容目标的 `AgentConfigAdapter` 把 Java Head Sampling 规则编译为 `apm/sampling.json`。按 service/environment/instance 解析分配并存入 Desired State，Reconciler 对接 opamp-go，区分 HTTP 拉取与 WebSocket 推送，使用 ACK Hash 更新 Observed。P3 追加带审计的受控 rollout、失败隔离、显式 rollback 发布和必要的容量测量。
 
