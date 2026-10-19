@@ -305,7 +305,7 @@ stateDiagram-v2
     TimedOut --> Pending: 恢复协调
     Unsupported --> Pending: Agent 能力变化并重新解析
     Applied --> Pending: 新 Desired Revision 发布
-```
+~~~
 
 此图描述**平台的每实例 Assignment 状态**，不是 OpAMP Protobuf 的状态枚举。`SENT` 或 `WaitingAck` 是投递信息，不是 Agent 真正执行成功的证据。
 
@@ -350,7 +350,7 @@ sequenceDiagram
     R->>DB: 更新 Identity / Observation
     DB-->>R: 写入完成
     G-->>A: ServerToAgent（必要时 ReportFullState）
-```
+~~~
 
 如果消息丢失、序号异常或服务端失去完整快照，应依据 OpAMP 的状态压缩规则请求 Agent 上报完整状态。重复 Instance UID 但来自不同授权身份或不同活动会话的情况，必须使用明确的 ownership/fencing 规则处理；不能靠“后来的连接覆盖先来的连接”当成安全证明。
 
