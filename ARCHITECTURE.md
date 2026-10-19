@@ -30,7 +30,7 @@ flowchart LR
     ADMIN --> CONFIG["Per-Agent Sampling JSON"]
     CONFIG --> OPAMP
     TEST["Test Agent · HTTP Polling"] <-->|"AgentToServer / ServerToAgent"| OPAMP
-    FUTURE["PostgreSQL/MySQL Adapters + Policy / Reconciler"] -.->|"DD-001 proposed"| OPAMP
+    FUTURE["GORM PostgreSQL/MySQL Dialectors + Policy / Reconciler"] -.->|"DD-001 proposed"| OPAMP
 ~~~
 
 The protocol server uses the upstream opamp-go Server.Attach() callback interface; a shared net/http server routes management APIs separately. No real database, queue or external OTLP pipeline is started in this repository.
