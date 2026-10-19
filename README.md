@@ -4,7 +4,9 @@ A Go-based **OpAMP Agent Control Plane**. Long-term scope: Java, Go, Python and 
 
 ## Developer architecture documentation
 
-- [**P1–P3 技术选型（中文、待评审）**](docs/architecture/technology-selection.md) — HTTP、配置加载、PostgreSQL/MySQL 多数据库 Driver、SQL 生成、Goose Migration、Telemetry、测试和兼容性选择。
+- [**RF Research R-001：开源项目架构对比**](docs/research/active/r-001_opamp-oss-architecture/RESEARCH.md) — Gitea / Grafana / Casdoor / Collector 的源码证据与迁移边界。
+
+- [**P1–P3 技术选型（中文、待评审）**](docs/architecture/technology-selection.md) — HTTP、配置加载、PostgreSQL/MySQL 多数据库 Driver、GORM、Goose Migration、Telemetry、测试和兼容性选择。
 
 - [**APM Control Plane：开发者架构指南（中文）**](docs/architecture/README.md) — end-to-end control flow, concepts, module contracts, OpAMP messaging, desired/observed state, persistence, security, extension points, and source navigation.
 - [DD-001 governed design (draft)](docs/design-docs/dd-001_opamp-control-plane.md) — design authority and unresolved decisions; the developer guide does not imply approval.
