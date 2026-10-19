@@ -156,19 +156,15 @@ P1 首先拆模块并持久化；P2 在此基础上引入策略版本和协调�
 不变量：Desired 和 Observed 分离；配置 Hash 与 Revision 分离；Agent 成功接收消息不等于 APPLIED；身份声明属性无授权力；相同配置下发幂等；控制故障不影响 OTLP。""",
 "Research and Architecture Inputs": """- Research gate: not_required。已经由明确用户路线、现有 P0 实现及 opamp-go 公开接口建立实施初始事实，不虚构 concluded Research。
 - Architecture decision gate: not_required for plan creation。Go + opamp-go + 自定义 Java Agent 和先交付 Control Plane 已由用户选择；本计划不接受未批准 ADR。若 mTLS/Token、重复 UID 或 HA 的长期方案需要正式选择，先创建 proposed ADR 并经 Owner 接受再实施该部分。
-- Architecture compliance: applicable。DD-001 是本 EP 的 draft design 输入，并不构成 approved revision；未批准时本 EP 不能归档 completed。
+- Architecture compliance: applicable。精确 Design 输入路径为 docs/design-docs/dd-001_opamp-control-plane.md，architecture entrypoint 为 docs/design-docs/index.md。DD-001 为 draft，并不构成 approved revision；未批准时本 EP 不能归档 completed。
 - ADR references: []；ADR constraint evidence: []；approved Design evidence: []。不存在不得虚构。
 - Source-backed evidence: PR #1 的 P0 代码及 GitHub Actions 绿色 Go / RF 校验，只能证明当前范围的测试通过。
 - 负面边界：没有证明 JVM 热更采样、生产流量 SLA、跨实例同步或批量发布可靠性；这些均保留为单独的后续验收。""",
-"Architecture Compliance Matrix": """| Architecture input | Required implementation / preservation | Verification |
+"Architecture Compliance Matrix": """| ADR constraint or architecture input | Implementation or preservation | Verification |
 | --- | --- | --- |
-| DD-001 control/data separation | OpAMP Gateway 与 OTLP Data Plane 分离；不添加 OTLP 代理实现 | 依赖检查与测试部署拓扑 |
-| DD-001 identity and trust boundaries | Credential-bound Principal → Tenant/Agent scope；不信任 service.name | 越权/伪装场景测试 |
-| DD-001 desired/observed semantics | 不可变 PolicyVersion + per-agent Assignment；matched ACK 才 APPLIED | stale ACK、hash mismatch、重复消息测试 |
-| DD-001 online vs health | Session 状态独立于 Agent 健康，offline 不等于 JVM down | 断线/重连/健康快照测试 |
-| DD-001 protocol capabilities | 仅在 AcceptsRemoteConfig 下发；支持 HTTP 拉取与 WS 串行推送 | 双传输端到端测试 |
+| docs/design-docs/dd-001_opamp-control-plane.md | Preserve Control/Data separation, credential-bound Agent identity, immutable policy versions, Desired vs Observed state, capability checks and HTTP/WS delivery semantics; all are provisional until Design approval | Protocol integration tests, database restart test, role-boundary negative tests, stale ACK/concurrency tests |
 
-Current accepted ADR set is empty. DD-001 is explanatory and not a substitute for explicit ADR authority.""",
+There are no accepted ADR constraints to map. docs/design-docs/index.md is the navigation entrypoint, not an extra normative constraint row.""",
 "Benchmark Gate Set": """- Required Scenario IDs: []。P1/P2 正确性、授权和故障恢复使用确定性集成测试；暂无用户批准的生产规模或 SLO，不制造性能基准数字。
 - 在开始规模/延迟优化前，使用 RF engineering-benchmark **预声明** BS 场景（连接数、消息大小、掉线率、下发 p95 和内存），再执行并封存结果；若测试推翻单体方案，返回 Research/ADR。当前 EP 不以未创建的 Benchmark Run 声称通过。""",
 "Plan of Work": """先锁定 P0 测试行为与安全缺口，把当前 main.go 分拆为 HTTP 装配、OpAMP Gateway、Agent Registry 与 Admin API，保持现有路由兼容。P1 用 PostgreSQL 事务存储 Agent Identity 和 Observed Snapshot，保留会话在内存，明确实例/凭证绑定与重连覆盖条件。
@@ -248,6 +244,10 @@ run(epctl,"init")
 run(epctl,"new-ep","--slug","build-control-plane","--title","Deliver durable OpAMP Control Plane","--author","AI assistant","--owner","Unassigned","--research-not-required-reason","Explicit user direction, existing implemented OpAMP P0 source and documented upstream API are sufficient to plan durable state and policy milestones without a new concluded Research artifact; security and scaling unknowns remain tracked.","--decision-not-required-reason","This active plan executes the user-selected Go OpAMP control-plane scope, not a new accepted durable architecture choice; security and schema alternatives remain unapproved and must be governed before irreversible implementation.","--design",str(design.relative_to(ROOT)),"--architecture-entrypoint","docs/design-docs/index.md")
 plan=next((ROOT/"docs/exec-plans/active").glob("ep-*_build-control-plane/EXECPLAN.md"))
 fill_sections(plan,ep_sections)
+# The plan has two genuine open blockers (design approval and security boundary).
+text=plan.read_text(encoding="utf-8")
+if "status: active" not in text: raise ValueError("active status not found")
+plan.write_text(text.replace("status: active","status: blocked",1),encoding="utf-8")
 run(epctl,"reindex")
 run(epctl,"validate")
 run(designctl,"validate")
