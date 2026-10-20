@@ -4,7 +4,7 @@
 >
 > **日期**：2026-10-19；**数据库**：PostgreSQL / MySQL；**运行架构**：单个部署选择一种主数据库，GORM v2 + Goose。
 >
-> **现状边界**：截至 `main@b6fc2563f765af90f36b09ada2c4d4830a9dcdec`，**仅 `agent_instances` 已有 Goose Migration 和 GORM 实现**；其他表均为 **P2/P3 目标 Schema 草案**，**没有执行 Migration、没有写入实际数据库**。本文不批准 DD-001、ADR 或身份方案；生产发布前须按 RepoFoundryAI 设计门禁评审。
+> **实现状态**：截至 `main@b6fc2563f765af90f36b09ada2c4d4830a9dcdec`，P1.1 的 `agent_instances`、Goose 初始化 Migration 和 GORM Repository **已经有代码**，当前列名仍是 `tenant_id`；**尚无生产部署或须保留既有业务数据的证据**。P2/P3 的其余表仍是未实现的设计。用户已确认归属边界是**整个可观测平台的 Workspace**，且现阶段**无需历史数据兼容**。因此目标设计直接使用 `workspace_id`；后续实现 PR 同步修改 P1.1 的初始化 DDL、GORM 和鉴权参数，不设计双列、双写或历史回填。若已有非测试环境数据，此前提不成立，必须先停下并另行制定迁移流程。本 PR 只改文档，不运行 Migration，也不代表 DD-001 获批准。
 >
 > **来源**：[DD-001（Draft）](../design-docs/dd-001_opamp-control-plane.md)、[EP-001（Blocked）](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md)、[FR-001—FR-013](../requirements/APM_CONTROL_PLANE.md)、[P1.1 持久化实现](p1-durable-inventory.md)、[技术选型](technology-selection.md)。
 
@@ -50,7 +50,7 @@ erDiagram
 | --- | --- | --- | --- | --- |
 | `agent_principals` | Agent 的稳定授权主体 | 低频更新 | P2 身份治理 | 未创建 |
 | `credential_bindings` | Credential 引用 → Principal，可轮换 | 低频更新 | P2 身份治理 | 未创建 |
-| `agent_instances` | Agent 身份与最新状态 | 低频身份更新、高频状态更新 | **P1.1**；P2 补字段 | **已创建** |
+| `agent_instances` | Agent 身份与最新状态 | 低频身份更新、高频状态更新 | **P1.1 已有代码**；Workspace 命名需修正 | **当前代码用 `tenant_id`；目标 `workspace_id` 未实现** |
 | `policies` | 策略逻辑身份 | 低频更新 | P2 | 未创建 |
 | `policy_revisions` | 不可变策略版本 | Append-only | P2 | 未创建 |
 | `policy_bindings` | Scope/Selector → 生效版本 | 有 CAS 的少量修改 | P2 | 未创建 |
@@ -68,8 +68,8 @@ erDiagram
 
 | 逻辑类型 | PostgreSQL 候选 | MySQL 候选 | 约束与原因 |
 | --- | --- | --- | --- |
-| Workspace ID | `VARCHAR(96)`（暂定） | `VARCHAR(96)`（暂定） | 复用可观测平台已有 Workspace ID；**P1.1 当前物理字段仍是 `tenant_id`**，必须先迁移可信数据 |
-| Agent Instance UID | `VARCHAR(32)` | `CHAR(32) CHARACTER SET ascii COLLATE ascii_bin` | **保留现状**；仅允许 16 字节 UID 的小写 hex，避免本次设计顺带变更线上主键 |
+| Workspace ID | `VARCHAR(96)`（暂定） | `VARCHAR(96)`（暂定） | 复用可观测平台已有 Workspace ID；目标 Schema 均使用 `workspace_id`，**初始化前同步修改现有 P1.1 DDL 与 Go 代码** |
+| Agent Instance UID | `VARCHAR(32)` | `CHAR(32) CHARACTER SET ascii COLLATE ascii_bin` | 延用已实现的 16 字节 UID 小写 hex 表示，当前无需同步优化为二进制键 |
 | 新的业务 ID | `VARCHAR(36)` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | 建议由应用产生 UUID 字符串；不依赖自增 ID、`RETURNING` |
 | Principal / Credential 外部引用 | `VARCHAR(128)` | `VARCHAR(128)` | 字符串范围由发行凭证的可信系统定义；不存明文 Token |
 | Config Hash / Payload Hash | `CHAR(64)` | `CHAR(64) CHARACTER SET ascii COLLATE ascii_bin` | SHA-256 lower-hex；解码成 32 字节后才放入 OpAMP `config_hash` |
@@ -81,7 +81,7 @@ erDiagram
 | 布尔 | `BOOLEAN` | `BOOLEAN`（TINYINT） | 统一 GORM bool |
 | OpAMP Capabilities | 当前 `BIGINT` | 当前 `BIGINT` | **已有 P1.1 限制**：无符号 uint64 高位无法表达；变更前必须约定无损的 8 字节或二进制编码 |
 
-**不要现在把主键改为 `BINARY(16)`**。虽然它更紧凑，但会改变已落地表、引用方式和 API / GORM 适配，在当前规模没有足够的收益证据。若以后确有容量压力，应作为独立、受控的数据迁移。
+**暂不把 UID 改为 `BINARY(16)`**：目标是先统一 Workspace 语义，不为没有性能数据的优化增加编码复杂度。未来若证据显示索引体积成为瓶颈，可再评估二进制 UID。
 
 ### 2.2 全局不变量
 
@@ -97,7 +97,7 @@ erDiagram
 
 ### 3.1 工作空间归属 — 复用可观测平台 Workspace（不新增本地主数据表）
 
-**明确的产品语义**：本 Control Plane 的资源隔离单元是**整个可观测性系统的工作空间（Workspace）**，不是企业客户、计费 Workspace，也不是另一个独立的 APM 专属组织。Agent Inventory、Policy、Config、Release 和审计都属于某一个既有 Workspace。其稳定标识来自**可观测平台的工作空间服务 / 可信认证上下文**；名称、成员、角色和生命周期由该上游系统管理。
+**明确的产品语义**：本 Control Plane 的资源隔离单元是**整个可观测性系统的工作空间（Workspace）**，不是企业客户（Tenant）、计费账户，也不是另一个独立的 APM 专属组织。Agent Inventory、Policy、Config、Release 和审计都属于某一个既有 Workspace。其稳定标识来自**可观测平台的工作空间服务 / 可信认证上下文**；名称、成员、角色和生命周期由该上游系统管理。
 
 ~~~
 可观测性平台（Workspace 权威来源）
@@ -107,13 +107,13 @@ erDiagram
                     └── APM Control Plane: Agents / Policies / Releases
 ~~~
 
-**本项目不新建 `workspaces` 或独立的 `workspaces` 主数据表。** 使用 `workspace_id` 作为各业务表的归属字段；同一数据库内不同业务表之间使用 `(workspace_id,业务 ID)` 复合主键/外键，防止跨 Workspace 引用。Workspace 是否存在、用户能否管理、Agent Credential 是否有权限写入该 Workspace，**必须通过可信平台身份与授权层确认**。由于上游 Workspace 不在本数据库中，不能假装有本地 `FOREIGN KEY (workspace_id) REFERENCES workspaces(...)`。
+**本项目不新建独立的 `workspaces` 主数据表。** 使用 `workspace_id` 作为各业务表的归属字段；同一数据库内不同业务表之间使用 `(workspace_id,业务 ID)` 复合主键/外键，防止跨 Workspace 引用。Workspace 是否存在、用户能否管理、Agent Credential 是否有权限写入该 Workspace，**必须通过可信平台身份与授权层确认**。由于上游 Workspace 不在本数据库中，不能假装有本地 `FOREIGN KEY (workspace_id) REFERENCES workspaces(...)`。
 
 如未来部署需要离线验证 Workspace 状态，可增加由上游同步的只读 `workspace_refs` 本地投影，带同步版本和禁用/删除语义。它不是新的工作空间创建入口，且**不列为首期核心表**；必须明确同步延迟、撤销传播和一致性要求。不要在接到 Agent 自报的 `workspace_id` 时自动创建 Workspace。
 
 `workspace_id` 建议直接复用现有平台 ID 的**规范字符串表示**（文中 `VARCHAR(96)` 是暂定存储上限）；如果共享平台已经采用 `org_id` 或其他名字，应在集成层明确字段映射，并保证数值/字符串规范、唯一性和授权一致，**不能为 APM 重新生成第二套 ID**。Workspace 名称变更不改变其 ID，跨 Workspace 迁移 Agent 需显式审批，不能通过更新自报 `service.name` 或 `environment` 完成。
 
-**P1.1 兼容注意**：已合并物理表 `agent_instances` 的字段目前确实叫 `workspace_id`，其 Go `auth.Principal.WorkspaceID` 和启动配置也沿用这个名字；P1.1 的 `default`、自定义 Workspace 字符串**不自动等于真实可观测 Workspace**。第 9 节规定可信映射/回填/双读切换。目标 Schema 使用 `workspace_id`，但本次文档 PR 不执行列重命名或身份迁移。
+**当前实现与目标设计的区别**：已合并的 P1.1 使用 `agent_instances.tenant_id`、`auth.Principal.TenantID` 和凭证配置中的 `tenant_id`；这些是**代码现状**，并非产品最终的 Workspace 设计。P1.1 的 `default` 和自定义 Tenant 字符串不能被视为平台已验证的 Workspace。本项目尚未确认存在需要保留的生产记录，因此**后续实现 PR 直接替换为可信 `workspace_id`**，同步修改初始化 Migration、GORM、鉴权及 API，重建开发/测试数据库；不引入过渡双字段或迁移旧数据。当前文档 PR 不改运行时代码。
 
 ### 3.2 `agent_principals` — 稳定授权主体
 
@@ -150,14 +150,13 @@ erDiagram
 
 ### 3.4 `agent_instances` — Agent Inventory（已存在；目标为原位演进）
 
-**当前已落库主键**：`(tenant_id,instance_uid)`。**`tenant_id` 是已实现的过渡列名，不代表产品上存在独立 Tenant**；目标逻辑键改为 `(workspace_id,instance_uid)`，实际切换需要新的 Goose Migration。详细物理 DDL 以 [PostgreSQL Migration](../../db/migrations/postgres/00001_agent_instances.sql) 与 [MySQL Migration](../../db/migrations/mysql/00001_agent_instances.sql) 为准。下表中“现有”不表示已实现稳定 Principal 字段。
+**目标主键**：`(workspace_id,instance_uid)`。**当前已提交的 P1.1** 初始 DDL 使用 `(tenant_id,instance_uid)`，见 [PostgreSQL Migration](../../db/migrations/postgres/00001_agent_instances.sql) 与 [MySQL Migration](../../db/migrations/mysql/00001_agent_instances.sql)。在确认尚未正式部署、无需历史兼容的前提下，后续实现 PR **直接修改这两份初始 Migration 和 GORM 模型**；此文档定义的是改完之后的目标 Schema，不把当前代码误称已改。
 
 | 字段 | 状态 | 类型 | 约束 / 语义 |
 | --- | --- | --- | --- |
-| `tenant_id` | **现有（过渡列名）** | VARCHAR(96) | **实际物理主键列**；P1.1 尚未接入平台 Workspace 验证 |
-| `workspace_id` | **拟新增** | VARCHAR(96) | 可信平台 Workspace ID；迁移完成后成为 PK 的第一列 |
+| `workspace_id` | **目标字段（当前代码尚未实现）** | VARCHAR(96) | 目标 PK；可信可观测平台 Workspace ID，替换当前 P1.1 `tenant_id` |
 | `instance_uid` | **现有** | 32-char hex | PK，Agent Instance Key |
-| `credential_id` | **现有（过渡）** | VARCHAR(128) | P1.1 首次注册凭证所有权；以后由 `owner_principal_id` 替代 |
+| `credential_id` | **P1.1 当前已有** | VARCHAR(128) | 当前实现的首次注册绑定；未来是否转为稳定 `owner_principal_id` 仍待安全设计审批 |
 | `owner_principal_id` | **拟新增** | VARCHAR(128) | FK → `agent_principals`；换 Token 不改变主体 |
 | `agent_kind` | **现有** | VARCHAR(64) | java-apm / go-apm / python-apm / collector 等；Agent 声明不扩权 |
 | `distribution` | **现有** | VARCHAR(128) | 发行版名称 |
@@ -176,7 +175,7 @@ erDiagram
 | `created_at` / `updated_at` | **拟新增** | UTC Timestamp | Identity / Metadata 生命周期 |
 | `retired_at` | **拟新增** | Nullable UTC Timestamp | 受控退役，不执行级联删除 |
 
-**已有索引**：PK `(tenant_id,instance_uid)`、`(tenant_id,last_seen)`（两者是已合并 Migration 的真实列）；**目标索引**应使用 `(workspace_id,instance_uid)`、`(workspace_id,last_seen)`，必须在回填验证和代码切换后使用新 Goose Migration 改动。后续如确有 Inventory UI 按 AgentKind/Service/Env 分页的需求，可针对访问模式增加 `(workspace_id,environment,service_name,instance_uid)` 或 `(workspace_id,agent_kind,instance_uid)`。没有真实查询证据前不预建所有组合索引。
+**目标索引**：PK `(workspace_id,instance_uid)` 和 `(workspace_id,last_seen)`。当前 P1.1 的真实索引分别以 `tenant_id` 为首列；在正式部署前直接调整初始 PostgreSQL/MySQL Migration 和 Repository 使用的列名，**不设计额外的回填或双索引兼容期**。后续如确有 Inventory UI 按 AgentKind/Service/Env 分页的需求，可针对访问模式增加 `(workspace_id,environment,service_name,instance_uid)` 或 `(workspace_id,agent_kind,instance_uid)`。没有真实查询证据前不预建所有组合索引。
 
 **重要边界**：P1.1 把最新 Observation 内联在实例表中，避免额外写时 Join。只有真实报告写压力造成身份表大量 UPDATE/索引维护后，才考虑 §10 的 `agent_observations` 一对一拆表；不要为了概念分层而提前实施。
 
@@ -445,7 +444,7 @@ P2 先只使用 `release_targets.batch_no = 0`。P3 的灰度批次可以先在 
 | 读写路径 | 访问条件 | 所需索引 / 约束 |
 | --- | --- | --- |
 | Agent 详情 / 状态写入 | Workspace + UID | `agent_instances` PK |
-| 按时间列出 Agent | Workspace + LastSeen 范围 | 现有 `agent_instances(workspace_id,last_seen)` |
+| 按时间列出 Agent | Workspace + LastSeen 范围 | **目标** `agent_instances(workspace_id,last_seen)`（当前代码仍为 `tenant_id`） |
 | 获取策略的版本 | Workspace + PolicyID + RevisionNumber | `policy_revisions` 唯一键 |
 | 查询适用 Binding | Workspace + Kind + Scope + Enabled | `policy_bindings` 复合索引 |
 | 根据 Release 列出某 Batch 的目标及结果 | Workspace + ReleaseID + BatchNo + Status | `release_targets` 复合索引 |
@@ -455,7 +454,7 @@ P2 先只使用 `release_targets.batch_no = 0`。P3 的灰度批次可以先在 
 | 单 Agent 审计时间线 | Workspace + InstanceUID + OccurredAt | `config_events` 时间索引 |
 | 按请求幂等键去重 | Workspace + IdempotencyKey | `config_releases` UNIQUE（NULL 允许多个） |
 
-**写入热点注意**：`agent_instances` 的 LastSeen 变化会维护现有 `(workspace_id,last_seen)` 索引。Agent 高频心跳应在 OpAMP 层有节制地刷新数据库，不必把每次 Polling 变成一次同步 UPDATE；但延迟上限和刷新策略不能未经产品 SLO 确认就硬编码成不可靠的“在线”定义。
+**写入热点注意**：目标 `agent_instances` 的 LastSeen 更新将维护 `(workspace_id,last_seen)` 索引。Agent 高频心跳应在 OpAMP 层有节制地刷新数据库，不必把每次 Polling 变成一次同步 UPDATE；但延迟上限和刷新策略不能未经产品 SLO 确认就硬编码成不可靠的“在线”定义。
 
 首次不引入 Redis、Kafka、分库分表、数据库物化 View、分布式消息事务或复杂 ORM 多层泛型；GORM 使用显式的 Repository/Tx 边界即可。真正出现查询和并发问题时再依据指标增加索引、热表或协调队列。
 
@@ -464,9 +463,9 @@ P2 先只使用 `release_targets.batch_no = 0`。P3 的灰度批次可以先在 
 这段只说明 PostgreSQL 的复合键与 CAS 约束风格，**不是**可直接执行的全量 Migration，也不意味着 P1.1 Schema 已变更：
 
 ~~~sql
--- 提议示例：Workspace 真源在可观测平台，不能创建虚构本地 workspaces 主表。
--- 需要先基于可信 Workspace 映射迁移 agent_instances.tenant_id，
--- 后续业务表才统一使用 workspace_id。
+-- 提议示例：Workspace 真源在可观测平台，不创建本地主数据表。
+-- P1.1 正式部署前直接将初始化 SQL/Go Model 改为 workspace_id；
+-- 以下业务表统一使用 workspace_id，本示例并非已执行 Migration。
 CREATE TABLE policies (
     workspace_id VARCHAR(96) NOT NULL,
     policy_id VARCHAR(36) NOT NULL,
@@ -499,25 +498,22 @@ CREATE TABLE policy_revisions (
 
 注意 PostgreSQL 的外键引用要求被引用列组合有 PK/UNIQUE；MySQL 还必须统一列长度、类型、字符集与 Collation，否则复合外键可能无法建立。实际 MySQL Migration 应独立编写，不将 PostgreSQL SQL 做机械字符串替换。
 
-## 9. 从已落地 P1.1 演进的 Migration 路线
+## 9. 尚未正式部署：直接统一 P1.1 初始化 Schema 与后续版本
 
-**当前的 `00001_agent_instances.sql` 不重写。** 这份 Migration 已创建 `tenant_id`，绝不能通过修改历史 SQL 假装 P1.1 已使用 `workspace_id`。 历史 Migration 一旦合入并执行，应通过新增 Goose 版本变更数据库，而不是修改第 1 版 SQL。以下阶段与文件名**仅表示建议顺序，不代表文件已经存在**。
+**实施前提**：当前 P1.1 的初始表和 GORM 代码已经合并，但没有证据表明它已进入需保留历史数据的生产或共享环境。用户明确选择**不做 Tenant → Workspace 兼容迁移**。因此目标方案为**改初始定义，而不是新增过渡 Migration**。
 
-| 阶段 | 新的 Migration 内容 | 应用兼容/回填要求 |
+| 阶段 | 实施内容 | 验收条件 |
 | --- | --- | --- |
-| 先决：P1.1 | `agent_instances(tenant_id,instance_uid)` 已部署 | 保留既有物理主键、凭证所有权和 Admin API；不能直接将历史 `tenant_id` 值当作平台 Workspace |
-| M-Workspace（P2 首步） | 为 `agent_instances` 增加 nullable `workspace_id`，建立可信 `tenant_id → workspace_id` 过渡映射或明确的受控转换流程 | 认证服务必须提供权威 Workspace ID；拒绝未知/冲突映射，检查新唯一键冲突并完成全量回填，不能默认为 `default` 真实存在 |
-| M-Workspace switch | 受控双读/双写、切换 API Principal 与存储查询到 `workspace_id`，新建复合主键与索引，逐步停止依赖 `tenant_id` | PostgreSQL/MySQL 分别验证唯一键切换、二级索引和 FK、灰度回滚；清理旧列单独提交 Migration |
-| M-Auth（P2） | `agent_principals`、`credential_bindings`，向 `agent_instances` 添加 nullable `owner_principal_id` | 按可信 `(workspace_id,credential_id)` 构建一对一过渡 Principal，不自动跨 Workspace 合并；旧记录可追溯 |
-| M-Auth switch | 双读/受控双写 → 回填校验 → 应用改用 Principal → 按正式批准的安全流程约束非空 | Token 轮换必须可用；核对异步请求和跨库约束后才清理旧字段 |
-| M-Policy（P2） | `policies`、`policy_revisions`、`policy_bindings` | revision 不可变；旧演示采样率不自动成为已批准业务 Policy |
-| M-Config（P2） | `config_revisions`、`config_releases`、`release_targets`、`agent_assignments`、`config_events` | 冻结目标、CAS、内容 Hash、审计同 Tx；重启可恢复 |
-| M-Rollout（P3） | 在已有 Release/Target 中扩展灰度字段与索引 | 状态迁移无歧义，旧 P2 Release 仍可读；需要时再新增 release_batches |
-| M-Scale（仅按证据） | 独立 `agent_observations`、`apm_services`、分区归档或可选 `release_batches` | 先以真实查询/写压力与保留义务证明必要性 |
+| P1.1 Workspace 清理（先执行） | 同一个代码 PR 内直接修改 `db/migrations/postgres/00001_agent_instances.sql`、`db/migrations/mysql/00001_agent_instances.sql`、GORM `AgentRecord`、Repository 查询、`auth.Principal`、Koanf 凭证 JSON、Admin API 和测试；统一 `workspace_id` | 双数据库全新建库成功，Agent 注册/查询严格按可信 Workspace 隔离；代码与初始化 SQL 不再出现业务级 `tenant_id` |
+| P2 授权主体 | 按正式安全设计引入 `agent_principals`、`credential_bindings`；是否把当前 `credential_id` 替换为稳定 Principal 归属由设计审批决定 | Token 轮换不会意外改变 Agent 所有权；撤销/授权路径经过可信 Workspace 验证 |
+| P2 Policy | `policies`、`policy_revisions`、`policy_bindings` | Revision 不可变，Selector 冲突有确定性行为 |
+| P2 Config/Release | `config_revisions`、`config_releases`、`release_targets`、`agent_assignments`、`config_events` | 发布事务原子性、Assignment CAS、ACK 归因、重启恢复和跨 Workspace 隔离 |
+| P3 Rollout | 在 Release/Target 中补充必要的灰度字段和查询索引 | 受控批次、失败阻断、回滚和审计可恢复 |
+| 按需扩展 | 只有性能/产品证据充分时才增加 `agent_observations`、`apm_services`、`release_batches` | 以实际查询/写负载和保留要求评估必要性 |
 
-**安全迁移步骤（建议）**：先从可观测平台或可信认证系统取得 Workspace 的真实标识，并梳理 P1.1 已有 `tenant_id` 值；对于无法认证的旧映射停止迁移 → 新增 Nullable `workspace_id` → 部署兼容读写 → 受控回填 → 验证行数、Workspace/UID 归属和新主键冲突 → 切换 API Principal 与存储访问 → 可选强化 NOT NULL/复合约束 → 单独发布清理旧列。发生冲突应停止并人工审计，不通过“最后一次凭证胜出”消解 Agent 所有权。
+**不创建 `tenant_id` 与 `workspace_id` 双字段，不做双读双写，不为旧的 `default` 值造 Workspace，不自动迁移任何未确认归属的数据。** 如果实际发现已经部署的共享/生产数据，须停止直接修改初始 Migration 的做法，重新审查是否必须引入增量 Goose Migration 和可信映射。这是对事实前提的保护，不是当前方案中隐藏的兼容分支。
 
-在 MySQL 中 `CREATE/ALTER TABLE` 可能隐式提交；即使用 Goose，也不能把 Migration 失败理解为所有 DDL 已回滚。Goose 命令应由独立 Job 管控；服务只检查 DB/Schema 兼容版本，不通过 GORM AutoMigrate 改生产表。真实兼容必须分别在 PostgreSQL/MySQL 的 CI 和升级/恢复演练中确认。
+即使不保留历史数据，也要在 PostgreSQL/MySQL 分别验证全新建库、字段约束、唯一性、可信 Workspace 注入和代码行为。MySQL `CREATE/ALTER TABLE` 可能隐式提交；Goose 负责明确版本的执行，生产运行时不使用 GORM AutoMigrate。
 
 ## 10. 延迟引入的三个扩展表
 
