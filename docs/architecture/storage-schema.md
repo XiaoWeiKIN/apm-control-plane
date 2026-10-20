@@ -150,7 +150,7 @@ erDiagram
 
 ### 3.4 `agent_instances` — Agent Inventory（已存在；目标为原位演进）
 
-**目标主键**：`(workspace_id,instance_uid)`。**当前已提交的 P1.1** 初始 DDL 使用 `(tenant_id,instance_uid)`，见 [PostgreSQL Migration](../../db/migrations/postgres/00001_agent_instances.sql) 与 [MySQL Migration](../../db/migrations/mysql/00001_agent_instances.sql)。在确认尚未正式部署、无需历史兼容的前提下，后续实现 PR **直接修改这两份初始 Migration 和 GORM 模型**；此文档定义的是改完之后的目标 Schema，不把当前代码误称已改。
+**目标主键**：`(workspace_id,instance_uid)`。**当前仅代码中已提交的 P1.1** 初始 DDL 使用 `(tenant_id,instance_uid)`，见 [PostgreSQL Migration](../../db/migrations/postgres/00001_agent_instances.sql) 与 [MySQL Migration](../../db/migrations/mysql/00001_agent_instances.sql)。在确认尚未正式部署、无需历史兼容的前提下，后续实现 PR **直接修改这两份初始 Migration 和 GORM 模型**；此文档定义的是改完之后的目标 Schema，不把当前代码误称已改。
 
 | 字段 | 状态 | 类型 | 约束 / 语义 |
 | --- | --- | --- | --- |
@@ -387,7 +387,7 @@ Credential Token -> 可信认证系统 -> (workspace_id, credential_ref, princip
      -> 观察快照 -> 返回 OpAMP 响应
 ~~~
 
-P1.1 **实际实现**只有 `credential_id` 首次绑定：在同一 Workspace 内通过其他 Credential 上报相同 UID 会被拒绝。上述稳定 `principal_id` 的模型是后续目标设计，必须通过新增字段、回填和迁移实现，不能靠把新 Token 的 `credential_id` 随意覆盖来“完成轮换”。
+P1.1 **实际实现**只有 `credential_id` 首次绑定：同一个作用域内由其他 Credential 上报相同 UID 会被拒绝，但作用域当前仍由名为 `tenant_id` 的代码参数表示，尚未接入真实 Workspace 授权。后续目标是以稳定 `principal_id` 表示所有权；在首轮正式部署前可直接调整尚未发布的初始身份模型，不设计为了兼容旧业务数据而存在的回填/双写流程。不能仅靠新 Token 覆盖旧的 `credential_id` 来完成轮换。
 
 身份删除/轮换授权必须是显式受控操作，不允许 Agent 单方面报告一个新 Principal 即完成换绑。HTTP 请求执行完毕后不保留 Session；WebSocket Session 在内存里，有连接所有权和关闭回调。未来多实例 HA 的 Fencing / Session Ownership **不在此 Schema 中冒充已解决**。
 
@@ -519,7 +519,7 @@ CREATE TABLE policy_revisions (
 
 | 可选表 | 引入条件 | 推荐关键字段 / 约束 |
 | --- | --- | --- |
-| `agent_observations` | Agent 状态写入压力使 Inventory 表写放大、索引维护成为明确瓶颈 | `(workspace_id,instance_uid)` PK/FK，一对一保存 LastSeen、Health、Capabilities、Reported Hash/Status；现有 agent_instances 最新状态字段迁移后收敛 |
+| `agent_observations` | Agent 状态写入压力使 Inventory 表写放大、索引维护成为明确瓶颈 | `(workspace_id,instance_uid)` PK/FK，一对一保存 LastSeen、Health、Capabilities、Reported Hash/Status；仅按有证据的热表拆分实施 |
 | `apm_services` | 需要服务目录属性/Ownership/标签，且不再满足于 Agent 自报 Service 坐标 | `(workspace_id,service_id)` PK，`(workspace_id,environment,namespace,name)` 业务唯一键；Collector 不强制属于 Java Service |
 | `release_batches` | P3 需要每批独立审批、人员权限、暂停或恢复记录 | `(workspace_id,release_id,batch_no)` PK/FK，Batch Status、ApprovedBy、StartedAt、CompletedAt |
 
