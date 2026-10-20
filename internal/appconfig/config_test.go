@@ -1,6 +1,7 @@
 package appconfig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,5 +108,38 @@ func TestRejectCredentialsWithExtraJSON(t *testing.T) {
 	}))
 	if err == nil || !strings.Contains(err.Error(), "unexpected trailing") {
 		t.Fatalf("trailing JSON must be rejected: %v", err)
+	}
+}
+
+func TestRejectCredentialIDsBeyondDatabaseLimits(t *testing.T) {
+	cases := []struct {
+		name string
+		field string
+		value string
+	}{
+		{"workspace", "workspace_id", strings.Repeat("w", 97)},
+		{"credential", "id", strings.Repeat("c", 129)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cred := Credential{ID: "agent-a", WorkspaceID: "workspace-a", Token: "long-agent-secret-token"}
+			if tc.field == "workspace_id" {
+				cred.WorkspaceID = tc.value
+			} else {
+				cred.ID = tc.value
+			}
+			data, err := json.Marshal([]Credential{cred})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = LoadWithEnv(testEnv(map[string]string{
+				"APM_DATABASE_DSN": "test",
+				"APM_AGENT_CREDENTIALS_JSON": string(data),
+				"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin-a","workspace_id":"workspace-a","token":"long-admin-secret-token"}]`,
+			}))
+			if err == nil || !strings.Contains(err.Error(), tc.field) {
+				t.Fatalf("%s outside schema limits accepted: %v", tc.field, err)
+			}
+		})
 	}
 }
