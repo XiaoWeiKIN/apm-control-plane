@@ -25,7 +25,7 @@ const deliveryRetryInterval = 15 * time.Second
 
 // ReconcileAgentConfig records an Agent receipt and offers the current durable
 // Desired configuration. Offering a response is not proof of transport or apply.
-func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceUID string, reported *ConfigStatus) (*DesiredConfig, bool, error) {
+func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceUID string, reported *ConfigStatus, offer bool) (*DesiredConfig, bool, error) {
 	// 1. 无发布意图的心跳走只读快速路径；不为每次轮询开启事务。
 	var existing AgentAssignmentRecord
 	err := s.db.WithContext(ctx).Where("workspace_id = ? AND instance_uid = ?", workspaceID, instanceUID).Take(&existing).Error
@@ -34,6 +34,14 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 	}
 	if err != nil {
 		return nil, false, err
+	}
+	// 不需要处理新回执或提供配置时，避免无效事务及 Agent 行锁。
+	if reported == nil {
+		if !offer || existing.State == "APPLIED" || existing.State == "FAILED" ||
+			existing.State == "UNSUPPORTED" || existing.State == "SUPERSEDED" ||
+			(existing.NextRetryAt != nil && time.Now().UTC().Before(*existing.NextRetryAt)) {
+			return nil, true, nil
+		}
 	}
 
 	var desired *DesiredConfig
@@ -112,7 +120,11 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 			}
 		}
 
-		// 4. 已收敛或明确失败的版本不重发；等待 ACK 时仅按重试期限重新提供。
+		// 4. WS 消息仅提交回执，独立 WS Writer 负责后续提供配置。
+		if !offer {
+			return nil
+		}
+		// 已收敛或明确失败的版本不重发；等待 ACK 时仅按重试期限重新提供。
 		switch assignment.State {
 		case "APPLIED", "FAILED", "UNSUPPORTED", "SUPERSEDED":
 			return nil
