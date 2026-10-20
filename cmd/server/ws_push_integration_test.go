@@ -200,7 +200,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			receive(conn, first.ConfigHash)
 			assignmentState("WAITING_ACK")
 			send(conn, 2, &protobufs.RemoteConfigStatus{
-				Status: protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
+				Status:               protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
 				LastRemoteConfigHash: mustHash(t, first.ConfigHash),
 			})
 			assignmentState("APPLIED")
@@ -209,7 +209,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			second := publish(0.6)
 			receive(conn, second.ConfigHash)
 			send(conn, 3, &protobufs.RemoteConfigStatus{
-				Status: protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
+				Status:               protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
 				LastRemoteConfigHash: mustHash(t, first.ConfigHash),
 			})
 			assignmentState("WAITING_ACK")
@@ -222,7 +222,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			send(reconnected, 1, nil)
 			receive(reconnected, third.ConfigHash)
 			send(reconnected, 2, &protobufs.RemoteConfigStatus{
-				Status: protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
+				Status:               protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
 				LastRemoteConfigHash: mustHash(t, third.ConfigHash),
 			})
 			assignmentState("APPLIED")
