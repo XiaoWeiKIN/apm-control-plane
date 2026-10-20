@@ -43,7 +43,7 @@ func TestReleaseHandlerRejectsInvalidRequestsBeforePersistence(t *testing.T) {
 		{ID: "admin-a", WorkspaceID: "workspace-a", Token: "test-admin-token-1234"},
 	})
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(fake, authenticator))
+	mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(fake, authenticator, nil))
 	_, uidHex := uid(14)
 	revision := "00000000-0000-4000-8000-000000000001"
 	request := func(url, token, body string) *httptest.ResponseRecorder {
