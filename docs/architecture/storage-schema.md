@@ -4,7 +4,7 @@
 >
 > **日期**：2026-10-19；**数据库**：PostgreSQL / MySQL；**运行架构**：单个部署选择一种主数据库，GORM v2 + Goose。
 >
-> **实现状态**：P1.1 的 `agent_instances`、Goose 初始化 Migration、GORM Repository、可信部署凭证 JSON 和 API 已在本次实现修订中统一为 `workspace_id`；无需已不存在的 `tenant_id` 兼容层。**其余 P2/P3 逻辑表尚未实施**，Workspace/IAM 权限真源集成仍待安全设计。未发现需保留的生产数据；若未来发现旧环境已经使用过过往初始化 Schema，则不能假装无历史数据，须独立评估。本文只是详细技术说明，不是 DD-001 的审批记录。
+> **实现状态**：P1.1 的 `agent_instances`、Workspace 凭证配置和管理查询已实现。**本 P2.1 增量**新增 Java Sampling ConfigMap 的确定性编译与 `config_revisions` 持久化（PostgreSQL/MySQL Goose 00002、GORM 创建/查询与双引擎测试）。Policy、Release、Target、Assignment、Reconciler 和 P3 Rollout **仍未实现**。Workspace/IAM 权限真源集成还待安全设计；本文件是详细技术说明，不代替 DD-001 审批。
 >
 > **来源**：[DD-001（Draft）](../design-docs/dd-001_opamp-control-plane.md)、[EP-001（Blocked）](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md)、[FR-001—FR-013](../requirements/APM_CONTROL_PLANE.md)、[P1.1 持久化实现](p1-durable-inventory.md)、[技术选型](technology-selection.md)。
 
@@ -54,7 +54,7 @@ erDiagram
 | `policies` | 策略逻辑身份 | 低频更新 | P2 | 未创建 |
 | `policy_revisions` | 不可变策略版本 | Append-only | P2 | 未创建 |
 | `policy_bindings` | Scope/Selector → 生效版本 | 有 CAS 的少量修改 | P2 | 未创建 |
-| `config_revisions` | 按 AgentKind 编译的不可变完整配置 | Append-only | P2 | 未创建 |
+| `config_revisions` | 按 AgentKind 编译的不可变完整配置 | Append-only | **P2.1** | **Java Sampling 编译 + 双数据库 Goose 00002 已实现；尚无发布入口** |
 | `config_releases` | 一次发布的命令、状态、幂等键、计划 | 发布创建，状态变更 | P2 基本 / P3 灰度 | 未创建 |
 | `release_targets` | 某次发布的**冻结目标快照**与批次结果 | 目标不可变，执行状态可更新 | P2 基本 / P3 灰度 | 未创建 |
 | `agent_assignments` | 每 Agent **当前** Desired/Observed 和 CAS | 可变、可恢复 | P2 | 未创建 |
@@ -241,6 +241,10 @@ erDiagram
 ## 5. 配置内容、发布与协调域
 
 ### 5.1 `config_revisions` — 不可变编译结果
+
+**P2.1 已实现的子集**：`internal/config.CompileJavaSampling(rate)` 只编译 Java Head Sampling ConfigMap，其 JSON 文件名为 `apm/sampling.json`。先使用 Go Protobuf 的 deterministic marshal 序列化完整 `AgentConfigMap`，然后对**该序列化字节**计算 SHA-256；`hash_algorithm = sha256-proto-deterministic-v1`。此序列化选择属于固定的应用级版本契约，不能假设 Protobuf deterministic marshal 是跨不同实现/版本的通用规范编码；应保留原始 bytes/hash 供以后直接下发。
+
+存储实现为 `internal/storage/gormrepo/config_revisions.go`，PostgreSQL/MySQL 的 `db/migrations/*/00002_config_revisions.sql`。新建 Revision 生成独立 UUID，`(workspace_id, config_revision_id)` 为复合主键；允许不同 Revision 内容 Hash 相同。仅提供 Create/Get，**不提供 Update/Delete 业务方法**。P2.1 尚无 Policy 主表，`source_policy_revision_id` 暂为可空列，**此时还没有 FK**；后续 Policy 实施时再建立相应约束。没有自动 Agent 分配、发布或 OpAMP 远程下发。
 
 **主键**：`(workspace_id,config_revision_id)`。一个 `policy_revision` 可因不同 AgentKind、ConfigDialect、发行版/能力要求，编译成多个不同 Config Revision。每条记录对应**完整的 OpAMP RemoteConfig ConfigMap**，不是单独的一个 `sampling.rate` 字段。
 
