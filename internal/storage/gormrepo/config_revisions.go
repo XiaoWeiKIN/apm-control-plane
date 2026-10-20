@@ -17,19 +17,19 @@ var ErrConfigRevisionNotFound = errors.New("config revision not found")
 
 // ConfigRevisionRecord stores an immutable, complete OpAMP ConfigMap snapshot.
 type ConfigRevisionRecord struct {
-	WorkspaceID            string    §gorm:"column:workspace_id;primaryKey"§
-	ConfigRevisionID        string    §gorm:"column:config_revision_id;primaryKey"§
-	SourcePolicyRevisionID  *string   §gorm:"column:source_policy_revision_id"§
-	AgentKind               string    §gorm:"column:agent_kind"§
-	Distribution            string    §gorm:"column:distribution"§
-	ConfigDialect           string    §gorm:"column:config_dialect"§
-	PayloadFormat           string    §gorm:"column:payload_format"§
-	ConfigMapBytes          []byte    §gorm:"column:config_map_bytes"§
-	ConfigHash              string    §gorm:"column:config_hash"§
-	HashAlgorithm           string    §gorm:"column:hash_algorithm"§
-	PayloadSizeBytes        int64     §gorm:"column:payload_size_bytes"§
-	CreatedAt               time.Time §gorm:"column:created_at"§
-	CreatedBy               string    §gorm:"column:created_by"§
+	WorkspaceID            string    `gorm:"column:workspace_id;primaryKey"`
+	ConfigRevisionID        string    `gorm:"column:config_revision_id;primaryKey"`
+	SourcePolicyRevisionID  *string   `gorm:"column:source_policy_revision_id"`
+	AgentKind               string    `gorm:"column:agent_kind"`
+	Distribution            string    `gorm:"column:distribution"`
+	ConfigDialect           string    `gorm:"column:config_dialect"`
+	PayloadFormat           string    `gorm:"column:payload_format"`
+	ConfigMapBytes          []byte    `gorm:"column:config_map_bytes"`
+	ConfigHash              string    `gorm:"column:config_hash"`
+	HashAlgorithm           string    `gorm:"column:hash_algorithm"`
+	PayloadSizeBytes        int64     `gorm:"column:payload_size_bytes"`
+	CreatedAt               time.Time `gorm:"column:created_at"`
+	CreatedBy               string    `gorm:"column:created_by"`
 }
 
 func (ConfigRevisionRecord) TableName() string { return "config_revisions" }
