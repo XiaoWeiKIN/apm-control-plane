@@ -25,15 +25,15 @@ const deliveryRetryInterval = 15 * time.Second
 
 // ReconcileAgentConfig records an Agent receipt and offers the current durable
 // Desired configuration. Offering a response is not proof of transport or apply.
-func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceUID string, reported *ConfigStatus) (*DesiredConfig, error) {
+func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceUID string, reported *ConfigStatus) (*DesiredConfig, bool, error) {
 	// 1. 无发布意图的心跳走只读快速路径；不为每次轮询开启事务。
 	var existing AgentAssignmentRecord
 	err := s.db.WithContext(ctx).Where("workspace_id = ? AND instance_uid = ?", workspaceID, instanceUID).Take(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	var desired *DesiredConfig
@@ -176,7 +176,7 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 		desired = &DesiredConfig{ConfigMapBytes: revision.ConfigMapBytes, ConfigHash: assignment.DesiredHash}
 		return nil
 	})
-	return desired, err
+	return desired, true, err
 }
 
 // setReleaseDeliveryStatus applies to the current P2.2 single-target release.
