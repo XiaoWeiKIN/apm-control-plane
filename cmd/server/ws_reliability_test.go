@@ -146,7 +146,6 @@ func TestWSReportFullStateWithoutDesired(t *testing.T) {
 	}
 }
 
-
 type blockedWSConnection struct {
 	entered chan struct{}
 	closed  chan struct{}
