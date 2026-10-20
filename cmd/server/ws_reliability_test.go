@@ -142,7 +142,7 @@ func TestWSReportFullStateWithoutDesired(t *testing.T) {
 	}
 	flag := uint64(protobufs.ServerToAgentFlags_ServerToAgentFlags_ReportFullState)
 	if reply.Flags&flag == 0 || reply.RemoteConfig != nil {
-		t.Fatalf("invalid full-state request: %+v", reply)
+		t.Fatalf("invalid full-state request: %+v", &reply)
 	}
 }
 
