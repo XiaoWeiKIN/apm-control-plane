@@ -3,6 +3,7 @@ package gormrepo
 import (
 	"context"
 	"errors"
+	"unicode/utf8"
 	"fmt"
 	"math"
 	"time"
@@ -19,6 +20,7 @@ import (
 var (
 	ErrNotFound  = errors.New("agent not found")
 	ErrOwnership = errors.New("agent instance owned by a different credential")
+	ErrInvalidObservation = errors.New("invalid agent observation")
 )
 
 type AgentRecord struct {
@@ -96,6 +98,27 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("agent_instances schema missing: run Goose migrations for %s", cfg.Driver)
 	}
+	columns, err := db.Migrator().ColumnTypes(&AgentRecord{})
+	if err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("inspect agent_instances schema: %w", err)
+	}
+	present := make(map[string]bool, len(columns))
+	for _, column := range columns {
+		present[column.Name()] = true
+	}
+	for _, name := range []string{
+		"workspace_id", "instance_uid", "credential_id", "agent_kind",
+		"distribution", "distribution_version", "service_name",
+		"service_namespace", "environment", "service_version",
+		"last_seen", "last_transport", "healthy", "capabilities",
+		"reported_hash", "config_status", "config_error",
+	} {
+		if !present[name] {
+			_ = sqlDB.Close()
+			return nil, fmt.Errorf("agent_instances column %q missing: initialize the current Goose schema", name)
+		}
+	}
 	return &Store{db: db}, nil
 }
 
@@ -109,13 +132,37 @@ func (s *Store) Close() error {
 
 func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs Observation) (AgentRecord, error) {
 	if p.WorkspaceID == "" || p.CredentialID == "" || len(uid) != 32 || obs.SeenAt.IsZero() {
-		return AgentRecord{}, fmt.Errorf("invalid agent identity or observation")
+		return AgentRecord{}, fmt.Errorf("%w: invalid agent identity or observation", ErrInvalidObservation)
 	}
 	if obs.Capabilities > math.MaxInt64 {
-		return AgentRecord{}, fmt.Errorf("unsupported capabilities bitmask")
+		return AgentRecord{}, fmt.Errorf("%w: unsupported capabilities bitmask", ErrInvalidObservation)
 	}
 	if obs.Transport != "http" && obs.Transport != "websocket" {
-		return AgentRecord{}, fmt.Errorf("unsupported transport")
+		return AgentRecord{}, fmt.Errorf("%w: unsupported transport", ErrInvalidObservation)
+	}
+	if obs.Description != nil {
+		for _, field := range []struct {
+			name string
+			value string
+			max int
+		}{
+			{"agent_kind", obs.Description.Kind, 64},
+			{"distribution", obs.Description.Distribution, 128},
+			{"distribution_version", obs.Description.DistributionVersion, 64},
+			{"service_name", obs.Description.Service, 255},
+			{"service_namespace", obs.Description.Namespace, 255},
+			{"environment", obs.Description.Environment, 128},
+			{"service_version", obs.Description.ServiceVersion, 64},
+		} {
+			if utf8.RuneCountInString(field.value) > field.max {
+				return AgentRecord{}, fmt.Errorf("%w: %s exceeds %d characters", ErrInvalidObservation, field.name, field.max)
+			}
+		}
+	}
+	if obs.Config != nil {
+		if len(obs.Config.Hash) > 64 || len(obs.Config.Status) > 32 || len(obs.Config.Error) > 8192 {
+			return AgentRecord{}, fmt.Errorf("%w: remote config status exceeds storage limits", ErrInvalidObservation)
+		}
 	}
 	seenAt := obs.SeenAt.UTC()
 	seed := AgentRecord{
