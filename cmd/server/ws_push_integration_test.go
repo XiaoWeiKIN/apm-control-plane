@@ -214,9 +214,38 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			})
 			assignmentState("WAITING_ACK")
 
-			// 3. 断开 WS 后发布新 Revision，重连读取数据库恢复最新 Desired。
+			// 3. 离线发布后重启 Gateway 与 Store；新会话只能从数据库恢复 Desired。
 			_ = conn.Close()
 			third := publish(0.9)
+			if err := reg.stop(); err != nil {
+				t.Fatal(err)
+			}
+			server.Close()
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			store, err = gormrepo.Open(ctx, appconfig.Database{
+				Driver: tt.driver, DSN: dsn, MaxOpen: 8, MaxIdle: 2, MaxLifetime: time.Minute,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			reg = newRegistry(store, time.Second)
+			reg.delivery = store
+			defer reg.stop()
+			handler, cc, err = makeGateway(reg, auth.New([]appconfig.Credential{
+				{ID: "java-credential", WorkspaceID: workspace, Token: "ws-agent-token-long"},
+			}), log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mux = http.NewServeMux()
+			mux.HandleFunc("/v1/opamp", handler)
+			server = httptest.NewUnstartedServer(mux)
+			server.Config.ConnContext = cc
+			server.Start()
+			defer server.Close()
 			reconnected := connect()
 			defer reconnected.Close()
 			send(reconnected, 1, nil)
