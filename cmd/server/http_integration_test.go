@@ -43,12 +43,12 @@ func TestAgentRegistrationThroughOpAMPToDatabaseAndAPI(t *testing.T) {
 			t.Cleanup(func() { _ = store.Close() })
 			reg := newRegistry(store, 1*time.Millisecond)
 			agentAuth := auth.New([]appconfig.Credential{
-				{ID: "agent-a", TenantID: "team-one", Token: "long-agent-secret-for-test"},
-				{ID: "agent-b", TenantID: "team-one", Token: "other-long-agent-token"},
+				{ID: "agent-a", WorkspaceID: "team-one", Token: "long-agent-secret-for-test"},
+				{ID: "agent-b", WorkspaceID: "team-one", Token: "other-long-agent-token"},
 			})
 			adminAuth := auth.New([]appconfig.Credential{
-				{ID: "admin-a", TenantID: "team-one", Token: "long-admin-secret-for-test"},
-				{ID: "admin-b", TenantID: "team-two", Token: "other-long-admin-token"},
+				{ID: "admin-a", WorkspaceID: "team-one", Token: "long-admin-secret-for-test"},
+				{ID: "admin-b", WorkspaceID: "team-two", Token: "other-long-admin-token"},
 			})
 			handler, connContext, err := makeGateway(reg, agentAuth, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			if err != nil {
@@ -123,13 +123,16 @@ func TestAgentRegistrationThroughOpAMPToDatabaseAndAPI(t *testing.T) {
 				return res.StatusCode, body
 			}
 			code, state := get("long-admin-secret-for-test")
-			if code != http.StatusOK || state["service_name"] != "payments" || state["agent_kind"] != "opamp-test-agent" {
+			if code != http.StatusOK || state["workspace_id"] != "team-one" || state["service_name"] != "payments" || state["agent_kind"] != "opamp-test-agent" {
 				t.Fatalf("API did not reflect OpAMP registration: %d %+v", code, state)
 			}
-			if code, _ := get("other-long-admin-token"); code != http.StatusNotFound {
-				t.Fatalf("cross tenant API leaked Agent: %d", code)
+			if _, legacyFieldPresent := state["tenant_id"]; legacyFieldPresent {
+				t.Fatal("obsolete tenant_id should not be present in Agent API response")
 			}
-			// Another authenticated credential in the same Tenant may not
+			if code, _ := get("other-long-admin-token"); code != http.StatusNotFound {
+				t.Fatalf("cross workspace API leaked Agent: %d", code)
+			}
+			// Another authenticated credential in the same Workspace may not
 			// take over an existing Instance UID. Even if OpAMP's HTTP
 			// callback reports no per-message 403, the persisted owner and
 			// all Agent metadata must remain unchanged.

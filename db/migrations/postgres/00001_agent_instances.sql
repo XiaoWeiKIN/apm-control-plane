@@ -1,6 +1,6 @@
 -- +goose Up
 CREATE TABLE agent_instances (
-    tenant_id VARCHAR(96) NOT NULL,
+    workspace_id VARCHAR(96) NOT NULL,
     instance_uid VARCHAR(32) NOT NULL,
     credential_id VARCHAR(128) NOT NULL,
     agent_kind VARCHAR(64) NOT NULL DEFAULT 'unknown',
@@ -17,9 +17,9 @@ CREATE TABLE agent_instances (
     reported_hash VARCHAR(64) NOT NULL DEFAULT '',
     config_status VARCHAR(32) NOT NULL DEFAULT '',
     config_error TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (tenant_id, instance_uid)
+    PRIMARY KEY (workspace_id, instance_uid)
 );
-CREATE INDEX agent_instances_last_seen_idx ON agent_instances (tenant_id, last_seen);
+CREATE INDEX agent_instances_last_seen_idx ON agent_instances (workspace_id, last_seen);
 
 -- +goose Down
 DROP TABLE agent_instances;

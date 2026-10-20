@@ -11,4 +11,4 @@ database:
 
 # APM_DATABASE_DSN is read from the environment/Secret at startup.
 # APM_AGENT_CREDENTIALS_JSON and APM_ADMIN_CREDENTIALS_JSON contain
-# [{"id":"...","tenant_id":"...","token":"..."}] (env only, not YAML).
+# [{"id":"...","workspace_id":"...","token":"..."}] (env only, not YAML).
