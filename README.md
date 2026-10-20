@@ -4,6 +4,7 @@ A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Ag
 
 ## Developer documentation
 
+- [核心模块与职责边界：六个功能模块 + 三个支撑模块](docs/architecture/modules.md) — Gateway、Registry、Policy、Config、Release、Reconciler 的状态归属、依赖关系、Go Package 和 P2 实施顺序。
 - [完整数据库设计：Workspace Scope / P1–P3](docs/architecture/storage-schema.md) — 11 张逻辑表、外键、CAS、审计与 Goose Schema。
 - [P1.1 Agent Inventory 运行说明](docs/architecture/p1-durable-inventory.md) — Workspace 凭证、双数据库启动、重连与当前限制。
 - [总体架构](docs/architecture/README.md)、[技术选型](docs/architecture/technology-selection.md)、[受治理 DD-001（Draft）](docs/design-docs/dd-001_opamp-control-plane.md)。
