@@ -60,7 +60,7 @@ flowchart TB
 | **Policy Manager** | 规则版本、Scope、Selector、Priority | 不可变 Policy Revision、Binding、匹配排序与冲突检测 | OpAMP 网络写、生成所有 Agent 共用的固定 JSON | `policies`、`policy_revisions`、`policy_bindings` | **P2 待实现** |
 | **Config Manager** | 选中的规则、AgentKind/发行版/能力 | 确定性完整 ConfigMap/Hash、不可变 Config Revision；后续按 Agent 能力判定 | 持有网络连接、管理灰度批次 | `config_revisions` | **P2.1 Java 编译和存储已实现；通用 Adapter/能力匹配仍待实现** |
 | **Release Manager** | 经过授权的配置发布/回滚请求 | Release、冻结 Target、Agent 当前 Desired Assignment、提交事务和审计 | 把 SENT 当 APPLIED、在事务内发送 OpAMP | `config_releases`、`release_targets`、`config_events`；与 Assignment 同 Tx | **P2.2 已实现单 Agent Pending 发布；P3 灰度/回滚未实现** |
-| **Reconciler** | 持久 Assignment、当前 Agent 能力/会话、OpAMP ACK | Desired/Observed 对账、ACK 归因、响应式投递、重试期限 | 修改不可变 Revision、绕过授权写新策略 | `agent_assignments`（当前版本与 CAS） | **P2.3a 已合并；P2.3b WS Push + 5 秒在线会话检查已提交，待 CI 验证** |
+| **Reconciler** | 持久 Assignment、当前 Agent 能力/会话、OpAMP ACK | Desired/Observed 对账、ACK 归因、响应式投递、重试期限 | 修改不可变 Revision、绕过授权写新策略 | `agent_assignments`（当前版本与 CAS） | **P2.3a 已合并；P2.3b 单进程 WS Push、在线重试和断线重连已通过双数据库/Go/RF CI** |
 
 这张表描述**拥有者**而非“每张表都要一层 Repo”。`agent_assignments` 的 Desired 由 Release 在发布事务内变更；Observed 和投递进度由 Reconciler/ACK 处理，但二者属于同一持久 Assignment 记录。应通过存储事务和 CAS 保护，不为拆分代码而制造两个相互冲突的事实源。
 
