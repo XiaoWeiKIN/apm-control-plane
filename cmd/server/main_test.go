@@ -340,3 +340,58 @@ func TestStopWaitsForPendingWriteAndRejectsNewObservations(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestServeWaitsForHTTPRequestsToDrain(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(entered)
+		<-release
+		w.WriteHeader(http.StatusOK)
+	})}
+	done := make(chan error, 1)
+	go func() { done <- serve(ctx, srv, listener, newRegistry(newFakeStore(), time.Second)) }()
+	clientDone := make(chan error, 1)
+	go func() {
+		res, err := (&http.Client{Timeout: 3 * time.Second}).Get("http://" + listener.Addr().String())
+		if err == nil {
+			_ = res.Body.Close()
+		}
+		clientDone <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2*time.Second):
+		t.Fatal("HTTP request did not reach handler")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		t.Fatalf("serve exited before request completion: %v", err)
+	case <-time.After(75 * time.Millisecond):
+	}
+	unblock()
+	if err := <-clientDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInvalidObservationIsOpAMPBadRequest(t *testing.T) {
+	reply := processingErrorResponse(make([]byte, 16), gormrepo.ErrInvalidObservation)
+	if reply.ErrorResponse == nil ||
+		reply.ErrorResponse.Type != protobufs.ServerErrorResponseType_ServerErrorResponseType_BadRequest ||
+		reply.RemoteConfig != nil || reply.Capabilities != 0 {
+		t.Fatalf("invalid Agent metadata should yield only error_response: %+v", reply)
+	}
+}
