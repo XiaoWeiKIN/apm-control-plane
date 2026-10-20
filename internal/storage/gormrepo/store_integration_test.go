@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,6 +96,44 @@ func TestRepositoryContractPostgresAndMySQL(t *testing.T) {
 			}
 			if restored.ReportedHash != "aabbcc" || restored.ConfigStatus != "APPLIED" || restored.ServiceName != "checkout" || restored.LastSeen.IsZero() {
 				t.Fatalf("persistence lost: %+v", restored)
+			}
+		})
+	}
+}
+
+func TestInvalidObservationNeverPersists(t *testing.T) {
+	for _, tt := range []struct{ driver, env string }{
+		{"postgres", "APM_TEST_POSTGRES_DSN"},
+		{"mysql", "APM_TEST_MYSQL_DSN"},
+	} {
+		t.Run(tt.driver, func(t *testing.T) {
+			dsn := os.Getenv(tt.env)
+			if dsn == "" {
+				t.Skip(tt.env + " not configured")
+			}
+			ctx := context.Background()
+			store, err := Open(ctx, appconfig.Database{Driver: tt.driver, DSN: dsn, MaxOpen: 3, MaxIdle: 1, MaxLifetime: time.Minute})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			p := auth.Principal{WorkspaceID: "test-workspace", CredentialID: "test-credential"}
+			for _, tc := range []struct {
+				name string
+				obs Observation
+			}{
+				{"oversized service", Observation{SeenAt: time.Now().UTC(), Transport: "http", Description: &Description{Kind: "java-apm", Service: strings.Repeat("x", 256)}}},
+				{"oversized config error", Observation{SeenAt: time.Now().UTC(), Transport: "http", Config: &ConfigStatus{Status: "FAILED", Error: strings.Repeat("x", 8193)}}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					id := newUID(t)
+					if _, err := store.Observe(ctx, p, id, tc.obs); !errors.Is(err, ErrInvalidObservation) {
+						t.Fatalf("invalid observation accepted: %v", err)
+					}
+					if _, err := store.Get(ctx, p.WorkspaceID, id); !errors.Is(err, ErrNotFound) {
+						t.Fatalf("invalid observation changed Inventory: %v", err)
+					}
+				})
 			}
 		})
 	}
