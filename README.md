@@ -18,9 +18,15 @@ A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Ag
 - Instance identity `(workspace_id, instance_uid)`; the credential that first registers the UID retains ownership within that Workspace.
 - Service metadata, Agent Kind/Distribution/Version, capabilities, latest health and RemoteConfigStatus snapshots.
 - HTTP polling freshness and WebSocket session handling have separate connection semantics.
-- The existing per-agent `PUT /sampling` endpoint remains an **ephemeral P0 demonstration**. ConfigRevision, durable Desired State, Release and Reconciler are not yet implemented.
+- The existing per-agent `PUT /sampling` endpoint remains an **ephemeral P0 demonstration**. P2.1 adds compile-and-persist ConfigRevisions without changing that route; durable Desired State, Release and Reconciler are not yet implemented.
 
 **Workspace means a workspace of the larger observability platform**, shared conceptually with logs, metrics, traces and dashboards. This service does **not** create a separate Tenant table or accept Agent-declared Workspace IDs as permission. Current P1.1 obtains trusted scope from operator-supplied credential configuration; integration with the platform's authoritative Workspace/IAM service is a separate security/design task.
+
+## P2.1: Java ConfigRevision compilation and storage
+
+The P2.1 code increment includes `internal/config.CompileJavaSampling` and `gormrepo.Store.CreateConfigRevision/GetConfigRevision`. It compiles a single Java `apm/sampling.json` to a **complete serialized OpAMP ConfigMap**, stores its immutable bytes and SHA-256 hash under a new Workspace-scoped UUID Revision, and can read the same bytes after reopening PostgreSQL or MySQL.
+
+Before using these internal operations, run Goose migration `00002_config_revisions.sql` for your configured driver (the `goose ... up` commands below apply both 00001 and 00002). **There is no new Management API route, Agent publication or runtime JVM sampling integration in P2.1.** The hash in this new compiled snapshot covers the deterministic protobuf ConfigMap bytes, while the existing P0 demo route remains unchanged.
 
 ## Local startup
 
