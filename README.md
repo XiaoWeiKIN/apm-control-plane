@@ -4,6 +4,8 @@ A Go-based **OpAMP Agent Control Plane**. Long-term scope: Java, Go, Python and 
 
 ## Developer architecture documentation
 
+- [**Control Plane 数据库 Schema 设计（P1–P3，待评审）**](docs/architecture/storage-schema.md) — 12 张核心逻辑表、ER 关系、字段/主外键、索引、CAS、审计、跨数据库 Migration。
+
 - [**P1.1 Durable Inventory runbook（中文）**](docs/architecture/p1-durable-inventory.md) — PostgreSQL/MySQL Migration、Scoped Credentials、实例持久化与当前限制。
 
 - [**RF Research R-001：开源项目架构对比**](docs/research/active/r-001_opamp-oss-architecture/RESEARCH.md) — Gitea / Grafana / Casdoor / Collector 的源码证据与迁移边界。
