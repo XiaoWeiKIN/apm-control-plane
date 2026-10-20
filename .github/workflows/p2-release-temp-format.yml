@@ -21,7 +21,7 @@ jobs:
       - name: Normalize source and commit if needed
         run: |
           set -euo pipefail
-          gofmt -w cmd/server/releases.go cmd/server/releases_test.go cmd/server/releases_integration_test.go internal/storage/gormrepo/releases.go internal/storage/gormrepo/releases_integration_test.go
+          gofmt -w cmd/server/releases.go cmd/server/releases_test.go cmd/server/releases_integration_test.go internal/storage/gormrepo/store.go internal/storage/gormrepo/releases.go internal/storage/gormrepo/releases_integration_test.go
           go mod tidy
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
