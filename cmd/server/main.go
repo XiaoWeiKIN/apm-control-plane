@@ -51,6 +51,7 @@ type registry struct {
 	inFlight      sync.WaitGroup
 	closing       bool
 	store         AgentStore
+	delivery      deliveryStore
 	sessions      map[string]*runtimeAgent
 	wsConnections map[types.Connection]struct{}
 	pollTTL       time.Duration
@@ -243,7 +244,22 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 	if err != nil {
 		return nil, false, err
 	}
-	// 3. 更新该 Agent 的运行时状态并决定本次是否需要下发配置。
+	// 3. 对账持久 Desired/Observed；先提交 ACK 和投递意图，网络响应随后发送。
+	var durable *protobufs.AgentRemoteConfig
+	assigned := false
+	if r.delivery != nil {
+		config, exists, err := r.delivery.ReconcileAgentConfig(ctx, p.WorkspaceID, id, status)
+		if err != nil {
+			return nil, false, err
+		}
+		assigned = exists
+		durable, err = remoteConfigFromDesired(config)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+
+	// 4. 更新该 Agent 的运行时状态；持久 Assignment 优先于 P0 内存演示配置。
 	rt.sequence = msg.SequenceNum
 	if isWS {
 		rt.conn = conn
@@ -254,6 +270,9 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 		} else {
 			rt.configStatus = "PENDING"
 		}
+	}
+	if assigned {
+		return durable, full, nil
 	}
 	if rt.remote == nil || msg.Capabilities&uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig) == 0 {
 		return nil, full, nil
@@ -577,6 +596,7 @@ func run(ctx context.Context, log *slog.Logger) (runErr error) {
 
 	// 3. 装配可信 Workspace 认证、Registry、OpAMP 及管理 API。
 	reg := newRegistry(store, cfg.HTTPPollingTTL)
+	reg.delivery = store
 	handler, connCtx, err := makeGateway(reg, auth.New(cfg.AgentCredentials), log)
 	if err != nil {
 		return fmt.Errorf("opamp attach failed: %w", err)

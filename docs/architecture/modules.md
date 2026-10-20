@@ -2,7 +2,7 @@
 
 > **性质**：开发者详细架构 / P2 实现合同草案。本文记录模块划分、依赖方向与增量开发顺序；不是新的 DD-NNN、ADR，也不代表 [DD-001](../design-docs/dd-001_opamp-control-plane.md) 已获批准。[EP-001](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) 的身份安全阻塞继续有效。
 >
-> **事实基线**：`main@67292b7daf7ab5d7b399af0c82250456927c0435` 已合并 P1.1 与 P2.1 ConfigRevision。本 P2.2 分支新增单 Agent Release/Target/Assignment/Event 原子 Pending 发布。**Reconciler、ACK 状态机、Policy Selector 和 P3 灰度尚未实现。** `internal/release` 是目标模块边界；现在仅有 `cmd/server/releases.go` 的 API 与 `gormrepo/releases.go` 的事务逻辑，不为了目录对称新增空包。
+> **事实基线**：`main@220edaf1feb13699a65af6ded488d10cac324ef2` 已合并 P1.1、P2.1 ConfigRevision 和 P2.2 单 Agent Release/Target/Assignment/Event 原子 Pending 发布。本 P2.3a 分支在持久 Desired 上增加 OpAMP 响应式配置投递与 ACK 收敛。**P2.3a 已提交持久 ACK 对账与 HTTP/WS 消息响应下发；WS 主动推送、后台扫描、Policy Selector 和 P3 灰度尚未实现。** `internal/release` 是目标模块边界；现在仅有 `cmd/server/releases.go` 的 API 与 `gormrepo/releases.go` 的事务逻辑，不为了目录对称新增空包。
 >
 > **读者任务**：决定某个功能应该放在哪个模块，理解一次配置发布与回执如何流转，按照最小的跨模块依赖开发 P2。表结构与数据库约束的详细来源见 [Workspace Schema 设计](storage-schema.md)。
 
@@ -60,7 +60,7 @@ flowchart TB
 | **Policy Manager** | 规则版本、Scope、Selector、Priority | 不可变 Policy Revision、Binding、匹配排序与冲突检测 | OpAMP 网络写、生成所有 Agent 共用的固定 JSON | `policies`、`policy_revisions`、`policy_bindings` | **P2 待实现** |
 | **Config Manager** | 选中的规则、AgentKind/发行版/能力 | 确定性完整 ConfigMap/Hash、不可变 Config Revision；后续按 Agent 能力判定 | 持有网络连接、管理灰度批次 | `config_revisions` | **P2.1 Java 编译和存储已实现；通用 Adapter/能力匹配仍待实现** |
 | **Release Manager** | 经过授权的配置发布/回滚请求 | Release、冻结 Target、Agent 当前 Desired Assignment、提交事务和审计 | 把 SENT 当 APPLIED、在事务内发送 OpAMP | `config_releases`、`release_targets`、`config_events`；与 Assignment 同 Tx | **P2.2 已实现单 Agent Pending 发布；P3 灰度/回滚未实现** |
-| **Reconciler** | 持久 Assignment、当前 Agent 能力/会话、OpAMP ACK | Desired/Observed 对账、幂等发送、ACK 归因、重试、恢复 | 修改不可变 Revision、绕过授权写新策略 | `agent_assignments`（当前版本与 CAS） | **P2 待实现** |
+| **Reconciler** | 持久 Assignment、当前 Agent 能力/会话、OpAMP ACK | Desired/Observed 对账、ACK 归因、响应式投递、重试期限 | 修改不可变 Revision、绕过授权写新策略 | `agent_assignments`（当前版本与 CAS） | **P2.3a 已提交响应式下发/ACK；主动 WS Push 和定时扫描待实现** |
 
 这张表描述**拥有者**而非“每张表都要一层 Repo”。`agent_assignments` 的 Desired 由 Release 在发布事务内变更；Observed 和投递进度由 Reconciler/ACK 处理，但二者属于同一持久 Assignment 记录。应通过存储事务和 CAS 保护，不为拆分代码而制造两个相互冲突的事实源。
 
@@ -122,7 +122,7 @@ Reconciler 在 DB 中读取当前 `agent_assignments`（Desired）和 Agent 回�
 | --- | --- | --- |
 | **Workspace / Auth** | 分离 Agent/Admin Credential，生成可信 Workspace Principal，授权后才执行 Registry/发布操作 | `internal/auth` 已支持受信配置里的 `workspace_id`；**尚未真正接入平台 Workspace/IAM 的存在性、角色和撤销验证** |
 | **Management API** | HTTP 路由、入参验证、认证/授权、资源响应与错误映射；调用 Release/Registry | `cmd/server/main.go` 已有 Inventory 和 P0 Demo API；P2 的 Policy/Release API 未实现 |
-| **Storage** | 通过 GORM + 选定 PostgreSQL/MySQL Dialector 实现业务查询、事务、CAS 与错误映射；Goose 独立迁移 | P1.1 + P2.1 已有；**P2.2 新增 Goose 00003、单 Agent 原子 Release/Assignment CAS**，ACK 更新待 P2.3 |
+| **Storage** | 通过 GORM + 选定 PostgreSQL/MySQL Dialector 实现业务查询、事务、CAS 与错误映射；Goose 独立迁移 | P1.1 + P2.1 已有；**P2.2 新增 Goose 00003、单 Agent 原子 Release/Assignment CAS**，P2.3a 已提交 ACK 状态更新 |
 
 **优先复用现有 GORM Repository**，不要为每张业务表都建立一次转发型 Service/Repository/UnitOfWork。只有发布事务确实需要跨多组操作、或测试需要隔离边界时，才定义必要的事务方法与接口。PostgreSQL 与 MySQL 采用**同一套业务实现与行为合同测试**，仅保留需要的 Dialector 与 SQL Migration 差异。
 
@@ -183,7 +183,7 @@ db/migrations/
 | --- | --- | --- |
 | **P2.1** 配置内容 | Config + Storage | 编译一个 Java `apm/sampling.json`，持久化完整 ConfigRevision/Hash，双数据库读回后字节一致；不冒充动态 JVM 采样已成功 |
 | **P2.2** 发布事务 | Release + Storage | Admin 针对**单个 Agent** 发布，Release/Target/Assignment/Event 同一个事务提交或全部失败；Desired 重启后不丢 |
-| **P2.3** 协调闭环 | Reconciler + Gateway + Registry | 真实 OpAMP HTTP 轮询收到配置，WS 按适配路径串行发送；匹配 ACK 才更新状态；旧 ACK、断线、重启和拒绝情况可恢复 |
+| **P2.3a** 响应式协调 | Reconciler + Gateway + Registry | 真实 OpAMP HTTP 轮询与 WS 消息响应获得配置；匹配 ACK 更新状态；旧 ACK 不污染新 Generation（见 [P2.3 文档](p2-reconcile-delivery.md)） |
 | **P2.4** 策略解析 | Policy + Config + Release | Workspace/Environment/Service Selector 确定性匹配，优先级冲突显式拒绝，Java-only Adapter 不错发 Go/Python/Collector |
 | **P3** 受控发布 | Release（扩展 Rollout） | 冻结目标、分批、失败停止扩散、显式回滚产生新 Release/审计事件 |
 
