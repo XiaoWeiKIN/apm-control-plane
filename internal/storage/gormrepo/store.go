@@ -80,6 +80,7 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 	db, err := gorm.Open(dialector, &gorm.Config{
 		Logger:                 logger.Default.LogMode(logger.Silent),
 		SkipDefaultTransaction: true,
+		TranslateError:         true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
@@ -120,6 +121,22 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 		if !present[name] {
 			_ = sqlDB.Close()
 			return nil, fmt.Errorf("agent_instances column %q missing: initialize the current Goose schema", name)
+		}
+	}
+	// P2.2 需要完整事务表，缺少 Migration 00003 时不得启动可接受发布的 API。
+	for _, table := range []struct {
+		name  string
+		model any
+	}{
+		{"config_revisions", &ConfigRevisionRecord{}},
+		{"config_releases", &ConfigReleaseRecord{}},
+		{"release_targets", &ReleaseTargetRecord{}},
+		{"agent_assignments", &AgentAssignmentRecord{}},
+		{"config_events", &ConfigEventRecord{}},
+	} {
+		if !db.Migrator().HasTable(table.model) {
+			_ = sqlDB.Close()
+			return nil, fmt.Errorf("%s schema missing: run Goose migrations for %s", table.name, cfg.Driver)
 		}
 	}
 	return &Store{db: db}, nil

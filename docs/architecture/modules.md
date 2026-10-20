@@ -2,7 +2,7 @@
 
 > **性质**：开发者详细架构 / P2 实现合同草案。本文记录模块划分、依赖方向与增量开发顺序；不是新的 DD-NNN、ADR，也不代表 [DD-001](../design-docs/dd-001_opamp-control-plane.md) 已获批准。[EP-001](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) 的身份安全阻塞继续有效。
 >
-> **事实基线**：`main@0d15166dc5dfb18c7887e4a3a6c1da0545ac4a45`（2026-10-20）已包含 P1.1 Workspace-scoped Inventory 与可靠性修复；**本 P2.1 分支**实现 Java Sampling ConfigRevision 的确定性编译与 PostgreSQL/MySQL 持久化。Release、Assignment、Reconciler、Policy Selector 和 P3 Rollout 仍未实现。目标包名未必都是已有源码。
+> **事实基线**：`main@67292b7daf7ab5d7b399af0c82250456927c0435` 已合并 P1.1 与 P2.1 ConfigRevision。本 P2.2 分支新增单 Agent Release/Target/Assignment/Event 原子 Pending 发布。**Reconciler、ACK 状态机、Policy Selector 和 P3 灰度尚未实现。** `internal/release` 是目标模块边界；现在仅有 `cmd/server/releases.go` 的 API 与 `gormrepo/releases.go` 的事务逻辑，不为了目录对称新增空包。
 >
 > **读者任务**：决定某个功能应该放在哪个模块，理解一次配置发布与回执如何流转，按照最小的跨模块依赖开发 P2。表结构与数据库约束的详细来源见 [Workspace Schema 设计](storage-schema.md)。
 
@@ -59,7 +59,7 @@ flowchart TB
 | **OpAMP Gateway** | AgentToServer、HTTP/WS 连接、发送请求 | OpAMP 编解码、连接回调、Session 生命周期、协议错误、按传输模式发送 | 选择策略、保存唯一 Desired、判断业务发布成功 | WS Session 在内存 | **P1.1 已实现接入与响应下发** |
 | **Policy Manager** | 规则版本、Scope、Selector、Priority | 不可变 Policy Revision、Binding、匹配排序与冲突检测 | OpAMP 网络写、生成所有 Agent 共用的固定 JSON | `policies`、`policy_revisions`、`policy_bindings` | **P2 待实现** |
 | **Config Manager** | 选中的规则、AgentKind/发行版/能力 | 确定性完整 ConfigMap/Hash、不可变 Config Revision；后续按 Agent 能力判定 | 持有网络连接、管理灰度批次 | `config_revisions` | **P2.1 Java 编译和存储已实现；通用 Adapter/能力匹配仍待实现** |
-| **Release Manager** | 经过授权的配置发布/回滚请求 | Release、冻结 Target、Agent 当前 Desired Assignment、提交事务和审计 | 把 SENT 当 APPLIED、在事务内发送 OpAMP | `config_releases`、`release_targets`、`config_events`；与 Assignment 同 Tx | **P2 基本发布 / P3 灰度** |
+| **Release Manager** | 经过授权的配置发布/回滚请求 | Release、冻结 Target、Agent 当前 Desired Assignment、提交事务和审计 | 把 SENT 当 APPLIED、在事务内发送 OpAMP | `config_releases`、`release_targets`、`config_events`；与 Assignment 同 Tx | **P2.2 已实现单 Agent Pending 发布；P3 灰度/回滚未实现** |
 | **Reconciler** | 持久 Assignment、当前 Agent 能力/会话、OpAMP ACK | Desired/Observed 对账、幂等发送、ACK 归因、重试、恢复 | 修改不可变 Revision、绕过授权写新策略 | `agent_assignments`（当前版本与 CAS） | **P2 待实现** |
 
 这张表描述**拥有者**而非“每张表都要一层 Repo”。`agent_assignments` 的 Desired 由 Release 在发布事务内变更；Observed 和投递进度由 Reconciler/ACK 处理，但二者属于同一持久 Assignment 记录。应通过存储事务和 CAS 保护，不为拆分代码而制造两个相互冲突的事实源。
@@ -78,7 +78,7 @@ Gateway 把 `protobufs.AgentToServer` 映射为 Agent Observation/配置回执�
 - **WebSocket**：长连接，可主动发新配置；连接所有权、断开及 Writer 并发管理留在运行时，不能直接写数据库。
 - **收到 ACK**：先保存 Agent 自报的 Hash/状态事实，再交给 Reconciler 对比当前 Desired；发送成功绝不等于 `APPLIED`。
 
-当前已实现的是 P1.1 的 HTTP/WS 基础接入和响应式 Demo 配置；**主动 WS 发布队列、ConfigRevision 驱动的重发和跨 Gateway 会话转移仍未实现**。
+当前已实现的是 P1.1 的 HTTP/WS 基础接入和响应式 Demo 配置；**P2.2 的 Pending Release 不会经由现有 Gateway 下发**。主动 WS 发布队列、ConfigRevision 驱动的重发和跨 Gateway 会话转移仍未实现。
 
 ### 2.3 Policy Manager
 
@@ -122,7 +122,7 @@ Reconciler 在 DB 中读取当前 `agent_assignments`（Desired）和 Agent 回�
 | --- | --- | --- |
 | **Workspace / Auth** | 分离 Agent/Admin Credential，生成可信 Workspace Principal，授权后才执行 Registry/发布操作 | `internal/auth` 已支持受信配置里的 `workspace_id`；**尚未真正接入平台 Workspace/IAM 的存在性、角色和撤销验证** |
 | **Management API** | HTTP 路由、入参验证、认证/授权、资源响应与错误映射；调用 Release/Registry | `cmd/server/main.go` 已有 Inventory 和 P0 Demo API；P2 的 Policy/Release API 未实现 |
-| **Storage** | 通过 GORM + 选定 PostgreSQL/MySQL Dialector 实现业务查询、事务、CAS 与错误映射；Goose 独立迁移 | P1.1 Inventory + **P2.1 `config_revisions` Goose 00002 和创建/查询已实现**；Release/Assignment Schema 未实施 |
+| **Storage** | 通过 GORM + 选定 PostgreSQL/MySQL Dialector 实现业务查询、事务、CAS 与错误映射；Goose 独立迁移 | P1.1 + P2.1 已有；**P2.2 新增 Goose 00003、单 Agent 原子 Release/Assignment CAS**，ACK 更新待 P2.3 |
 
 **优先复用现有 GORM Repository**，不要为每张业务表都建立一次转发型 Service/Repository/UnitOfWork。只有发布事务确实需要跨多组操作、或测试需要隔离边界时，才定义必要的事务方法与接口。PostgreSQL 与 MySQL 采用**同一套业务实现与行为合同测试**，仅保留需要的 Dialector 与 SQL Migration 差异。
 
@@ -137,8 +137,8 @@ Workspace 概念与 Logs/Metrics/Traces/Dashboard 属于同一可观测平台，
 | P0 Demo Sampling RemoteConfig/DesiredHash | `runtimeAgent` | ConfigRevision + Release/Assignment 替代 | **当前仅内存，P2 改为数据库** |
 | Policy 规则和 Selector | 未实现 | Policy | 数据库中的不可变 Revision + 可变 Binding |
 | 完整 ConfigMap/Hash | P0 Demo 按需生成；**P2.1 已能独立编译并持久化 Java ConfigRevision** | Config | 不可变 `config_revisions`；目前与 P0 Demo 分开 |
-| 目标快照与发布审计 | 未实现 | Release | `config_releases`、`release_targets`、`config_events` |
-| 当前 Desired/Observed 与 CAS | 尚无持久 Assignment | Release 写 Desired，Reconciler 写 Observed | `agent_assignments` |
+| 目标快照与发布审计 | P2.2 已实现单 Agent Pending Release、冻结 Target 和 TARGET_ASSIGNED 事件 | Release | `config_releases`、`release_targets`、`config_events` |
+| 当前 Desired/Observed 与 CAS | P2.2 已实现 Desired + Generation/RowVersion CAS；Observed 回执对账待 P2.3 | Release 写 Desired，Reconciler 写 Observed | `agent_assignments` |
 
 ### 4.1 代码依赖原则
 
@@ -164,13 +164,13 @@ internal/
   registry/                  [待拆] AgentKey、资产/Observation
   opamp/                     [待拆] 协议 Handler、Session、WS Writer
   config/                    [P2.1 已有] Java Sampling 编译与不可变 Snapshot
-  release/                   [P2] Release、Target、审计/回滚
+  release/                   [按需迁出] P2.2 发布目前位于 gormrepo 与 cmd/server
   reconcile/                 [P2] Desired/Observed、ACK、重试
   policy/                    [P2 后半] Policy Revision、Selector
   api/                       [按需迁出] Management HTTP API
 db/migrations/
-  postgres/                  [已有 00001 + P2.1 00002]
-  mysql/                     [已有 00001 + P2.1 00002]
+  postgres/                  [已有 00001 + 00002 + P2.2 00003]
+  mysql/                     [已有 00001 + 00002 + P2.2 00003]
 ~~~
 
 **不为拆目录单独提交全量重构**。当前 `cmd/server/main.go` 中同时包含 `registry.update/get/list`、`makeGateway`、`adminHandler` 和临时 `samplingConfig/assign`。随着持久 Config 和 Reconciler 引入，先把被新功能真正复用或阻碍测试的职责迁出，并维持 `/v1/opamp`、`/api/v1/agents` 等现有协议与路由。
@@ -187,7 +187,7 @@ db/migrations/
 | **P2.4** 策略解析 | Policy + Config + Release | Workspace/Environment/Service Selector 确定性匹配，优先级冲突显式拒绝，Java-only Adapter 不错发 Go/Python/Collector |
 | **P3** 受控发布 | Release（扩展 Rollout） | 冻结目标、分批、失败停止扩散、显式回滚产生新 Release/审计事件 |
 
-P2.1 的存储与 P2.2 的发布事务可以在一个紧凑 PR 中交付，不必为“建空表”单独提交没有可观察业务能力的改动。执行顺序按实际依赖调整，但不要跳过存储原子性与 Agent 回执验证。
+P2.1 ConfigRevision 与 P2.2 发布事务已作为相邻独立增量实施。P2.2 的可观察结果是数据库已有 Pending Desired，而非 Agent 已应用配置。执行顺序按实际依赖调整，但不要跳过存储原子性与 Agent 回执验证。
 
 ### 6.1 必须覆盖的错误路径
 

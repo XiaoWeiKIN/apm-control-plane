@@ -18,7 +18,7 @@ A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Ag
 - Instance identity `(workspace_id, instance_uid)`; the credential that first registers the UID retains ownership within that Workspace.
 - Service metadata, Agent Kind/Distribution/Version, capabilities, latest health and RemoteConfigStatus snapshots.
 - HTTP polling freshness and WebSocket session handling have separate connection semantics.
-- The existing per-agent `PUT /sampling` endpoint remains an **ephemeral P0 demonstration**. P2.1 adds compile-and-persist ConfigRevisions without changing that route; durable Desired State, Release and Reconciler are not yet implemented.
+- The existing per-agent `PUT /sampling` endpoint remains an **ephemeral P0 demonstration**. P2.1 adds compiled ConfigRevisions; **P2.2 now persists single-Agent Release/Target/Assignment/audit as Pending without sending OpAMP**. Reconciler and multi-Agent Rollout remain future work.
 
 **Workspace means a workspace of the larger observability platform**, shared conceptually with logs, metrics, traces and dashboards. This service does **not** create a separate Tenant table or accept Agent-declared Workspace IDs as permission. Current P1.1 obtains trusted scope from operator-supplied credential configuration; integration with the platform's authoritative Workspace/IAM service is a separate security/design task.
 
@@ -26,7 +26,19 @@ A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Ag
 
 The P2.1 code increment includes `internal/config.CompileJavaSampling` and `gormrepo.Store.CreateConfigRevision/GetConfigRevision`. It compiles a single Java `apm/sampling.json` to a **complete serialized OpAMP ConfigMap**, stores its immutable bytes and SHA-256 hash under a new Workspace-scoped UUID Revision, and can read the same bytes after reopening PostgreSQL or MySQL.
 
-Before using these internal operations, run Goose migration `00002_config_revisions.sql` for your configured driver (the `goose ... up` commands below apply both 00001 and 00002). **There is no new Management API route, Agent publication or runtime JVM sampling integration in P2.1.** The hash in this new compiled snapshot covers the deterministic protobuf ConfigMap bytes, while the existing P0 demo route remains unchanged.
+Before using these internal operations, run Goose migration `00002_config_revisions.sql` for your configured driver. This new compiled snapshot hashes deterministic protobuf ConfigMap bytes. P2.1 alone does not publish to any Agent.
+
+## P2.2: Persist one Agent's Pending Release
+
+P2.2 adds `db/migrations/{postgres,mysql}/00003_single_agent_releases.sql` and the Workspace-scoped Admin endpoint:
+
+`POST /api/v1/agents/{uid}/releases` with JSON body `{"config_revision_id":"<existing-UUID>"}` and optional `Idempotency-Key` header.
+
+The endpoint checks the Agent's Workspace, type and advertised remote-config capability before atomically creating `config_releases`, a frozen `release_targets` row, current `agent_assignments` Desired, and a `config_events` audit record. The response is HTTP **202** with `release_id`, `desired_generation` and `status: "PENDING"`. A replay with the same key and request does not advance Generation; changing the request under the same key returns Conflict. New publishes supersede previous pending targets and increment Generation.
+
+**HTTP 202 only confirms a committed Desired state.** There is no Reconciler or new OpAMP delivery in P2.2. The P0 `PUT /sampling` remains in-memory. There is also no management endpoint yet for creating ConfigRevisions: P2.1 creates these from internal Go code; P2.2 references an existing Revision ID. JVM runtime sampling remains unverified.
+
+Run Goose `up` for the selected database before startup: **00001, 00002 and 00003 are all required**. Startup fails explicitly if a release table is missing; the service does not alter schemas automatically.
 
 ## Local startup
 
@@ -82,6 +94,7 @@ Never commit real secrets. Local plain HTTP is not a public production authentic
 | GET | `/api/v1/agents` | Workspace-scoped Agent list |
 | GET | `/api/v1/agents/{uid}` | Workspace-scoped instance detail |
 | PUT | `/api/v1/agents/{uid}/sampling` | Ephemeral demo sampling rate, [0,1] |
+| POST | `/api/v1/agents/{uid}/releases` | P2.2 Pending Release intent (Admin token) |
 
 ## Validation
 
