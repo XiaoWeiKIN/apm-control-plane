@@ -1,34 +1,31 @@
 # APM Control Plane
 
-A Go-based **OpAMP Agent Control Plane**. Long-term scope: Java, Go, Python and other APM Agent distributions, with a later path to Collector management. **First deliverable: a custom OpenTelemetry Java Agent**. P0 is a protocol interoperability PoC; branch feat/p1-durable-agent-inventory adds durable multi-database Agent Inventory and scoped credentials, pending PR review.
+A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Agent distributions, with future Collector support. The first operational increment is **durable, workspace-scoped Agent Inventory**; policy revision, reconciler and staged rollout remain future milestones.
 
-## Developer architecture documentation
+## Developer documentation
 
-- [**Control Plane 数据库 Schema 设计（P1–P3，待评审）**](docs/architecture/storage-schema.md) — 12 张核心逻辑表、ER 关系、字段/主外键、索引、CAS、审计、跨数据库 Migration。
+- [完整数据库设计：Workspace Scope / P1–P3](docs/architecture/storage-schema.md) — 11 张逻辑表、外键、CAS、审计与 Goose Schema。
+- [P1.1 Agent Inventory 运行说明](docs/architecture/p1-durable-inventory.md) — Workspace 凭证、双数据库启动、重连与当前限制。
+- [总体架构](docs/architecture/README.md)、[技术选型](docs/architecture/technology-selection.md)、[受治理 DD-001（Draft）](docs/design-docs/dd-001_opamp-control-plane.md)。
+- [开源架构研究 R-001](docs/research/active/r-001_opamp-oss-architecture/RESEARCH.md)。
 
-- [**P1.1 Durable Inventory runbook（中文）**](docs/architecture/p1-durable-inventory.md) — PostgreSQL/MySQL Migration、Scoped Credentials、实例持久化与当前限制。
+## Implemented P1.1
 
-- [**RF Research R-001：开源项目架构对比**](docs/research/active/r-001_opamp-oss-architecture/RESEARCH.md) — Gitea / Grafana / Casdoor / Collector 的源码证据与迁移边界。
+- OpAMP HTTP/WebSocket server at `/v1/opamp`, with credential-based Agent authentication.
+- Agent Inventory in PostgreSQL or MySQL via GORM; schema installed separately through Goose.
+- A **trusted deployment-configured `workspace_id`** on each Agent/Admin credential. Admin inventory queries and Agent ownership are scoped to the same platform Workspace.
+- Instance identity `(workspace_id, instance_uid)`; the credential that first registers the UID retains ownership within that Workspace.
+- Service metadata, Agent Kind/Distribution/Version, capabilities, latest health and RemoteConfigStatus snapshots.
+- HTTP polling freshness and WebSocket session handling have separate connection semantics.
+- The existing per-agent `PUT /sampling` endpoint remains an **ephemeral P0 demonstration**. ConfigRevision, durable Desired State, Release and Reconciler are not yet implemented.
 
-- [**P1–P3 技术选型（中文、待评审）**](docs/architecture/technology-selection.md) — HTTP、配置加载、PostgreSQL/MySQL 多数据库 Driver、GORM、Goose Migration、Telemetry、测试和兼容性选择。
+**Workspace means a workspace of the larger observability platform**, shared conceptually with logs, metrics, traces and dashboards. This service does **not** create a separate Tenant table or accept Agent-declared Workspace IDs as permission. Current P1.1 obtains trusted scope from operator-supplied credential configuration; integration with the platform's authoritative Workspace/IAM service is a separate security/design task.
 
-- [**APM Control Plane：开发者架构指南（中文）**](docs/architecture/README.md) — end-to-end control flow, concepts, module contracts, OpAMP messaging, desired/observed state, persistence, security, extension points, and source navigation.
-- [DD-001 governed design (draft)](docs/design-docs/dd-001_opamp-control-plane.md) — design authority and unresolved decisions; the developer guide does not imply approval.
+## Local startup
 
-## P0 scope
+Requires Go 1.25+, PostgreSQL or MySQL and a fresh development database. Because this project has not yet been deployed with persistent production data, the initial `00001_agent_instances.sql` definition uses `workspace_id` directly. **No migration from a previous `tenant_id` schema is provided.**
 
-- Official `opamp-go` HTTP/WebSocket server at `/v1/opamp`
-- Bearer-authenticated agent connections and a separate administrative token
-- In-memory Agent Inventory (instance UID, service, environment, version, last seen)
-- OpAMP health and RemoteConfigStatus snapshots
-- Per-agent remote sampling-policy JSON with hash-based acknowledgement
-- Standalone HTTP polling test agent, Go unit tests, and GitHub Actions CI
-
-**P0 is a protocol interoperability PoC.** There is no durable database, global service-level policy rollout, or real JVM sampling change yet.
-
-## Local startup (P1 feature branch)
-
-Requires Go 1.25+, PostgreSQL or MySQL, and an explicit schema migration before running the service. Production migrations use **Goose**, not GORM AutoMigrate.
+First run the correct Goose migration:
 
 ```bash
 go install github.com/pressly/goose/v3/cmd/goose@v3.27.0
@@ -36,66 +33,60 @@ go install github.com/pressly/goose/v3/cmd/goose@v3.27.0
 export APM_DB_DRIVER=postgres
 export APM_DATABASE_DSN='postgres://app:replace@127.0.0.1:5432/controlplane?sslmode=disable'
 goose -dir db/migrations/postgres postgres "$APM_DATABASE_DSN" up
+```
 
-export APM_OPAMP_TOKEN='replace-with-long-random-agent-token'
-export APM_ADMIN_TOKEN='replace-with-a-different-long-admin-token'
+For MySQL, use `APM_DB_DRIVER=mysql`, a DSN containing `parseTime=true&loc=UTC`, and `goose -dir db/migrations/mysql mysql "$APM_DATABASE_DSN" up`.
+
+In local development, use two distinct high-entropy replacement tokens. The names below are example shell variables; only the credential JSON variables are read by the **server**:
+
+```bash
+export APM_OPAMP_TOKEN='replace-with-random-agent-token-at-least-16-chars'
+export DEMO_ADMIN_TOKEN='replace-with-different-admin-token-at-least-16-chars'
+export APM_AGENT_CREDENTIALS_JSON="$(printf '[{"id":"dev-agent","workspace_id":"dev-workspace","token":"%s"}]' "$APM_OPAMP_TOKEN")"
+export APM_ADMIN_CREDENTIALS_JSON="$(printf '[{"id":"dev-admin","workspace_id":"dev-workspace","token":"%s"}]' "$DEMO_ADMIN_TOKEN")"
+
 go run ./cmd/server
 ```
 
-To use MySQL instead, set `APM_DB_DRIVER=mysql`, supply a MySQL DSN (with `parseTime=true&loc=UTC`) and run `goose -dir db/migrations/mysql mysql "$APM_DATABASE_DSN" up`.
+The server **requires** `APM_AGENT_CREDENTIALS_JSON` and `APM_ADMIN_CREDENTIALS_JSON`; the legacy `APM_OPAMP_TOKEN` / `APM_ADMIN_TOKEN` server-side fallback has been removed. `APM_OPAMP_TOKEN` above is used by the separate `cmd/testagent` client only.
 
-The two legacy token variables are still supported for local P0 compatibility, scoped to a single `default` tenant. For separate tenants, use `APM_AGENT_CREDENTIALS_JSON` and `APM_ADMIN_CREDENTIALS_JSON` with credential id, tenant id and token as described in the [P1 runbook](docs/architecture/p1-durable-inventory.md). Do not expose the development listener or plain HTTP to an untrusted network.
-
-Default listener: `127.0.0.1:4320`. Set `APM_CONFIG_FILE=configs/example.yaml` to load Koanf startup configuration. In another terminal:
+In another terminal, configure the matching Agent token and run:
 
 ```bash
-export APM_OPAMP_TOKEN='replace-with-long-random-agent-token'
+export APM_OPAMP_TOKEN='replace-with-random-agent-token-at-least-16-chars'
 go run ./cmd/testagent -service checkout
 ```
 
-The test agent prints its 32-character `instance_uid`; this can now be queried through the tenant-scoped admin API and is retained after a server restart. The P0-only `PUT /api/v1/agents/{uid}/sampling` endpoint remains an **in-memory demo**, not durable P2 policy revision management.
+Query Inventory with the Admin token:
 
 ```bash
-export APM_ADMIN_TOKEN='replace-with-a-different-long-admin-token'
-curl -H "Authorization: Bearer $APM_ADMIN_TOKEN" http://127.0.0.1:4320/api/v1/agents
+curl -H "Authorization: Bearer $DEMO_ADMIN_TOKEN" \
+  http://127.0.0.1:4320/api/v1/agents
 ```
+
+Never commit real secrets. Local plain HTTP is not a public production authentication strategy. Use TLS termination, a secret manager and authoritative Workspace permission checks before production.
 
 ## Routes
 
-
 | Method | Route | Purpose |
 | --- | --- | --- |
-| GET | `/healthz` | liveness (public) |
-| HTTP/WebSocket | `/v1/opamp` | OpAMP (agent token) |
-| GET | `/api/v1/agents` | snapshots (admin token) |
-| GET | `/api/v1/agents/{uid}` | instance detail (admin token) |
-| PUT | `/api/v1/agents/{uid}/sampling` | sampling rate in [0,1] (admin token) |
+| GET | `/healthz` | Liveness |
+| HTTP/WebSocket | `/v1/opamp` | Credential-authenticated OpAMP |
+| GET | `/api/v1/agents` | Workspace-scoped Agent list |
+| GET | `/api/v1/agents/{uid}` | Workspace-scoped instance detail |
+| PUT | `/api/v1/agents/{uid}/sampling` | Ephemeral demo sampling rate, [0,1] |
 
-## Tests
+## Validation
 
 ```bash
-go mod tidy
 go test -race ./...
 go vet ./...
 ```
 
-See [P1 deployment guide](docs/architecture/p1-durable-inventory.md), [architecture](docs/architecture/README.md), and [P0 limitations](docs/architecture.md).
+The [P1 Database Contracts workflow](.github/workflows/p1-database-contracts.yml) runs Goose and the same Repository and OpAMP HTTP/API integration tests on **PostgreSQL 17 and MySQL 8.4**. This proves those test contracts, not production readiness or actual Java SDK sampling.
 
-## Engineering governance (RepoFoundryAI)
+## Engineering governance
 
-This repository is bootstrapped with [RepoFoundryAI v0.15.1](https://github.com/XiaoWeiKIN/RepoFoundryAI/releases/tag/v0.15.1) and the locked [EngineeringSpecifications v1.9.0](https://github.com/XiaoWeiKIN/EngineeringSpecifications/releases/tag/v1.9.0). The versioned project Harness includes Codex, Claude Code and portable adapters. The active governance profile is **adaptive**.
+RepoFoundryAI v0.15.1 and EngineeringSpecifications v1.9.0 control project documentation and validation. [DD-001](docs/design-docs/dd-001_opamp-control-plane.md) remains Draft, and [EP-001](docs/exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) retains its security/identity review blockers. Merging a P1.1 implementation does not constitute design approval.
 
-- [Requirements and acceptance criteria](docs/requirements/APM_CONTROL_PLANE.md)
-- [Engineering workflow and installation](docs/PROJECT_WORKFLOW.md)
-- [Repository guide](AGENTS.md)
-- [Engineering specification routing index](docs/agent-guides/managed/index.md)
-- [DD-001: Control Plane architecture (draft)](docs/design-docs/dd-001_opamp-control-plane.md)
-- [EP-001: durable Control Plane delivery (blocked, review prerequisites)](docs/exec-plans/active/ep-001_build-control-plane/EXECPLAN.md)
-- [Decision index](docs/DECISIONS.md), [design index](docs/DESIGN-DOCS.md), [execution plans](docs/PLANS.md)
-
-A developer installs the CLI and professional Skills into **their own** environment using the official installer (see the engineering workflow). Project manifests, adapters and locked specifications are committed here. PRs automatically validate Harness, Spec and engineering lifecycle state, in addition to Go tests.
-
-## Upstream
-
-- [OpAMP specification](https://github.com/open-telemetry/opamp-spec)
-- [opamp-go](https://github.com/open-telemetry/opamp-go), pinned to v0.25.0
+[RepoFoundryAI](https://github.com/XiaoWeiKIN/RepoFoundryAI) · [OpAMP specification](https://github.com/open-telemetry/opamp-spec) · [opamp-go v0.25.0](https://github.com/open-telemetry/opamp-go/tree/v0.25.0)

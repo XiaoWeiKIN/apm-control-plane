@@ -4,7 +4,7 @@
 >
 > **日期**：2026-10-19；**数据库**：PostgreSQL / MySQL；**运行架构**：单个部署选择一种主数据库，GORM v2 + Goose。
 >
-> **实现状态**：截至 `main@b6fc2563f765af90f36b09ada2c4d4830a9dcdec`，P1.1 的 `agent_instances`、Goose 初始化 Migration 和 GORM Repository **已经有代码**，当前列名仍是 `tenant_id`；**尚无生产部署或须保留既有业务数据的证据**。P2/P3 的其余表仍是未实现的设计。用户已确认归属边界是**整个可观测平台的 Workspace**，且现阶段**无需历史数据兼容**。因此目标设计直接使用 `workspace_id`；后续实现 PR 同步修改 P1.1 的初始化 DDL、GORM 和鉴权参数，不设计双列、双写或历史回填。若已有非测试环境数据，此前提不成立，必须先停下并另行制定迁移流程。本 PR 只改文档，不运行 Migration，也不代表 DD-001 获批准。
+> **实现状态**：P1.1 的 `agent_instances`、Goose 初始化 Migration、GORM Repository、可信部署凭证 JSON 和 API 已在本次实现修订中统一为 `workspace_id`；无需已不存在的 `tenant_id` 兼容层。**其余 P2/P3 逻辑表尚未实施**，Workspace/IAM 权限真源集成仍待安全设计。未发现需保留的生产数据；若未来发现旧环境已经使用过过往初始化 Schema，则不能假装无历史数据，须独立评估。本文只是详细技术说明，不是 DD-001 的审批记录。
 >
 > **来源**：[DD-001（Draft）](../design-docs/dd-001_opamp-control-plane.md)、[EP-001（Blocked）](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md)、[FR-001—FR-013](../requirements/APM_CONTROL_PLANE.md)、[P1.1 持久化实现](p1-durable-inventory.md)、[技术选型](technology-selection.md)。
 
@@ -50,7 +50,7 @@ erDiagram
 | --- | --- | --- | --- | --- |
 | `agent_principals` | Agent 的稳定授权主体 | 低频更新 | P2 身份治理 | 未创建 |
 | `credential_bindings` | Credential 引用 → Principal，可轮换 | 低频更新 | P2 身份治理 | 未创建 |
-| `agent_instances` | Agent 身份与最新状态 | 低频身份更新、高频状态更新 | **P1.1 已有代码**；Workspace 命名需修正 | **当前代码用 `tenant_id`；目标 `workspace_id` 未实现** |
+| `agent_instances` | Agent 身份与最新状态 | 低频身份更新、高频状态更新 | **P1.1** | **已实现 `workspace_id`，见双方言初始化 Migration** |
 | `policies` | 策略逻辑身份 | 低频更新 | P2 | 未创建 |
 | `policy_revisions` | 不可变策略版本 | Append-only | P2 | 未创建 |
 | `policy_bindings` | Scope/Selector → 生效版本 | 有 CAS 的少量修改 | P2 | 未创建 |
@@ -68,7 +68,7 @@ erDiagram
 
 | 逻辑类型 | PostgreSQL 候选 | MySQL 候选 | 约束与原因 |
 | --- | --- | --- | --- |
-| Workspace ID | `VARCHAR(96)`（暂定） | `VARCHAR(96)`（暂定） | 复用可观测平台已有 Workspace ID；目标 Schema 均使用 `workspace_id`，**初始化前同步修改现有 P1.1 DDL 与 Go 代码** |
+| Workspace ID | `VARCHAR(96)`（现有） | `VARCHAR(96)`（现有） | P1.1 当前 Schema 使用 `workspace_id`；必须从可信凭证配置获得，平台 IAM 集成仍未实现 |
 | Agent Instance UID | `VARCHAR(32)` | `CHAR(32) CHARACTER SET ascii COLLATE ascii_bin` | 延用已实现的 16 字节 UID 小写 hex 表示，当前无需同步优化为二进制键 |
 | 新的业务 ID | `VARCHAR(36)` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | 建议由应用产生 UUID 字符串；不依赖自增 ID、`RETURNING` |
 | Principal / Credential 外部引用 | `VARCHAR(128)` | `VARCHAR(128)` | 字符串范围由发行凭证的可信系统定义；不存明文 Token |
@@ -113,7 +113,7 @@ erDiagram
 
 `workspace_id` 建议直接复用现有平台 ID 的**规范字符串表示**（文中 `VARCHAR(96)` 是暂定存储上限）；如果共享平台已经采用 `org_id` 或其他名字，应在集成层明确字段映射，并保证数值/字符串规范、唯一性和授权一致，**不能为 APM 重新生成第二套 ID**。Workspace 名称变更不改变其 ID，跨 Workspace 迁移 Agent 需显式审批，不能通过更新自报 `service.name` 或 `environment` 完成。
 
-**当前实现与目标设计的区别**：已合并的 P1.1 使用 `agent_instances.tenant_id`、`auth.Principal.TenantID` 和凭证配置中的 `tenant_id`；这些是**代码现状**，并非产品最终的 Workspace 设计。P1.1 的 `default` 和自定义 Tenant 字符串不能被视为平台已验证的 Workspace。本项目尚未确认存在需要保留的生产记录，因此**后续实现 PR 直接替换为可信 `workspace_id`**，同步修改初始化 Migration、GORM、鉴权及 API，重建开发/测试数据库；不引入过渡双字段或迁移旧数据。当前文档 PR 不改运行时代码。
+**P1.1 实现边界**：初始化表、GORM、`auth.Principal.WorkspaceID`、Credential JSON 和 Admin API 使用 `workspace_id`，不再识别旧 `tenant_id`。Workspace ID 仍由可信部署者提供的 Token 配置绑定，服务端目前不会向可观测平台的 Workspace/IAM 服务查询成员身份或禁用状态；这属于待批准的生产安全集成工作。
 
 ### 3.2 `agent_principals` — 稳定授权主体
 
@@ -150,11 +150,11 @@ erDiagram
 
 ### 3.4 `agent_instances` — Agent Inventory（已存在；目标为原位演进）
 
-**目标主键**：`(workspace_id,instance_uid)`。**当前仅代码中已提交的 P1.1** 初始 DDL 使用 `(tenant_id,instance_uid)`，见 [PostgreSQL Migration](../../db/migrations/postgres/00001_agent_instances.sql) 与 [MySQL Migration](../../db/migrations/mysql/00001_agent_instances.sql)。在确认尚未正式部署、无需历史兼容的前提下，后续实现 PR **直接修改这两份初始 Migration 和 GORM 模型**；此文档定义的是改完之后的目标 Schema，不把当前代码误称已改。
+**当前已实现主键**：`(workspace_id,instance_uid)`。已实现的 [PostgreSQL Migration](../../db/migrations/postgres/00001_agent_instances.sql)、[MySQL Migration](../../db/migrations/mysql/00001_agent_instances.sql) 与 GORM 模型使用相同的 Workspace 作用域。生产 Workspace 授权集成仍待审批，不能将数据库字段存在等同于已验证平台 IAM。
 
 | 字段 | 状态 | 类型 | 约束 / 语义 |
 | --- | --- | --- | --- |
-| `workspace_id` | **目标字段（当前代码尚未实现）** | VARCHAR(96) | 目标 PK；可信可观测平台 Workspace ID，替换当前 P1.1 `tenant_id` |
+| `workspace_id` | **现有** | VARCHAR(96) | PK；从可信部署配置的凭证获得，未接入统一 Workspace/IAM 服务 |
 | `instance_uid` | **现有** | 32-char hex | PK，Agent Instance Key |
 | `credential_id` | **P1.1 当前已有** | VARCHAR(128) | 当前实现的首次注册绑定；未来是否转为稳定 `owner_principal_id` 仍待安全设计审批 |
 | `owner_principal_id` | **拟新增** | VARCHAR(128) | FK → `agent_principals`；换 Token 不改变主体 |
@@ -175,7 +175,7 @@ erDiagram
 | `created_at` / `updated_at` | **拟新增** | UTC Timestamp | Identity / Metadata 生命周期 |
 | `retired_at` | **拟新增** | Nullable UTC Timestamp | 受控退役，不执行级联删除 |
 
-**目标索引**：PK `(workspace_id,instance_uid)` 和 `(workspace_id,last_seen)`。当前 P1.1 的真实索引分别以 `tenant_id` 为首列；在正式部署前直接调整初始 PostgreSQL/MySQL Migration 和 Repository 使用的列名，**不设计额外的回填或双索引兼容期**。后续如确有 Inventory UI 按 AgentKind/Service/Env 分页的需求，可针对访问模式增加 `(workspace_id,environment,service_name,instance_uid)` 或 `(workspace_id,agent_kind,instance_uid)`。没有真实查询证据前不预建所有组合索引。
+**当前索引**：PK `(workspace_id,instance_uid)` 和 `(workspace_id,last_seen)`。不保留 `tenant_id` 列，也不引入回填或双索引兼容期。后续如确有 Inventory UI 按 AgentKind/Service/Env 分页的需求，可针对访问模式增加 `(workspace_id,environment,service_name,instance_uid)` 或 `(workspace_id,agent_kind,instance_uid)`。没有真实查询证据前不预建所有组合索引。
 
 **重要边界**：P1.1 把最新 Observation 内联在实例表中，避免额外写时 Join。只有真实报告写压力造成身份表大量 UPDATE/索引维护后，才考虑 §10 的 `agent_observations` 一对一拆表；不要为了概念分层而提前实施。
 
@@ -387,7 +387,7 @@ Credential Token -> 可信认证系统 -> (workspace_id, credential_ref, princip
      -> 观察快照 -> 返回 OpAMP 响应
 ~~~
 
-P1.1 **实际实现**只有 `credential_id` 首次绑定：同一个作用域内由其他 Credential 上报相同 UID 会被拒绝，但作用域当前仍由名为 `tenant_id` 的代码参数表示，尚未接入真实 Workspace 授权。后续目标是以稳定 `principal_id` 表示所有权；在首轮正式部署前可直接调整尚未发布的初始身份模型，不设计为了兼容旧业务数据而存在的回填/双写流程。不能仅靠新 Token 覆盖旧的 `credential_id` 来完成轮换。
+P1.1 **实际实现**仍以 `credential_id` 进行首次绑定：同一个 Workspace 内其他 Credential 上报相同 UID 会被拒绝，作用域由可信部署的 Credential JSON 中 `workspace_id` 决定，尚未接入平台 Workspace/IAM 查询。后续目标是以稳定 `principal_id` 表示所有权，不为了兼容旧业务数据而额外引入双读/双写流程。不能仅靠新 Token 覆盖旧的 `credential_id` 来完成轮换。
 
 身份删除/轮换授权必须是显式受控操作，不允许 Agent 单方面报告一个新 Principal 即完成换绑。HTTP 请求执行完毕后不保留 Session；WebSocket Session 在内存里，有连接所有权和关闭回调。未来多实例 HA 的 Fencing / Session Ownership **不在此 Schema 中冒充已解决**。
 
@@ -444,7 +444,7 @@ P2 先只使用 `release_targets.batch_no = 0`。P3 的灰度批次可以先在 
 | 读写路径 | 访问条件 | 所需索引 / 约束 |
 | --- | --- | --- |
 | Agent 详情 / 状态写入 | Workspace + UID | `agent_instances` PK |
-| 按时间列出 Agent | Workspace + LastSeen 范围 | **目标** `agent_instances(workspace_id,last_seen)`（当前代码仍为 `tenant_id`） |
+| 按时间列出 Agent | Workspace + LastSeen 范围 | **已实现** `agent_instances(workspace_id,last_seen)` |
 | 获取策略的版本 | Workspace + PolicyID + RevisionNumber | `policy_revisions` 唯一键 |
 | 查询适用 Binding | Workspace + Kind + Scope + Enabled | `policy_bindings` 复合索引 |
 | 根据 Release 列出某 Batch 的目标及结果 | Workspace + ReleaseID + BatchNo + Status | `release_targets` 复合索引 |
@@ -464,7 +464,7 @@ P2 先只使用 `release_targets.batch_no = 0`。P3 的灰度批次可以先在 
 
 ~~~sql
 -- 提议示例：Workspace 真源在可观测平台，不创建本地主数据表。
--- P1.1 正式部署前直接将初始化 SQL/Go Model 改为 workspace_id；
+-- P1.1 初始 SQL/Go Model 使用 workspace_id；
 -- 以下业务表统一使用 workspace_id，本示例并非已执行 Migration。
 CREATE TABLE policies (
     workspace_id VARCHAR(96) NOT NULL,
@@ -500,18 +500,18 @@ CREATE TABLE policy_revisions (
 
 ## 9. 尚未正式部署：直接统一 P1.1 初始化 Schema 与后续版本
 
-**实施前提**：当前 P1.1 的初始表和 GORM 代码已经合并，但没有证据表明它已进入需保留历史数据的生产或共享环境。用户明确选择**不做 Tenant → Workspace 兼容迁移**。因此目标方案为**改初始定义，而不是新增过渡 Migration**。
+**实施前提**：用户确认尚无须保留的历史数据，本实现修订直接让 P1.1 初始 Schema 使用 `workspace_id`。**不做 Tenant → Workspace 兼容迁移**。如发现已经使用旧版 Migration 并需要保留数据的环境，该前提不成立，应停止直接覆写后独立评估。
 
 | 阶段 | 实施内容 | 验收条件 |
 | --- | --- | --- |
-| P1.1 Workspace 清理（先执行） | 同一个代码 PR 内直接修改 `db/migrations/postgres/00001_agent_instances.sql`、`db/migrations/mysql/00001_agent_instances.sql`、GORM `AgentRecord`、Repository 查询、`auth.Principal`、Koanf 凭证 JSON、Admin API 和测试；统一 `workspace_id` | 双数据库全新建库成功，Agent 注册/查询严格按可信 Workspace 隔离；代码与初始化 SQL 不再出现业务级 `tenant_id` |
+| P1.1 Workspace Scope（代码已实现） | 初始 PostgreSQL/MySQL Goose SQL、GORM `AgentRecord`、Repository、`auth.Principal`、Credential JSON 和 Admin API 统一 `workspace_id` | 双数据库全新建库、Agent 注册/查询、权限隔离测试通过后才能作为稳定交付证据；**不代表平台 IAM 已联通** |
 | P2 授权主体 | 按正式安全设计引入 `agent_principals`、`credential_bindings`；是否把当前 `credential_id` 替换为稳定 Principal 归属由设计审批决定 | Token 轮换不会意外改变 Agent 所有权；撤销/授权路径经过可信 Workspace 验证 |
 | P2 Policy | `policies`、`policy_revisions`、`policy_bindings` | Revision 不可变，Selector 冲突有确定性行为 |
 | P2 Config/Release | `config_revisions`、`config_releases`、`release_targets`、`agent_assignments`、`config_events` | 发布事务原子性、Assignment CAS、ACK 归因、重启恢复和跨 Workspace 隔离 |
 | P3 Rollout | 在 Release/Target 中补充必要的灰度字段和查询索引 | 受控批次、失败阻断、回滚和审计可恢复 |
 | 按需扩展 | 只有性能/产品证据充分时才增加 `agent_observations`、`apm_services`、`release_batches` | 以实际查询/写负载和保留要求评估必要性 |
 
-**不创建 `tenant_id` 与 `workspace_id` 双字段，不做双读双写，不为旧的 `default` 值造 Workspace，不自动迁移任何未确认归属的数据。** 如果实际发现已经部署的共享/生产数据，须停止直接修改初始 Migration 的做法，重新审查是否必须引入增量 Goose Migration 和可信映射。这是对事实前提的保护，不是当前方案中隐藏的兼容分支。
+**当前初始 Schema 不存在 `tenant_id` 与 `workspace_id` 双字段、不做双读双写、不为旧的 `default` 值造 Workspace，也不自动迁移未确认归属的数据。** 如果实际发现已经部署的共享/生产数据，须停止直接修改初始 Migration 的做法，重新审查是否必须引入增量 Goose Migration 和可信映射。这是对事实前提的保护，不是当前方案中隐藏的兼容分支。
 
 即使不保留历史数据，也要在 PostgreSQL/MySQL 分别验证全新建库、字段约束、唯一性、可信 Workspace 注入和代码行为。MySQL `CREATE/ALTER TABLE` 可能隐式提交；Goose 负责明确版本的执行，生产运行时不使用 GORM AutoMigrate。
 

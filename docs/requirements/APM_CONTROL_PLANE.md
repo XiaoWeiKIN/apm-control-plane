@@ -10,14 +10,14 @@ Build a **general OpAMP Agent Control Plane** that can eventually manage **Java,
 
 | ID | Requirement | Verification / acceptance |
 | --- | --- | --- |
-| FR-001 | Register distinct Agent instances using OpAMP instance UID and description metadata. | Connected agents appear in inventory; new and repeated UIDs are handled deterministically; claimed attributes are not treated as authenticated tenant identity. |
+| FR-001 | Register distinct Agent instances using OpAMP instance UID and description metadata. | Connected agents appear in inventory; new and repeated UIDs are handled deterministically; claimed attributes are not treated as authenticated workspace identity. |
 | FR-002 | Track connection freshness separately from Agent-reported health. | Disconnect reports unknown runtime health instead of falsely reporting the JVM as stopped; timestamps update on messages. |
 | FR-003 | Manage sampling policy by environment and `service.name`; distinguish policy revision from per-agent assignment. | Resolved policy is deterministic for a given set of selector attributes, priorities and inputs, with conflicts explicitly handled. |
 | FR-004 | Send a versioned policy through OpAMP RemoteConfig when the Agent advertises the required capability. | Captured wire message carries expected bytes and hash; an unsupported Agent is not marked applied. |
 | FR-005 | Record Desired and Observed configuration independently and store Agent RemoteConfigStatus with hash and failure text. | Send success leaves assignment pending; only matching `APPLIED` status marks the expected revision applied. |
 | FR-006 | Preserve desired policy and assignment over control-plane restarts. | Restart with an offline test Agent, reconnect, and converge without losing last assigned revision. |
 | FR-007 | Support safe rollout/rollback and audit of configuration changes before broad production deployment. | Failed or delayed updates are visible and rollback creates an auditable new desired revision. |
-| FR-008 | Separate management authentication from Agent identity and support authenticated TLS transport. | Unauthorized callers cannot query or modify state; untrusted claimed service/environment attributes cannot grant tenant access. |
+| FR-008 | Separate management authentication from Agent identity and support authenticated TLS transport. | Unauthorized callers cannot query or modify state; untrusted claimed service/environment attributes cannot grant workspace access. |
 | FR-009 | Support the custom Java Agent distribution's runtime Head Sampling; keep application callback responsibility in the Java Agent. | A JVM integration test updates root-span sampling without restart; control-plane success requires hash-matched Agent acknowledgement plus telemetry-based validation. |
 | FR-010 | Represent Agent Kind, Distribution, Distribution Version and advertised Capabilities independently of the workload service identity. | Inventory can distinguish Java, Go, Python and Collector-shaped test agents without treating `service.name` or `service.version` as universal agent-version or authorization fields. |
 | FR-011 | Resolve and compile configuration through Agent-Kind/Distribution-aware adapters and reject unsupported configuration or runtime semantics. | A Java sampling policy compiles only for compatible Java targets; an incompatible or Collector-shaped Agent is reported UNSUPPORTED without receiving Java-specific JSON. Other adapters remain future work. |
@@ -44,6 +44,10 @@ On 2026-10-19, the product direction was confirmed as multi-language APM Agent m
 ## Relational storage requirement
 
 The product needs more than one database driver and may use MySQL. Database selection is a deployment parameter, not a runtime data migration facility. PostgreSQL/MySQL have different SQL and DDL behavior, so store-level dialects and migrations can be separate while required business invariants remain consistent. The proposed technology stack is described in [P1–P3 technology selection](../architecture/technology-selection.md); compatibility remains unverified until real database CI tests pass.
+
+## Confirmed workspace scope
+
+The resource authorization boundary is the **observability platform Workspace**, shared conceptually across Agent management, logs, metrics, traces and dashboards. The Control Plane must not create its own customer Tenant namespace. Agent Inventory and future Policy/Release/Assignment resources use the authenticated `workspace_id`. P1.1 currently scopes each credential to an operator-configured Workspace; authoritative IAM/Workspace validation remains a separate security requirement. Because no existing deployment data needs compatibility, the initial schema uses `workspace_id` directly and does not keep a `tenant_id` compatibility column.
 
 ## Evidence and authority
 
