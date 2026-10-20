@@ -3,12 +3,13 @@ package appconfig
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
@@ -17,9 +18,9 @@ import (
 
 // Credential is loaded from secret environment variables, never from public YAML.
 type Credential struct {
-	ID       string `json:"id"`
+	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
-	Token    string `json:"token"`
+	Token       string `json:"token"`
 }
 
 type Database struct {
@@ -44,6 +45,7 @@ type Config struct {
 func Load() (Config, error) { return LoadWithEnv(os.Getenv) }
 
 func LoadWithEnv(env func(string) string) (Config, error) {
+	// 1. 初始化默认参数并加载明确支持的 YAML 配置。
 	cfg := Config{
 		ListenAddress:     "127.0.0.1:4320",
 		ReadHeaderTimeout: 5 * time.Second,
@@ -102,6 +104,7 @@ func LoadWithEnv(env func(string) string) (Config, error) {
 			cfg.Database.MaxLifetime = d
 		}
 	}
+	// 2. 应用环境覆盖并解析数据库与超时设置。
 	if val := env("APM_LISTEN_ADDR"); val != "" {
 		cfg.ListenAddress = val
 	}
@@ -123,6 +126,7 @@ func LoadWithEnv(env func(string) string) (Config, error) {
 		}
 		cfg.HTTPPollingTTL = d
 	}
+	// 3. 只接受显式 Workspace 凭证，再统一验证启动约束。
 	if val := env("APM_AGENT_CREDENTIALS_JSON"); val != "" {
 		if err := parseCredentials(val, &cfg.AgentCredentials); err != nil {
 			return cfg, fmt.Errorf("APM_AGENT_CREDENTIALS_JSON: %w", err)
@@ -175,6 +179,12 @@ func (c Config) Validate() error {
 		for _, cred := range credentials {
 			if cred.ID == "" || cred.WorkspaceID == "" || len(cred.Token) < 16 {
 				return fmt.Errorf("credentials require nonempty id/workspace and token length >= 16")
+			}
+			if utf8.RuneCountInString(cred.WorkspaceID) > 96 {
+				return fmt.Errorf("credential workspace_id must not exceed 96 characters")
+			}
+			if utf8.RuneCountInString(cred.ID) > 128 {
+				return fmt.Errorf("credential id must not exceed 128 characters")
 			}
 			if seenID[cred.ID] || seenToken[cred.Token] {
 				return fmt.Errorf("credential ids and tokens must be unique across roles")

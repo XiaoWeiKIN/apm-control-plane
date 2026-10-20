@@ -191,11 +191,19 @@ func TestTransportFreshnessAndIdentityFields(t *testing.T) {
 	}
 }
 
-type mockConnection struct{ id int }
+type mockConnection struct {
+	id           int
+	disconnected chan struct{}
+}
 
 func (*mockConnection) Connection() net.Conn                                 { return nil }
 func (*mockConnection) Send(context.Context, *protobufs.ServerToAgent) error { return nil }
-func (*mockConnection) Disconnect() error                                    { return nil }
+func (c *mockConnection) Disconnect() error {
+	if c.disconnected != nil {
+		close(c.disconnected)
+	}
+	return nil
+}
 
 func TestWebsocketSessionExclusion(t *testing.T) {
 	reg := newRegistry(newFakeStore(), time.Second)
@@ -232,5 +240,158 @@ func TestAdminUnauthorized(t *testing.T) {
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("unexpected status: %d", w.Code)
+	}
+}
+
+type blockingStore struct {
+	*fakeStore
+	blockUID string
+	entered  chan struct{}
+	release  chan struct{}
+	once     sync.Once
+}
+
+func (s *blockingStore) Observe(ctx context.Context, p auth.Principal, id string, o gormrepo.Observation) (gormrepo.AgentRecord, error) {
+	if id == s.blockUID {
+		s.once.Do(func() { close(s.entered) })
+		<-s.release
+	}
+	return s.fakeStore.Observe(ctx, p, id, o)
+}
+
+func TestUnrelatedAgentWriteIsNotBlockedByDatabaseIO(t *testing.T) {
+	idA, hexA := uid(10)
+	idB, _ := uid(11)
+	store := &blockingStore{fakeStore: newFakeStore(), blockUID: hexA, entered: make(chan struct{}), release: make(chan struct{})}
+	unblock := sync.OnceFunc(func() { close(store.release) })
+	defer unblock()
+	reg := newRegistry(store, time.Second)
+	p := principal("workspace-a", "credential-a")
+	firstDone := make(chan error, 1)
+	go func() {
+		_, _, err := reg.update(context.Background(), p, false, nil, &protobufs.AgentToServer{InstanceUid: idA, SequenceNum: 1})
+		firstDone <- err
+	}()
+	select {
+	case <-store.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first Agent never reached storage")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, _, err := reg.update(context.Background(), p, false, nil, &protobufs.AgentToServer{InstanceUid: idB, SequenceNum: 1})
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("unrelated Agent was blocked by a database write")
+	}
+	unblock()
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStopWaitsForPendingWriteAndRejectsNewObservations(t *testing.T) {
+	idA, hexA := uid(12)
+	idB, _ := uid(13)
+	store := &blockingStore{fakeStore: newFakeStore(), blockUID: hexA, entered: make(chan struct{}), release: make(chan struct{})}
+	unblock := sync.OnceFunc(func() { close(store.release) })
+	defer unblock()
+	reg := newRegistry(store, time.Second)
+	p := principal("workspace-a", "credential-a")
+	conn := &mockConnection{id: 4, disconnected: make(chan struct{})}
+	reg.trackWS(conn)
+	updateDone := make(chan error, 1)
+	go func() {
+		_, _, err := reg.update(context.Background(), p, true, conn, &protobufs.AgentToServer{InstanceUid: idA, SequenceNum: 1})
+		updateDone <- err
+	}()
+	select {
+	case <-store.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("observation never reached storage")
+	}
+	stopped := make(chan error, 1)
+	go func() { stopped <- reg.stop() }()
+	select {
+	case <-conn.disconnected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop did not disconnect the WebSocket")
+	}
+	if _, _, err := reg.update(context.Background(), p, false, nil, &protobufs.AgentToServer{InstanceUid: idB, SequenceNum: 1}); !errors.Is(err, errRegistryClosing) {
+		t.Fatalf("new status accepted during shutdown: %v", err)
+	}
+	select {
+	case err := <-stopped:
+		t.Fatalf("stop returned before the write finished: %v", err)
+	default:
+	}
+	unblock()
+	if err := <-updateDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestServeWaitsForHTTPRequestsToDrain(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(entered)
+		<-release
+		w.WriteHeader(http.StatusOK)
+	})}
+	done := make(chan error, 1)
+	go func() { done <- serve(ctx, srv, listener, newRegistry(newFakeStore(), time.Second)) }()
+	clientDone := make(chan error, 1)
+	go func() {
+		res, err := (&http.Client{Timeout: 3 * time.Second}).Get("http://" + listener.Addr().String())
+		if err == nil {
+			_ = res.Body.Close()
+		}
+		clientDone <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP request did not reach handler")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		t.Fatalf("serve exited before request completion: %v", err)
+	case <-time.After(75 * time.Millisecond):
+	}
+	unblock()
+	if err := <-clientDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInvalidObservationIsOpAMPBadRequest(t *testing.T) {
+	reply := processingErrorResponse(make([]byte, 16), gormrepo.ErrInvalidObservation)
+	if reply.ErrorResponse == nil ||
+		reply.ErrorResponse.Type != protobufs.ServerErrorResponseType_ServerErrorResponseType_BadRequest ||
+		reply.RemoteConfig != nil || reply.Capabilities != 0 {
+		t.Fatalf("invalid Agent metadata should yield only error_response: %+v", reply)
 	}
 }

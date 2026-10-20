@@ -16,10 +16,17 @@ jobs:
         with:
           go-version: '1.25.x'
           cache: false
-      - name: Resolve pinned dependencies
-        run: go mod tidy
-      - name: Format Go source
-        run: gofmt -w cmd
+      - name: Check Go source formatting
+        run: |
+          unformatted="$(gofmt -l cmd internal)"
+          if [ -n "$unformatted" ]; then
+            printf 'Go files need gofmt:\n%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: Check reproducible module manifests
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
       - name: Unit tests and race detector
         run: go test -race ./...
       - name: Vet

@@ -50,7 +50,7 @@ export APM_DATABASE_DSN='app:replace@tcp(127.0.0.1:3306)/controlplane?parseTime=
 goose -dir db/migrations/mysql mysql "$APM_DATABASE_DSN" up
 ```
 
-只执行与启动 Driver 一致的 Migration；`gormrepo.Open` 启动时会验证数据库连接和 `agent_instances` 表存在。**生产模式不用 AutoMigrate。**
+只执行与启动 Driver 一致的 Migration；`gormrepo.Open` 启动时会验证数据库连接、`agent_instances` 表以及所有必需列（包括 `workspace_id`）。旧初始化 Schema 或缺列会直接启动失败，不在运行时猜测修复。**生产模式不用 AutoMigrate。**
 
 ## 3. 启动配置与凭证
 

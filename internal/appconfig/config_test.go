@@ -1,6 +1,7 @@
 package appconfig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,12 +55,14 @@ func TestRejectUnknownConfigKey(t *testing.T) {
 
 func TestRejectInvalidDriverAndDuplicateCredentials(t *testing.T) {
 	base := map[string]string{
-		"APM_DATABASE_DSN": "test",
+		"APM_DATABASE_DSN":           "test",
 		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","workspace_id":"workspace-a","token":"agent-example-long-token"}]`,
 		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","workspace_id":"workspace-a","token":"admin-example-long-token"}]`,
 	}
 	invalidDriver := map[string]string{}
-	for key, val := range base { invalidDriver[key] = val }
+	for key, val := range base {
+		invalidDriver[key] = val
+	}
 	invalidDriver["APM_DB_DRIVER"] = "sqlite"
 	_, err := LoadWithEnv(testEnv(invalidDriver))
 	if err == nil || !strings.Contains(err.Error(), "unsupported database driver") {
@@ -75,14 +78,14 @@ func TestRejectInvalidDriverAndDuplicateCredentials(t *testing.T) {
 func TestRequireExplicitWorkspaceCredentials(t *testing.T) {
 	_, err := LoadWithEnv(testEnv(map[string]string{
 		"APM_DATABASE_DSN": "test",
-		"APM_OPAMP_TOKEN": "old-agent-token-no-longer-used",
-		"APM_ADMIN_TOKEN": "old-admin-token-no-longer-used",
+		"APM_OPAMP_TOKEN":  "old-agent-token-no-longer-used",
+		"APM_ADMIN_TOKEN":  "old-admin-token-no-longer-used",
 	}))
 	if err == nil || !strings.Contains(err.Error(), "workspace-scoped") {
 		t.Fatalf("old single token fallback must be rejected: %v", err)
 	}
 	_, err = LoadWithEnv(testEnv(map[string]string{
-		"APM_DATABASE_DSN": "test",
+		"APM_DATABASE_DSN":           "test",
 		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","tenant_id":"old-tenant","token":"agent-example-long-token"}]`,
 		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","workspace_id":"workspace-a","token":"admin-example-long-token"}]`,
 	}))
@@ -90,7 +93,7 @@ func TestRequireExplicitWorkspaceCredentials(t *testing.T) {
 		t.Fatalf("old tenant_id field must be rejected: %v", err)
 	}
 	config, err := LoadWithEnv(testEnv(map[string]string{
-		"APM_DATABASE_DSN": "test",
+		"APM_DATABASE_DSN":           "test",
 		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","workspace_id":"workspace-a","token":"agent-example-long-token"}]`,
 		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","workspace_id":"workspace-a","token":"admin-example-long-token"}]`,
 	}))
@@ -101,11 +104,44 @@ func TestRequireExplicitWorkspaceCredentials(t *testing.T) {
 
 func TestRejectCredentialsWithExtraJSON(t *testing.T) {
 	_, err := LoadWithEnv(testEnv(map[string]string{
-		"APM_DATABASE_DSN": "test",
+		"APM_DATABASE_DSN":           "test",
 		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","workspace_id":"workspace-a","token":"agent-example-long-token"}] {}`,
 		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","workspace_id":"workspace-a","token":"admin-example-long-token"}]`,
 	}))
 	if err == nil || !strings.Contains(err.Error(), "unexpected trailing") {
 		t.Fatalf("trailing JSON must be rejected: %v", err)
+	}
+}
+
+func TestRejectCredentialIDsBeyondDatabaseLimits(t *testing.T) {
+	cases := []struct {
+		name  string
+		field string
+		value string
+	}{
+		{"workspace", "workspace_id", strings.Repeat("w", 97)},
+		{"credential", "id", strings.Repeat("c", 129)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cred := Credential{ID: "agent-a", WorkspaceID: "workspace-a", Token: "long-agent-secret-token"}
+			if tc.field == "workspace_id" {
+				cred.WorkspaceID = tc.value
+			} else {
+				cred.ID = tc.value
+			}
+			data, err := json.Marshal([]Credential{cred})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = LoadWithEnv(testEnv(map[string]string{
+				"APM_DATABASE_DSN":           "test",
+				"APM_AGENT_CREDENTIALS_JSON": string(data),
+				"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin-a","workspace_id":"workspace-a","token":"long-admin-secret-token"}]`,
+			}))
+			if err == nil || !strings.Contains(err.Error(), tc.field) {
+				t.Fatalf("%s outside schema limits accepted: %v", tc.field, err)
+			}
+		})
 	}
 }
