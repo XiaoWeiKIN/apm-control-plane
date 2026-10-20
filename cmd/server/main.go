@@ -541,7 +541,7 @@ func makeGateway(reg *registry, agentAuth *auth.Authenticator, log *slog.Logger)
 					if isWS && reg.delivery != nil {
 						// 持久 Config 由单 Session Writer 推送；避免回调同步发送重复配置。
 						reg.startWriter(principal, conn, msg.InstanceUid, log)
-						if config == nil {
+						if config == nil && !full {
 							return nil
 						}
 					}
