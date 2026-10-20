@@ -137,6 +137,17 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 			if err != nil || a.State != "APPLIED" || a.ObservedHash == nil || *a.ObservedHash != rev1.ConfigHash {
 				t.Fatalf("ACK not persisted: %+v %v", a, err)
 			}
+			// A later contradictory Agent report invalidates the prior applied state.
+			if got := send(5, &protobufs.RemoteConfigStatus{
+				Status: protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
+				LastRemoteConfigHash: []byte{0x01},
+			}); got.RemoteConfig != nil {
+				t.Fatal("unexpected config before retry deadline")
+			}
+			a, err = store.GetAgentAssignment(ctx, workspace, uid)
+			if err != nil || a.State != "PENDING" {
+				t.Fatalf("regressed Agent report left stale APPLIED state: %+v %v", a, err)
+			}
 			snapshot2, err := config.CompileJavaSampling(0.6)
 			if err != nil {
 				t.Fatal(err)
@@ -149,7 +160,7 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got2 := send(5, applied1).RemoteConfig
+			got2 := send(6, applied1).RemoteConfig
 			if got2 == nil || hex.EncodeToString(got2.ConfigHash) != rev2.ConfigHash {
 				t.Fatalf("stale ACK prevented latest ConfigRevision: %+v", got2)
 			}
@@ -162,7 +173,7 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 				Status:               protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
 				LastRemoteConfigHash: got2.ConfigHash,
 			}
-			send(6, applied2)
+			send(7, applied2)
 			a, err = store.GetAgentAssignment(ctx, workspace, uid)
 			if err != nil || a.State != "APPLIED" || a.DesiredGeneration != rel2.DesiredGeneration {
 				t.Fatalf("latest ACK not converged: %+v %v", a, err)
