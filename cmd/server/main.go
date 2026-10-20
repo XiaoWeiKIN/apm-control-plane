@@ -584,7 +584,9 @@ func run(ctx context.Context, log *slog.Logger) (runErr error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { response(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("/v1/opamp", handler)
-	mux.Handle("/api/", adminHandler(reg, auth.New(cfg.AdminCredentials)))
+	adminAuth := auth.New(cfg.AdminCredentials)
+	mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(store, adminAuth))
+	mux.Handle("/api/", adminHandler(reg, adminAuth))
 	srv := &http.Server{Addr: cfg.ListenAddress, Handler: mux, ConnContext: connCtx, ReadHeaderTimeout: cfg.ReadHeaderTimeout}
 	listener, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
