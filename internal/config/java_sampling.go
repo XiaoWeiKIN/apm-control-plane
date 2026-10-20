@@ -33,11 +33,11 @@ func (s Snapshot) ConfigMapBytes() []byte { return bytes.Clone(s.data) }
 func (s Snapshot) Hash() [sha256.Size]byte { return s.hash }
 
 type javaSamplingPolicy struct {
-	SchemaVersion int §json:"schema_version"§
+	SchemaVersion int `json:"schema_version"`
 	Sampling struct {
-		Type string  §json:"type"§
-		Rate float64 §json:"rate"§
-	} §json:"sampling"§
+		Type string  `json:"type"`
+		Rate float64 `json:"rate"`
+	} `json:"sampling"`
 }
 
 // CompileJavaSampling builds the P2.1 Java Head Sampling ConfigMap.
