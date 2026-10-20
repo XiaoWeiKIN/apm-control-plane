@@ -241,66 +241,80 @@ func TestUnsupportedReleaseDoesNotCreateAssignment(t *testing.T) {
 	}
 }
 
-
 func TestReleaseIdempotencyKeyAcrossConcurrentTargets(t *testing.T) {
-	for _, tt := range []struct{driver,env string}{
-		{"postgres","APM_TEST_POSTGRES_DSN"},
-		{"mysql","APM_TEST_MYSQL_DSN"},
+	for _, tt := range []struct{ driver, env string }{
+		{"postgres", "APM_TEST_POSTGRES_DSN"},
+		{"mysql", "APM_TEST_MYSQL_DSN"},
 	} {
-		t.Run(tt.driver,func(t *testing.T){
-			dsn:=os.Getenv(tt.env)
-			if dsn=="" {t.Skip(tt.env+" not configured")}
-			ctx:=context.Background()
-			store,err:=Open(ctx,appconfig.Database{Driver:tt.driver,DSN:dsn,MaxOpen:5,MaxIdle:2,MaxLifetime:time.Minute})
-			if err!=nil {t.Fatal(err)}
-			defer store.Close()
-			workspace:="concurrent-idempotency-workspace"
-			uidA,uidB:=newUID(t),newUID(t)
-			for _,id:=range []string{uidA,uidB}{
-				if _,err:=store.Observe(ctx,auth.Principal{WorkspaceID:workspace,CredentialID:"owner"},
-					id,Observation{
-						SeenAt:time.Now().UTC(),Transport:"http",
-						Capabilities:uint64(protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus|
-							protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
-						Description:&Description{Kind:config.JavaAgentKind},
-					});err!=nil {t.Fatal(err)}
+		t.Run(tt.driver, func(t *testing.T) {
+			dsn := os.Getenv(tt.env)
+			if dsn == "" {
+				t.Skip(tt.env + " not configured")
 			}
-			snapshot,_:=config.CompileJavaSampling(0.5)
-			revision,err:=store.CreateConfigRevision(ctx,workspace,"admin",snapshot)
-			if err!=nil {t.Fatal(err)}
-			type outcome struct {uid string; err error}
-			results:=make(chan outcome,2)
+			ctx := context.Background()
+			store, err := Open(ctx, appconfig.Database{Driver: tt.driver, DSN: dsn, MaxOpen: 5, MaxIdle: 2, MaxLifetime: time.Minute})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			workspace := "concurrent-idempotency-workspace"
+			uidA, uidB := newUID(t), newUID(t)
+			for _, id := range []string{uidA, uidB} {
+				if _, err := store.Observe(ctx, auth.Principal{WorkspaceID: workspace, CredentialID: "owner"},
+					id, Observation{
+						SeenAt: time.Now().UTC(), Transport: "http",
+						Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus |
+							protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
+						Description: &Description{Kind: config.JavaAgentKind},
+					}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshot, _ := config.CompileJavaSampling(0.5)
+			revision, err := store.CreateConfigRevision(ctx, workspace, "admin", snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			type outcome struct {
+				uid string
+				err error
+			}
+			results := make(chan outcome, 2)
 			var wg sync.WaitGroup
-			key:="shared-"+uidA[:16]
-			for _,id:=range []string{uidA,uidB}{
+			key := "shared-" + uidA[:16]
+			for _, id := range []string{uidA, uidB} {
 				wg.Add(1)
-				go func(id string){
+				go func(id string) {
 					defer wg.Done()
-					_,err:=store.PublishAgentConfig(ctx,workspace,id,revision.ConfigRevisionID,"admin",key)
-					results<-outcome{uid:id,err:err}
+					_, err := store.PublishAgentConfig(ctx, workspace, id, revision.ConfigRevisionID, "admin", key)
+					results <- outcome{uid: id, err: err}
 				}(id)
 			}
 			wg.Wait()
 			close(results)
-			var succeeded,conflicted int
-			for result:=range results {
+			var succeeded, conflicted int
+			for result := range results {
 				switch {
-				case result.err==nil:
+				case result.err == nil:
 					succeeded++
-				case errors.Is(result.err,ErrReleaseConflict):
+				case errors.Is(result.err, ErrReleaseConflict):
 					conflicted++
 				default:
-					t.Fatalf("unexpected idempotency race error for %s: %v",result.uid,result.err)
+					t.Fatalf("unexpected idempotency race error for %s: %v", result.uid, result.err)
 				}
 			}
-			if succeeded!=1||conflicted!=1 {
-				t.Fatalf("concurrent idempotency result: succeeded=%d conflicted=%d",succeeded,conflicted)
+			if succeeded != 1 || conflicted != 1 {
+				t.Fatalf("concurrent idempotency result: succeeded=%d conflicted=%d", succeeded, conflicted)
 			}
 			var count int64
-			if err:=store.db.Model(&ConfigReleaseRecord{}).
-				Where("workspace_id = ? AND idempotency_key = ?",workspace,key).
-				Count(&count).Error;err!=nil {t.Fatal(err)}
-			if count!=1 {t.Fatalf("same idempotency key produced %d Release rows",count)}
+			if err := store.db.Model(&ConfigReleaseRecord{}).
+				Where("workspace_id = ? AND idempotency_key = ?", workspace, key).
+				Count(&count).Error; err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatalf("same idempotency key produced %d Release rows", count)
+			}
 		})
 	}
 }
