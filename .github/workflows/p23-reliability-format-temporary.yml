@@ -1,0 +1,24 @@
+name: Temporary P2.3 reliability gofmt
+on:
+  push:
+    branches:
+      - test/p23-reliability-closeout
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test/p23-reliability-closeout
+      - name: Format P2.3 reliability test
+        run: |
+          set -euo pipefail
+          gofmt -w internal/storage/gormrepo/reconcile_race_integration_test.go cmd/server/ws_reliability_test.go cmd/server/ws_push_integration_test.go cmd/server/main.go
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add internal/storage/gormrepo/reconcile_race_integration_test.go cmd/server/ws_reliability_test.go cmd/server/ws_push_integration_test.go cmd/server/main.go
+          git commit -m "style: gofmt P2.3 reliability tests"
+          git push origin HEAD:test/p23-reliability-closeout
