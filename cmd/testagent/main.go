@@ -21,6 +21,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const testAgentCapabilities = uint64(
+	protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus |
+		protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig |
+		protobufs.AgentCapabilities_AgentCapabilities_ReportsRemoteConfig,
+)
+
 func main() {
 	endpoint := flag.String("endpoint", "http://127.0.0.1:4320/v1/opamp", "OpAMP HTTP endpoint")
 	service := flag.String("service", "checkout", "service.name for test agent")
@@ -46,7 +52,7 @@ func main() {
 		sequence++
 		msg := &protobufs.AgentToServer{
 			InstanceUid: uid, SequenceNum: sequence,
-			Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig | protobufs.AgentCapabilities_AgentCapabilities_ReportsRemoteConfig),
+			Capabilities: testAgentCapabilities,
 			AgentDescription: &protobufs.AgentDescription{IdentifyingAttributes: []*protobufs.KeyValue{
 				{Key: "service.name", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: *service}}},
 				{Key: "deployment.environment.name", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: "dev"}}},
@@ -83,6 +89,11 @@ func main() {
 				var reply protobufs.ServerToAgent
 				if err := proto.Unmarshal(raw, &reply); err != nil {
 					log.Printf("decode: %v", err)
+				} else if reply.ErrorResponse != nil {
+					log.Printf("OpAMP status rejected: %s", reply.ErrorResponse.Type)
+					if reply.ErrorResponse.Type != protobufs.ServerErrorResponseType_ServerErrorResponseType_Unavailable {
+						return // BadRequest/Unknown are not retryable by OpAMP clients.
+					}
 				} else if reply.RemoteConfig != nil {
 					config := reply.RemoteConfig
 					file := config.GetConfig().GetConfigMap()["apm/sampling.json"]

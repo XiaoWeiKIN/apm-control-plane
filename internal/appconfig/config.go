@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
@@ -175,6 +176,12 @@ func (c Config) Validate() error {
 		for _, cred := range credentials {
 			if cred.ID == "" || cred.WorkspaceID == "" || len(cred.Token) < 16 {
 				return fmt.Errorf("credentials require nonempty id/workspace and token length >= 16")
+			}
+			if utf8.RuneCountInString(cred.WorkspaceID) > 96 {
+				return fmt.Errorf("credential workspace_id must not exceed 96 characters")
+			}
+			if utf8.RuneCountInString(cred.ID) > 128 {
+				return fmt.Errorf("credential id must not exceed 128 characters")
 			}
 			if seenID[cred.ID] || seenToken[cred.Token] {
 				return fmt.Errorf("credential ids and tokens must be unique across roles")

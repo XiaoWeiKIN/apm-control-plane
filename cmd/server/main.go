@@ -459,6 +459,9 @@ func processingErrorResponse(uid []byte, err error) *protobufs.ServerToAgent {
 	case errors.Is(err, gormrepo.ErrOwnership):
 		kind = protobufs.ServerErrorResponseType_ServerErrorResponseType_Unknown
 		message = "agent instance identity conflict"
+	case errors.Is(err, gormrepo.ErrInvalidObservation):
+		kind = protobufs.ServerErrorResponseType_ServerErrorResponseType_BadRequest
+		message = "invalid agent metadata or status"
 	case errors.Is(err, errSessionConflict):
 		message = "another connection currently owns this agent instance"
 	case strings.Contains(err.Error(), "instance_uid must be"):
