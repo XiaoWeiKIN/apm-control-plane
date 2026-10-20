@@ -3,8 +3,8 @@ package appconfig
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -18,9 +18,9 @@ import (
 
 // Credential is loaded from secret environment variables, never from public YAML.
 type Credential struct {
-	ID       string `json:"id"`
+	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
-	Token    string `json:"token"`
+	Token       string `json:"token"`
 }
 
 type Database struct {

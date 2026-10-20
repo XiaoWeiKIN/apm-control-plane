@@ -9,7 +9,7 @@ import (
 )
 
 type Principal struct {
-	WorkspaceID     string
+	WorkspaceID  string
 	CredentialID string
 }
 

@@ -120,7 +120,7 @@ func TestInvalidObservationNeverPersists(t *testing.T) {
 			p := auth.Principal{WorkspaceID: "test-workspace", CredentialID: "test-credential"}
 			for _, tc := range []struct {
 				name string
-				obs Observation
+				obs  Observation
 			}{
 				{"oversized service", Observation{SeenAt: time.Now().UTC(), Transport: "http", Description: &Description{Kind: "java-apm", Service: strings.Repeat("x", 256)}}},
 				{"oversized config error", Observation{SeenAt: time.Now().UTC(), Transport: "http", Config: &ConfigStatus{Status: "FAILED", Error: strings.Repeat("x", 8193)}}},

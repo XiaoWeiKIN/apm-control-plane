@@ -192,7 +192,7 @@ func TestTransportFreshnessAndIdentityFields(t *testing.T) {
 }
 
 type mockConnection struct {
-	id int
+	id           int
 	disconnected chan struct{}
 }
 
@@ -246,9 +246,9 @@ func TestAdminUnauthorized(t *testing.T) {
 type blockingStore struct {
 	*fakeStore
 	blockUID string
-	entered chan struct{}
-	release chan struct{}
-	once sync.Once
+	entered  chan struct{}
+	release  chan struct{}
+	once     sync.Once
 }
 
 func (s *blockingStore) Observe(ctx context.Context, p auth.Principal, id string, o gormrepo.Observation) (gormrepo.AgentRecord, error) {
@@ -274,7 +274,7 @@ func TestUnrelatedAgentWriteIsNotBlockedByDatabaseIO(t *testing.T) {
 	}()
 	select {
 	case <-store.entered:
-	case <-time.After(2*time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("first Agent never reached storage")
 	}
 
@@ -288,7 +288,7 @@ func TestUnrelatedAgentWriteIsNotBlockedByDatabaseIO(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(2*time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("unrelated Agent was blocked by a database write")
 	}
 	unblock()
@@ -314,14 +314,14 @@ func TestStopWaitsForPendingWriteAndRejectsNewObservations(t *testing.T) {
 	}()
 	select {
 	case <-store.entered:
-	case <-time.After(2*time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("observation never reached storage")
 	}
 	stopped := make(chan error, 1)
 	go func() { stopped <- reg.stop() }()
 	select {
 	case <-conn.disconnected:
-	case <-time.After(2*time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("stop did not disconnect the WebSocket")
 	}
 	if _, _, err := reg.update(context.Background(), p, false, nil, &protobufs.AgentToServer{InstanceUid: idB, SequenceNum: 1}); !errors.Is(err, errRegistryClosing) {
@@ -369,7 +369,7 @@ func TestServeWaitsForHTTPRequestsToDrain(t *testing.T) {
 	}()
 	select {
 	case <-entered:
-	case <-time.After(2*time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("HTTP request did not reach handler")
 	}
 	cancel()

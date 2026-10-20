@@ -3,10 +3,10 @@ package gormrepo
 import (
 	"context"
 	"errors"
-	"unicode/utf8"
 	"fmt"
 	"math"
 	"time"
+	"unicode/utf8"
 
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/appconfig"
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/auth"
@@ -18,13 +18,13 @@ import (
 )
 
 var (
-	ErrNotFound  = errors.New("agent not found")
-	ErrOwnership = errors.New("agent instance owned by a different credential")
+	ErrNotFound           = errors.New("agent not found")
+	ErrOwnership          = errors.New("agent instance owned by a different credential")
 	ErrInvalidObservation = errors.New("invalid agent observation")
 )
 
 type AgentRecord struct {
-	WorkspaceID            string    `gorm:"column:workspace_id;primaryKey"`
+	WorkspaceID         string    `gorm:"column:workspace_id;primaryKey"`
 	InstanceUID         string    `gorm:"column:instance_uid;primaryKey"`
 	CredentialID        string    `gorm:"column:credential_id"`
 	AgentKind           string    `gorm:"column:agent_kind"`
@@ -142,9 +142,9 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 	}
 	if obs.Description != nil {
 		for _, field := range []struct {
-			name string
+			name  string
 			value string
-			max int
+			max   int
 		}{
 			{"agent_kind", obs.Description.Kind, 64},
 			{"distribution", obs.Description.Distribution, 128},

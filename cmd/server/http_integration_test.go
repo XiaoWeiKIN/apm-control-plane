@@ -142,9 +142,13 @@ func TestAgentRegistrationThroughOpAMPToDatabaseAndAPI(t *testing.T) {
 				{Key: "service.name", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: "spoofed"}}},
 			}}
 			spoofedBytes, err := proto.Marshal(spoofed)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			spoofedRequest, err := http.NewRequest(http.MethodPost, server.URL+"/v1/opamp", bytes.NewReader(spoofedBytes))
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			spoofedRequest.Header.Set("Authorization", "Bearer other-long-agent-token")
 			spoofedRequest.Header.Set("Content-Type", "application/x-protobuf")
 			spoofedResponse, err := server.Client().Do(spoofedRequest)

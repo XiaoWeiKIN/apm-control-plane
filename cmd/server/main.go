@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"sort"
@@ -143,7 +143,7 @@ func (r *registry) snapshot(rec gormrepo.AgentRecord, now time.Time) map[string]
 	}
 	return map[string]any{
 		"instance_uid":         rec.InstanceUID,
-		"workspace_id":            rec.WorkspaceID,
+		"workspace_id":         rec.WorkspaceID,
 		"service_name":         rec.ServiceName,
 		"service_namespace":    rec.ServiceNamespace,
 		"environment":          rec.Environment,
@@ -471,7 +471,7 @@ func processingErrorResponse(uid []byte, err error) *protobufs.ServerToAgent {
 	return &protobufs.ServerToAgent{
 		InstanceUid: uid,
 		ErrorResponse: &protobufs.ServerErrorResponse{
-			Type: kind,
+			Type:         kind,
 			ErrorMessage: message,
 		},
 	}
