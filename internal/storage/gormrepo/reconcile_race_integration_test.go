@@ -38,7 +38,7 @@ func TestConcurrentReleaseAndACKPreservesLatestDesiredPostgresAndMySQL(t *testin
 			if _, err := store.Observe(ctx, p, uid, Observation{
 				SeenAt: time.Now().UTC(), Transport: "websocket",
 				Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
-				Description: &Description{Kind: config.JavaAgentKind},
+				Description:  &Description{Kind: config.JavaAgentKind},
 			}); err != nil {
 				t.Fatal(err)
 			}
