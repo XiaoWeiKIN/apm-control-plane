@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net"
 	"os"
 	"os/signal"
 	"sort"
@@ -37,6 +38,7 @@ type AgentStore interface {
 }
 
 type runtimeAgent struct {
+	mu           sync.Mutex
 	conn         types.Connection
 	sequence     uint64
 	remote       *protobufs.AgentRemoteConfig
@@ -45,15 +47,23 @@ type runtimeAgent struct {
 }
 
 type registry struct {
-	mu       sync.Mutex
-	store    AgentStore
-	sessions map[string]*runtimeAgent
-	pollTTL  time.Duration
+	mu            sync.Mutex
+	inFlight      sync.WaitGroup
+	closing       bool
+	store         AgentStore
+	sessions      map[string]*runtimeAgent
+	wsConnections map[types.Connection]struct{}
+	pollTTL       time.Duration
 }
 
 func newRegistry(store AgentStore, ttl time.Duration) *registry {
-	return &registry{store: store, sessions: make(map[string]*runtimeAgent), pollTTL: ttl}
+	return &registry{
+		store: store, sessions: make(map[string]*runtimeAgent),
+		wsConnections: make(map[types.Connection]struct{}), pollTTL: ttl,
+	}
 }
+
+var errRegistryClosing = errors.New("control plane is shutting down")
 
 // ErrSessionConflict means an existing live WebSocket owns this Instance UID.
 // No other connection is allowed to overwrite that runtime session.
@@ -115,13 +125,15 @@ func (r *registry) snapshot(rec gormrepo.AgentRecord, now time.Time) map[string]
 	id := key(rec.WorkspaceID, rec.InstanceUID)
 	r.mu.Lock()
 	rt := r.sessions[id]
+	r.mu.Unlock()
 	connected := false
 	desiredHash := ""
 	if rt != nil {
+		rt.mu.Lock()
 		connected = rt.conn != nil && rec.LastTransport == "websocket"
 		desiredHash = rt.desiredHash
+		rt.mu.Unlock()
 	}
-	r.mu.Unlock()
 	if rec.LastTransport == "http" && now.Sub(rec.LastSeen) <= r.pollTTL && !rec.LastSeen.IsZero() {
 		connected = true // freshness estimate, not a persistent HTTP socket
 	}
@@ -173,9 +185,9 @@ func (r *registry) get(ctx context.Context, p auth.Principal, uid string) (map[s
 	return r.snapshot(item, time.Now().UTC()), nil
 }
 
-// update synchronously persists observations before acknowledging OpAMP status.
-// The lock serializes ownership checks and observations within a P1 process.
-// P2 can move persistence out of this critical section with per-Agent fencing.
+// update persists the observation before acknowledging OpAMP status.
+// Only requests for the same Agent share a lock; unrelated Agents must not
+// block each other while waiting for a database write.
 func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn types.Connection, msg *protobufs.AgentToServer) (*protobufs.AgentRemoteConfig, bool, error) {
 	if msg == nil || len(msg.InstanceUid) != 16 {
 		return nil, false, fmt.Errorf("instance_uid must be 16 bytes")
@@ -183,11 +195,21 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 	id := hex.EncodeToString(msg.InstanceUid)
 	k := key(p.WorkspaceID, id)
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	if r.closing {
+		r.mu.Unlock()
+		return nil, false, errRegistryClosing
+	}
 	rt := r.sessions[k]
 	if rt == nil {
 		rt = &runtimeAgent{}
+		r.sessions[k] = rt
 	}
+	r.inFlight.Add(1)
+	r.mu.Unlock()
+	defer r.inFlight.Done()
+
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
 	if rt.conn != nil && rt.conn != conn {
 		return nil, false, errSessionConflict
 	}
@@ -229,7 +251,6 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 			rt.configStatus = "PENDING"
 		}
 	}
-	r.sessions[k] = rt
 	if rt.remote == nil || msg.Capabilities&uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig) == 0 {
 		return nil, full, nil
 	}
@@ -239,14 +260,55 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 	return rt.remote, full, nil
 }
 
+func (r *registry) trackWS(conn types.Connection) {
+	r.mu.Lock()
+	if r.closing {
+		r.mu.Unlock()
+		_ = conn.Disconnect()
+		return
+	}
+	r.wsConnections[conn] = struct{}{}
+	r.mu.Unlock()
+}
+
 func (r *registry) disconnect(p auth.Principal, conn types.Connection) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	delete(r.wsConnections, conn)
+	agents := make([]*runtimeAgent, 0)
 	for k, rt := range r.sessions {
-		if strings.HasPrefix(k, p.WorkspaceID+"/") && rt.conn == conn {
-			rt.conn = nil
+		if strings.HasPrefix(k, p.WorkspaceID+"/") {
+			agents = append(agents, rt)
 		}
 	}
+	r.mu.Unlock()
+	for _, rt := range agents {
+		rt.mu.Lock()
+		if rt.conn == conn {
+			rt.conn = nil
+		}
+		rt.mu.Unlock()
+	}
+}
+
+// stop rejects new observations, disconnects WebSockets, and waits for
+// already accepted database writes before Store.Close.
+func (r *registry) stop() error {
+	r.mu.Lock()
+	r.closing = true
+	conns := make([]types.Connection, 0, len(r.wsConnections))
+	for conn := range r.wsConnections {
+		conns = append(conns, conn)
+	}
+	r.mu.Unlock()
+
+	var closeErr error
+	for _, conn := range conns {
+		if err := conn.Disconnect(); err != nil && !errors.Is(err, net.ErrClosed) {
+			closeErr = errors.Join(closeErr, err)
+		}
+	}
+	r.inFlight.Wait()
+	return closeErr
 }
 
 func samplingConfig(rate float64) (*protobufs.AgentRemoteConfig, error) {
@@ -279,16 +341,23 @@ func (r *registry) assign(ctx context.Context, p auth.Principal, uid string, rat
 		return nil, err
 	}
 	r.mu.Lock()
+	if r.closing {
+		r.mu.Unlock()
+		return nil, errRegistryClosing
+	}
 	k := key(p.WorkspaceID, uid)
 	rt := r.sessions[k]
 	if rt == nil {
 		rt = &runtimeAgent{}
 		r.sessions[k] = rt
 	}
+	r.mu.Unlock()
+
+	rt.mu.Lock()
 	rt.remote = cfg
 	rt.desiredHash = hex.EncodeToString(cfg.ConfigHash)
 	rt.configStatus = "PENDING"
-	r.mu.Unlock()
+	rt.mu.Unlock()
 	// P1 preserves the existing demo's ephemeral per-instance sampling API;
 	// immutable revisions, durable Desired and WS proactive push belong to P2.
 	return r.snapshot(record, time.Now().UTC()), nil
@@ -415,6 +484,11 @@ func makeGateway(reg *registry, agentAuth *auth.Authenticator, log *slog.Logger)
 			}
 			isWS := websocket.IsWebSocketUpgrade(req)
 			return types.ConnectionResponse{Accept: true, ConnectionCallbacks: types.ConnectionCallbacks{
+				OnConnected: func(_ context.Context, conn types.Connection) {
+					if isWS {
+						reg.trackWS(conn)
+					}
+				},
 				OnConnectionClose: func(conn types.Connection) {
 					if isWS {
 						reg.disconnect(principal, conn)
@@ -424,7 +498,9 @@ func makeGateway(reg *registry, agentAuth *auth.Authenticator, log *slog.Logger)
 					out := &protobufs.ServerToAgent{InstanceUid: msg.InstanceUid, Capabilities: uint64(
 						protobufs.ServerCapabilities_ServerCapabilities_AcceptsStatus |
 							protobufs.ServerCapabilities_ServerCapabilities_OffersRemoteConfig)}
-					config, full, err := reg.update(ctx, principal, isWS, conn, msg)
+					persistCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+					defer cancel()
+					config, full, err := reg.update(persistCtx, principal, isWS, conn, msg)
 					if err != nil {
 						log.Warn("opamp status rejected", "error", err)
 						return processingErrorResponse(msg.InstanceUid, err)
@@ -444,46 +520,81 @@ func makeGateway(reg *registry, agentAuth *auth.Authenticator, log *slog.Logger)
 	}})
 }
 
-func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+// serve owns the HTTP listener and does not return until ordinary requests
+// drain and the remaining WebSocket observations stop using the database.
+func serve(ctx context.Context, srv *http.Server, listener net.Listener, reg *registry) error {
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(listener) }()
+
+	select {
+	case err := <-serveErr:
+		return errors.Join(normalizeServeError(err), reg.stop())
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := srv.Shutdown(shutdownCtx)
+		cancel()
+		if err != nil {
+			_ = srv.Close()
+		}
+		wsErr := reg.stop()
+		return errors.Join(err, wsErr, normalizeServeError(<-serveErr))
+	}
+}
+
+func normalizeServeError(err error) error {
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
+}
+
+func run(ctx context.Context, log *slog.Logger) (runErr error) {
+	// 1. 读取并校验启动配置，非法数据库或凭证配置提前失败。
 	cfg, err := appconfig.Load()
 	if err != nil {
-		log.Error("invalid startup configuration", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("invalid startup configuration: %w", err)
 	}
-	connectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	// 2. 校验数据库连接和表结构，关闭时保留连接释放错误。
+	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	store, err := gormrepo.Open(connectCtx, cfg.Database)
 	cancel()
 	if err != nil {
-		log.Error("database not ready", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("database not ready: %w", err)
 	}
 	defer func() {
 		if err := store.Close(); err != nil {
-			log.Error("database close failed", "error", err)
+			runErr = errors.Join(runErr, fmt.Errorf("close database: %w", err))
 		}
 	}()
+
+	// 3. 装配可信 Workspace 认证、Registry、OpAMP 及管理 API。
 	reg := newRegistry(store, cfg.HTTPPollingTTL)
 	handler, connCtx, err := makeGateway(reg, auth.New(cfg.AgentCredentials), log)
 	if err != nil {
-		log.Error("opamp attach failed", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("opamp attach failed: %w", err)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { response(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("/v1/opamp", handler)
 	mux.Handle("/api/", adminHandler(reg, auth.New(cfg.AdminCredentials)))
 	srv := &http.Server{Addr: cfg.ListenAddress, Handler: mux, ConnContext: connCtx, ReadHeaderTimeout: cfg.ReadHeaderTimeout}
+	listener, err := net.Listen("tcp", cfg.ListenAddress)
+	if err != nil {
+		return fmt.Errorf("listen %q: %w", cfg.ListenAddress, err)
+	}
+
+	// 4. 监听服务；结束时先排空请求和 WS 写入，再关闭数据库。
+	log.Info("starting opamp control plane", "address", listener.Addr().String(), "database_driver", cfg.Database.Driver)
+	return serve(ctx, srv, listener, reg)
+}
+
+func main() {
+	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go func() {
-		<-ctx.Done()
-		timeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(timeout)
-	}()
-	log.Info("starting opamp control plane", "address", cfg.ListenAddress, "database_driver", cfg.Database.Driver)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := run(ctx, log); err != nil {
 		log.Error("server failed", "error", err)
+		os.Exit(1)
 	}
 }
