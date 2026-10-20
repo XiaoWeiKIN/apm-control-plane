@@ -196,7 +196,12 @@ func (s *Store) PublishAgentConfig(ctx context.Context, workspaceID, instanceUID
 			RolloutPlanJSON:`{"batches":1}`,Status:"PENDING",RowVersion:1,
 			RequestedBy:requestedBy,CreatedAt:now,
 		}
-		if err:=tx.Create(&release).Error;err!=nil {return err}
+		if err:=tx.Create(&release).Error;err!=nil {
+			if idempotencyKey!="" && errors.Is(err,gorm.ErrDuplicatedKey) {
+				return ErrReleaseConflict
+			}
+			return err
+		}
 		target:=ReleaseTargetRecord{
 			WorkspaceID:workspaceID,ReleaseID:releaseID,InstanceUID:instanceUID,
 			ConfigRevisionID:configRevisionID,BatchNo:0,Status:"PENDING",
