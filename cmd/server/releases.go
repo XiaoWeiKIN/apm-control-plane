@@ -16,7 +16,7 @@ type releasePublisher interface {
 }
 
 // adminReleaseHandler persists release intent; actual OpAMP delivery belongs to P2.3.
-func adminReleaseHandler(publisher releasePublisher, credentials *auth.Authenticator) http.Handler {
+func adminReleaseHandler(publisher releasePublisher, credentials *auth.Authenticator, onPublished func(string, string)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// 1. 认证 Workspace 与校验 UID/请求结构，非法输入不触发数据库写入。
 		principal, ok := credentials.Authenticate(req.Header.Get("Authorization"))
@@ -59,6 +59,10 @@ func adminReleaseHandler(publisher releasePublisher, credentials *auth.Authentic
 		case err != nil:
 			http.Error(w, "storage unavailable", http.StatusServiceUnavailable)
 		default:
+			// 持久事务提交后唤醒在线 WS；无连接时由下次重连/HTTP 轮询恢复。
+			if onPublished != nil {
+				onPublished(principal.WorkspaceID, uid)
+			}
 			response(w, http.StatusAccepted, result)
 		}
 	})
