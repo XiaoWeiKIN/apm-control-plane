@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	JavaAgentKind      = "java-apm"
+	JavaAgentKind       = "java-apm"
 	JavaSamplingDialect = "java-apm-sampling/v1"
 	ConfigMapFormat     = "opamp-config-map-proto"
 	HashAlgorithm       = "sha256-proto-deterministic-v1"
@@ -27,14 +27,14 @@ type Snapshot struct {
 	hash      [sha256.Size]byte
 }
 
-func (s Snapshot) AgentKind() string     { return s.agentKind }
-func (s Snapshot) ConfigDialect() string { return s.dialect }
-func (s Snapshot) ConfigMapBytes() []byte { return bytes.Clone(s.data) }
+func (s Snapshot) AgentKind() string       { return s.agentKind }
+func (s Snapshot) ConfigDialect() string   { return s.dialect }
+func (s Snapshot) ConfigMapBytes() []byte  { return bytes.Clone(s.data) }
 func (s Snapshot) Hash() [sha256.Size]byte { return s.hash }
 
 type javaSamplingPolicy struct {
 	SchemaVersion int `json:"schema_version"`
-	Sampling struct {
+	Sampling      struct {
 		Type string  `json:"type"`
 		Rate float64 `json:"rate"`
 	} `json:"sampling"`
