@@ -95,9 +95,14 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 					return ErrAssignmentConflict
 				}
 				assignment.RowVersion++
+				previousState := assignment.State
 				assignment.State = state
-				if state == "APPLIED" || state == "FAILED" {
-					if err := setReleaseDeliveryStatus(tx, assignment, state, now); err != nil {
+				if state != previousState {
+					targetState := state
+					if state == "APPLYING" {
+						targetState = "WAITING_ACK"
+					}
+					if err := setReleaseDeliveryStatus(tx, assignment, targetState, now); err != nil {
 						return err
 					}
 				}
