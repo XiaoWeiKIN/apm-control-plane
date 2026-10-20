@@ -127,7 +127,7 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 				t.Fatal("unacknowledged config offered repeatedly before retry")
 			}
 			applied1 := &protobufs.RemoteConfigStatus{
-				Status: protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
+				Status:               protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
 				LastRemoteConfigHash: got1.ConfigHash,
 			}
 			if got := send(4, applied1); got.RemoteConfig != nil {
@@ -159,7 +159,7 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 				t.Fatalf("stale ACK overwrote new release: %+v %v", a, err)
 			}
 			applied2 := &protobufs.RemoteConfigStatus{
-				Status: protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
+				Status:               protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
 				LastRemoteConfigHash: got2.ConfigHash,
 			}
 			send(6, applied2)
