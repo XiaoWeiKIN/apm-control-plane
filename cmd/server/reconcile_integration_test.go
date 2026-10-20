@@ -139,7 +139,7 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 			}
 			// A later contradictory Agent report invalidates the prior applied state.
 			if got := send(5, &protobufs.RemoteConfigStatus{
-				Status: protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
+				Status:               protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
 				LastRemoteConfigHash: []byte{0x01},
 			}); got.RemoteConfig != nil {
 				t.Fatal("unexpected config before retry deadline")
