@@ -65,7 +65,7 @@ flowchart TB
     Collector --> Backend["APM Backend / ClickHouse"]
 ~~~
 
-上图描述**目标拓扑**，不是当前已部署系统。当前 P0 只有 `cmd/server` 的内存 Registry、OpAMP Gateway 和管理接口；PostgreSQL/MySQL Storage Adapter、Release、Reconciler 仍未实现。所谓“未来 Collector”是**被管理对象**，不能与图中的 OTLP Receiver 自动视为同一个实例。
+上图描述**P1–P3 目标拓扑**，不是所有模块都已部署。P1.1 已通过 GORM/Goose 在 PostgreSQL 和 MySQL 上实现持久化 Agent Registry；Policy Release 与 Reconciler 仍未实现。Workspace 是可观测平台统一的工作空间边界，当前 P1.1 的作用域来自受信的部署凭证配置，平台 Workspace/IAM 联通还未完成。所谓“未来 Collector”是**被管理对象**，不能与图中的 OTLP Receiver 自动视为同一个实例。
 
 ## 2. 从一次采样策略发布理解系统
 
@@ -116,8 +116,8 @@ sequenceDiagram
 
 | 概念 | 标识和生命周期 | 职责与边界 |
 | --- | --- | --- |
-| **Tenant / Principal** | 经认证的组织/调用者范围 | 决定可以查看、控制哪些 Agent；不得从客户端自报的 `service.name` 推导 |
-| **Service** | Tenant + Environment + Namespace/Name | 业务工作负载分组；一个 Service 可以关联多个 APM Agent；Collector 不必映射为 Java Service |
+| **Workspace / Principal** | 经认证的组织/调用者范围 | 决定可以查看、控制哪些 Agent；不得从客户端自报的 `service.name` 推导 |
+| **Service** | Workspace + Environment + Namespace/Name | 业务工作负载分组；一个 Service 可以关联多个 APM Agent；Collector 不必映射为 Java Service |
 | **Agent Instance** | OpAMP `instance_uid`，限定在已认证范围内 | 某个运行中的被管理 Agent；UID 按协议是 16 字节，并非长期资产或授权凭据 |
 | **Agent Session** | 一次 WS 会话或 HTTP 请求上下文 | 短生命周期通信状态。HTTP 活跃程度由最近轮询时间推断，不能当作长连接 |
 | **Agent Kind** | `java-apm` / `go-apm` / `python-apm` / `otel-collector` 等平台标识 | 选择元数据规则和配置 Adapter；仅是类型，不代表已经支持该配置能力 |
@@ -284,7 +284,7 @@ Global Default
             └── Instance Override（具备 TTL 与审计）
 ```
 
-Resolver 首先检查 Tenant 授权与 Agent Kind，再选择该目标唯一适用的策略集合。一个 Agent 可能匹配多条规则，因此必须定义稳定优先级并拒绝同级冲突，不能取 Go Map 遍历中的“第一个”。
+Resolver 首先检查 Workspace 授权与 Agent Kind，再选择该目标唯一适用的策略集合。一个 Agent 可能匹配多条规则，因此必须定义稳定优先级并拒绝同级冲突，不能取 Go Map 遍历中的“第一个”。
 
 首期仅 Java Sampling Adapter 消费 Sampling Policy；如果目标为 Collector，即使它宣告 `AcceptsRemoteConfig`，也不能收到 `apm/sampling.json`。其他 Runtime 的配置方式、重启要求和编译器要单独扩展。
 
@@ -382,17 +382,17 @@ Rollout Controller 将发布目标分成可审计批次。每批使用匹配 Has
 
 ## 8. 数据与一致性模型（目标设计）
 
-**完整数据库逻辑模型、字段字典、复合租户外键、事务/CAS、双方言和迁移路径的权威技术详设**见 [P1–P3 Control Plane Schema 设计](storage-schema.md)。以下表仅帮助理解领域概念，不代表当前全部已有物理表，也不替代详设中的 12 张目标逻辑表与按需扩展说明。
+**完整数据库逻辑模型、字段字典、复合工作空间外键、事务/CAS、双方言和迁移路径的权威技术详设**见 [P1–P3 Control Plane Schema 设计](storage-schema.md)。以下表仅帮助理解领域概念，不代表当前全部已有物理表，也不替代详设中的 12 张目标逻辑表与按需扩展说明。
 
 部署时选择 PostgreSQL 或 MySQL 作为单一主数据库，保存长期的管理状态；Go 进程内存保存活动网络连接。两种存储实现须满足相同的领域契约，但 Schema/Migration/SQL 方言独立，不能只更改 Driver 就自动迁移历史数据。以下表是**逻辑模型**，不是已落库的 Migration，字段和索引须在 P1/P2 做实际评审。
 
 | 逻辑实体 | 关键字段/关系 | 写入时机 |
 | --- | --- | --- |
-| `agent_instances` | Tenant、InstanceUID、Kind、Distribution、Version、认证身份绑定 | 注册与受控身份变更 |
+| `agent_instances` | Workspace、InstanceUID、Kind、Distribution、Version、认证身份绑定 | 注册与受控身份变更 |
 | `agent_observations` | AgentKey、Capabilities、Health、LastSeen、ReportedConfigHash、ReportedStatus | 每次有实际变更的状态上报 |
-| `services` | Tenant、Environment、Namespace、ServiceName | APM 工作负载发现/归并 |
+| `services` | Workspace、Environment、Namespace、ServiceName | APM 工作负载发现/归并 |
 | `policy_versions` | PolicyID、Revision、Immutable Body、Actor、CreatedAt | 新策略版本创建 |
-| `policy_bindings` | Tenant Scope、Selector、PolicyRevision、优先级 | 启用或调整策略绑定 |
+| `policy_bindings` | Workspace Scope、Selector、PolicyRevision、优先级 | 启用或调整策略绑定 |
 | `config_revisions` | AgentKind/Dialect、完整 ConfigMap、ContentHash | Adapter 编译与发布准备 |
 | `config_releases` | ReleaseID、Revision、Target Snapshot、批次状态、Actor | 一次受控发布 |
 | `agent_assignments` | AgentKey、DesiredConfigRevision/Hash、ObservedHash、Status | 发布、Reconcile、Agent 回执 |
@@ -400,7 +400,7 @@ Rollout Controller 将发布目标分成可审计批次。每批使用匹配 Has
 
 逻辑关键约束：
 
-- AgentKey 必须包含被授权的 Tenant 范围，不能把可冲突的客户端 UID 裸值当全局授权键。
+- AgentKey 必须包含被授权的 Workspace 范围，不能把可冲突的客户端 UID 裸值当全局授权键。
 - PolicyRevision 与 ConfigRevision 不可变；同样 ConfigHash 可以被不同发布复用。
 - 更新 Assignment 的 Desired Version 应带版本检查（CAS/乐观并发），避免较旧 Reconciler 回写覆盖新发布。
 - 一个 Agent 的当前 Assignment 不应由独立的两个发布并发写入；冲突要么明确排队，要么明确失败。
@@ -442,7 +442,7 @@ Rollout Controller 将发布目标分成可审计批次。每批使用匹配 Has
 }
 ```
 
-Server 应先验证调用者是否能控制相应 Tenant/Service，再在授权范围内解析 AgentKind 和 Selector。HTTP 成功响应仅说明发布意图已被持久化，不说明任一 Agent 已应用。
+Server 应先验证调用者是否能控制相应 Workspace/Service，再在授权范围内解析 AgentKind 和 Selector。HTTP 成功响应仅说明发布意图已被持久化，不说明任一 Agent 已应用。
 
 ### 8.2 不同 Agent Kind 的首期能力矩阵
 
@@ -459,13 +459,13 @@ Server 应先验证调用者是否能控制相应 Tenant/Service，再在授权�
 
 远程配置具有修改采集行为、Exporter 目标甚至潜在数据访问范围的能力。OpAMP 规范将 Remote Configuration 视为需要特殊保护的能力。
 
-**P0 事实**：`cmd/server/main.go` 使用两个不同的全局 Bearer Token，默认监听 `127.0.0.1:4320`，并未实现每 Agent/租户的可信身份绑定、mTLS、RBAC 或生产 TLS 终止。它只能作为本地 PoC，不能被宣称为生产多租户边界。
+**P0 事实**：`cmd/server/main.go` 使用两个不同的全局 Bearer Token，默认监听 `127.0.0.1:4320`，并未实现每 Agent/工作空间的可信身份绑定、mTLS、RBAC 或生产 TLS 终止。它只能作为本地 PoC，不能被宣称为生产多工作空间边界。
 
 **目标设计的最低要求**：
 
-1. Management Principal 与 Agent Principal 分离。Admin API 对 Tenant、Service、策略操作执行授权；Agent token/mTLS 身份只被授予限定的实例及所属范围。
+1. Management Principal 与 Agent Principal 分离。Admin API 对 Workspace、Service、策略操作执行授权；Agent token/mTLS 身份只被授予限定的实例及所属范围。
 2. TLS 保护所有外部网络上的控制连接。若由反向代理终止 TLS，必须防止客户端伪造转发身份头。
-3. 不从 `AgentDescription.service.name`、`service.version`、`host.name` 或 AgentKind 自报信息推导租户权限。
+3. 不从 `AgentDescription.service.name`、`service.version`、`host.name` 或 AgentKind 自报信息推导工作空间权限。
 4. Config Adapter 不得让不兼容的 Agent 接受任意文件格式；Java 专用 JSON 不发送给 Go/Python/Collector 实例。
 5. 发布前校验配置的 Exporter Endpoint、敏感字段和允许的目标。秘密配置需使用单独的加密与轮换机制，避免将凭证直接写进日志或审计事件。
 6. Management API 与 OpAMP Endpoint 应分别进行速率限制、请求大小限制、超时及可审计拒绝处理。
@@ -519,11 +519,11 @@ Agent 凭证最终采用 Scoped Token 还是 mTLS、以及重复 UID 的转移�
 
 ## 12. 源码地图：从哪里开始开发
 
-### 12.1 当前 P0 已有代码
+### 12.1 当前 P1.1 实现代码
 
 | 路径 | 可直接阅读的内容 | 状态 |
 | --- | --- | --- |
-| [`cmd/server/main.go`](../../cmd/server/main.go) | OpAMP Server.Attach、OnConnecting、OnMessage、内存 Registry、管理路由 | 已实现 P0 |
+| [`cmd/server/main.go`](../../cmd/server/main.go) | OpAMP Server.Attach、OnConnecting、OnMessage、运行时 Session 和 Workspace-scoped 管理路由 | 已实现 P1.1 |
 | [`cmd/server/main_test.go`](../../cmd/server/main_test.go) | UID、鉴权、采样配置分配与 ACK Hash 测试 | 已有单元测试 |
 | [`cmd/testagent/main.go`](../../cmd/testagent/main.go) | HTTP 轮询测试 Client，验证 JSON 并回报 APPLIED | 测试模拟，不是真实 SDK |
 | [`docs/architecture.md`](../architecture.md) | P0 协议、认证和持久化边界 | 已有事实说明 |
@@ -552,41 +552,24 @@ db/migrations/mysql/        MySQL Goose Migration
 tests/integration/          OpAMP + PostgreSQL/MySQL 合同测试
 ```
 
-目标 Package 分解仅用于说明**允许的依赖方向**。目前的 `cmd/server/main.go` 仍是 P0 的集中实现，不能把上述目录当作已存在的代码。
+目标 Package 分解仅用于说明**允许的依赖方向**。P1.1 已存在 `internal/appconfig`、`internal/auth`、`internal/storage/gormrepo` 及两套 Goose 初始 Migration，尚未实现 Policy/Release/Reconciler 等目标包；不要把尚未创建的目录误当作已有代码。
 
 ## 13. 本地验证和贡献者交接
 
-### 13.1 复现当前 P0
+### 13.1 复现 Workspace-scoped P1.1
 
-Go 1.25+；当前 P0 仅适合本地开发，不要将测试 Token、明文管理端口暴露到公网。示例与 [README](../../README.md) 相同：
+Go 1.25+、本地 PostgreSQL 或 MySQL。先按 [P1.1 运行手册](p1-durable-inventory.md) 执行对应的 Goose 初始化 Migration，再使用受信的 Workspace Credential JSON 配置启动 Server。下面只展示认证变量部分：
 
 ```bash
-export APM_OPAMP_TOKEN='replace-with-a-test-agent-token'
-export APM_ADMIN_TOKEN='replace-with-a-different-admin-token'
+export APM_AGENT_CREDENTIALS_JSON='[{"id":"dev-agent","workspace_id":"dev-workspace","token":"replace-with-a-long-random-agent-token"}]'
+export APM_ADMIN_CREDENTIALS_JSON='[{"id":"dev-admin","workspace_id":"dev-workspace","token":"replace-with-a-different-long-admin-token"}]'
+# 另需配置 APM_DB_DRIVER 和 APM_DATABASE_DSN，并执行对应 Goose migration
 go run ./cmd/server
 ```
 
-另一个终端运行测试 Agent：
+`cmd/testagent` 的客户端 Bearer Token 仍通过 `APM_OPAMP_TOKEN` 设置；**该变量不会为服务端创建一个默认 Workspace**。测试客户端与 Admin 请求必须各自使用正确的 Token。服务端只信任认证后的 Workspace 作用域，不会从 AgentDescription 获取授权。
 
-```bash
-export APM_OPAMP_TOKEN='replace-with-a-test-agent-token'
-export APM_ADMIN_TOKEN='replace-with-a-different-admin-token'
-go run ./cmd/testagent -service checkout
-```
-
-记录其输出的 32 字符 `instance_uid`，然后调用：
-
-```bash
-curl -H "Authorization: Bearer $APM_ADMIN_TOKEN" \
-  http://127.0.0.1:4320/api/v1/agents
-
-curl -X PUT "http://127.0.0.1:4320/api/v1/agents/<instance_uid>/sampling" \
-  -H "Authorization: Bearer $APM_ADMIN_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"sampling_rate":0.1}'
-```
-
-将 `<instance_uid>` 替换为测试 Agent 实际输出的值，并在测试客户端观察其 JSON 解析和 ACK。**这些是从仓库现有代码推导出的手工验证步骤，不是本文件已经执行并通过的端到端证明。** 现有 P0 单元测试与 GitHub CI 不能替代真实双进程烟测或 JVM 采样实验。
+完整初始化、运行与查询命令以 [P1.1 运行手册](p1-durable-inventory.md) 为准。P0 采样 JSON 模拟回执仍不是 JVM Sampler 热更新证明。
 
 ### 13.2 代码与 RF 校验
 

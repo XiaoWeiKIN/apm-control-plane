@@ -89,7 +89,7 @@ flowchart TB
 
 **必须保持的边界**：
 1. OPAMP 是控制面；OTLP 是数据面，两者不互相代发。
-2. Instance UID 是 Agent 实例标识，不作为租户授权证明；service.name/environment 也是可伪造元数据。生产配置下发之前必须完成凭证到租户/Agent 范围的绑定。
+2. Instance UID 是 Agent 实例标识，不作为工作空间授权证明；service.name/environment 也是可伪造元数据。生产配置下发之前必须完成凭证到工作空间/Agent 范围的绑定。
 3. Desired Policy Revision 不可变，Assignment 指向具体版本；Observed Hash/ConfigStatus 来自 Agent。发送成功不等于 APPLIED，只有同 Hash 的应用报告可更新对应 Assignment。
 4. 连接在线和运行健康是独立状态；会话断开只能说明控制连接不可用，不能判定 JVM 已停止。
 5. 规范化序列化产生稳定配置 Hash；重复下发同一策略必须幂等。
@@ -105,21 +105,21 @@ flowchart TB
 
 **P0 已合并基线**：原始 cmd/server/main.go 同时承载协议、HTTP Admin API 和内存 Registry；cmd/testagent/main.go 是 HTTP ACK 模拟 Agent。P0 不属于生产控制平面。
 
-**P1.1 工作分支（PR #3，待评审，不是已批准设计）**：新增 Koanf 启动配置、GORM PostgreSQL/MySQL Agent Inventory Store、Goose Migration、Tenant/Credential 到 Instance UID 的首次绑定、Admin Tenant 查询隔离；HTTP 活跃度由 LastSeen + TTL 计算，WS 单实例活跃会话禁止静默抢占。短期为保证 P0 REST/OpAMP 兼容，协议回调和运行时临时配置仍在 cmd/server；Domain 分层和 P2 版本化 Config 将继续迭代。
+**P1.1 已合并的实现（PR #3）**：新增 Koanf 启动配置、GORM PostgreSQL/MySQL Agent Inventory Store、Goose Migration、Credential 到实例 UID 的首次绑定、Admin 作用域查询；后续 Workspace 命名统一实施修订把字段、API 和初始化 SQL 直接改为平台 Workspace；HTTP 活跃度由 LastSeen + TTL 计算，WS 单实例活跃会话禁止静默抢占。短期为保证 P0 REST/OpAMP 兼容，协议回调和运行时临时配置仍在 cmd/server；Domain 分层和 P2 版本化 Config 将继续迭代。
 
-**身份/会话方案仍为待评审提案**：Scoped Bearer Token 由环境变量/Secret 装载，CredentialID 在一个 Tenant 内首次绑定 UID；被不同 Credential 使用的同 UID 上报被拒绝。该策略能阻止凭证间冒领，但没有完成 Token 生命周期、mTLS、可信分布式会话 Generation/Fencing 或企业 IAM，因此不能称为生产认证方案。
+**身份/会话方案仍为待评审提案**：Scoped Bearer Token 由环境变量/Secret 装载，CredentialID 在一个 Workspace 内首次绑定 UID；被不同 Credential 使用的同 UID 上报被拒绝。该策略能阻止凭证间冒领，但没有完成 Token 生命周期、mTLS、可信分布式会话 Generation/Fencing 或企业 IAM，因此不能称为生产认证方案。
 
 **目标模块（模块化单体）**：
 - cmd/server：装配依赖、启动/关闭与 HTTP Server 生命周期。
 - internal/opamp：OpAMP Attach/Callbacks、Agent Capabilities、请求认证、实例连接与消息序列；协议结构不渗入 Policy Domain。
-- internal/registry：Agent Identity、AgentKind、Distribution、声明属性、CapabilitySet 和最近 Observed Snapshot；持久化 Agent Instance 与内存 Session 分离。Service（Tenant + Environment + Namespace + Name）作为 APM 工作负载关联；Collector 不强制进入同一服务层级。
+- internal/registry：Agent Identity、AgentKind、Distribution、声明属性、CapabilitySet 和最近 Observed Snapshot；持久化 Agent Instance 与内存 Session 分离。Service（Workspace + Environment + Namespace + Name）作为 APM 工作负载关联；Collector 不强制进入同一服务层级。
 - internal/policy：通用 Policy/Revision/Selector 与目标类型约束，首期只有 Java Head Sampling Policy；冲突采用显式优先级，优先级相同且内容不同直接拒绝发布，不能依赖遍历顺序。
 - internal/config：通用配置 Revision、Assignment、Config Release、ConfigHash、ConfigStatus；`AgentConfigAdapter` 按 AgentKind/Distribution/Schema/Capabilities 编译成不可变 AgentConfigMap。首期只有 `java-otel` 适配器；后续 Go/Python/Collector 适配器由各自配置契约提供，不复用 Java JSON 作为所有发行版的公共标准。
 - internal/reconcile：按 Agent desired hash 与 reported applied hash 协调，监听重连、发布、ACK 和失败重试。
 - internal/storage：驱动无关的 Repository/UnitOfWork 契约，使用 GORM v2 统一 CRUD 和事务，通过 gorm.io/driver/postgres 与 gorm.io/driver/mysql 选择驱动，连接池使用 database/sql。数据库物理 Schema 和 Migration 可以按方言区分；普通 CRUD 由一套 GORM Repository 实现，必要的方言差异和错误分类在存储层局部处理；避免把网络连接对象持久化。
-- internal/api：查询 Agent、创建策略版本、发布与回滚请求；鉴权与租户授权在入口完成。
+- internal/api：查询 Agent、创建策略版本、发布与回滚请求；鉴权与工作空间授权在入口完成。
 
-**候选持久实体（逻辑模型，非 PostgreSQL 专有 Schema）**：agent_instances（UID、AgentKind、Distribution、版本、已认证范围）、agent_observations（最后时间、Capabilities、Health、Observed Config）、apm_services（租户/环境/Namespace/Name）、policy_versions（不可变规则）、policy_bindings（Scope/Selector）、config_revisions（类型化配置正文）、config_releases（一次发布的目标/批次/审计）、agent_assignments（AgentUID、Desired revision/hash、Observed hash/status）、config_events（append-only 审计）。活动的 agent_sessions 不持久化 Connection 对象。逻辑实体可在 MVP 合并实现，但不能合并生命周期语义。这是一份待验证的数据模型，不是现有数据库表。
+**候选持久实体**：按 [统一 Workspace 数据库 Schema 设计](../architecture/storage-schema.md) 的 11 张核心逻辑表及按需扩展表组织。P1.1 已实现 `agent_instances`，其余 `agent_principals` / `credential_bindings`、Policy Revision、Config Revision、Release、Target、Assignment 和 Event 均为后续候选，**不代表物理 Migration 已完成**。Workspace 是可观测系统已有组织/工作空间，不新建 Control Plane 专用主数据表；活动的 `agent_sessions` 仍不存网络 Connection。
 
 **首期 Java 配置契约**：RemoteConfig ConfigMap 的名为 `apm/sampling.json`，ContentType 为 `application/json`；Body 包含 `schema_version`、`sampling.type = parent_based_trace_id_ratio`、`sampling.rate ∈ [0,1]`。这只是我们对 Java 发行版的自定义契约，不代表 OpAMP 或其他语言 Agent 的规范字段。未来 Collector Adapter 必须输出它实际理解的配置对象，并明确 apply/restart 能力，不得把 Java 的动态采样能力外推到 Collector。
 
@@ -127,7 +127,7 @@ flowchart TB
 
 **1. 任意 Agent 上线/重连（首期验证 Java Agent）**
 
-- 网络入口验证凭证 → 绑定租户/授权范围 → OnMessage 校验 16-byte InstanceUID、序列与 Capabilities → 读取 AgentKind/Distribution/Version 元数据 → 更新 Agent 的 Observed Snapshot。未认证的 AgentKind 声明不能扩大凭证授权。
+- 网络入口验证凭证 → 绑定工作空间/授权范围 → OnMessage 校验 16-byte InstanceUID、序列与 Capabilities → 读取 AgentKind/Distribution/Version 元数据 → 更新 Agent 的 Observed Snapshot。未认证的 AgentKind 声明不能扩大凭证授权。
 - AgentDescription 可部分上报；出现断序或服务端缺少快照时请求 ReportFullState。重复 UID 并发会话应制定显式冲突规则并测试，新建 Session 不盲目获得旧 Session 连接所有权。
 - Reconciler 读取持久 Assignment：若代理支持远程配置且 reported hash 未达到 desired hash，下发完整配置；否则保持 Pending/Unsupported 并显式暴露原因。
 
@@ -155,17 +155,19 @@ flowchart TB
 | Redis/Kafka + 多个 Gateway 服务 | 跨实例消息路由和吞吐扩展 | 当前没有规模证据，不引入 |
 | HTTP-only 管理 | 不需要驻留 WS 会话 | 配置只在轮询时生效；兼容保留但不能当推送 |
 
-**数据库候选技术**：GORM v2 + PostgreSQL/MySQL Dialectors + Goose Migration + Koanf v2，参见 [P1–P3 技术选型](../architecture/technology-selection.md)。这些仍是待验证的组件提议，不代表已批准的 ADR 或已在 go.mod 中引入。
+**已经采用的数据库组件**：GORM v2 + PostgreSQL/MySQL Dialectors + Goose Migration + Koanf v2 已在 P1.1 实现中引入，参见 [技术选型](../architecture/technology-selection.md)；其存在不代表所有设计约束已获批准或未来 Config/Release 已实施。
 
-**未决问题**：PostgreSQL/MySQL 兼容范围与测试版本、MySQL DDL Migration 恢复、两库事务隔离级别/CAS 并发行为以及未来是否增加第三种 Driver；服务的命名与租户分组边界、AgentKind/Distribution 识别和能力来源、跨发行版版本兼容性、Collector 的配置职责与 Kubernetes Operator 之间的边界；Agent 身份绑定采用 mTLS 证书还是租户 Scoped Token；重复 UID 应如何换绑；Service/Environment Selector 的授权边界；严格回滚与 ACK timeout 默认值；生产规模和目标 SLO；Go Server v0.25.0 与 Java Client v0.14.0 规范差异。无法由当前 P0 单测证明这些约束。
+**未决问题**：PostgreSQL/MySQL 兼容范围与测试版本、MySQL DDL Migration 恢复、两库事务隔离级别/CAS 并发行为以及未来是否增加第三种 Driver；服务的命名与工作空间分组边界、AgentKind/Distribution 识别和能力来源、跨发行版版本兼容性、Collector 的配置职责与 Kubernetes Operator 之间的边界；Agent 身份绑定采用 mTLS 证书还是工作空间 Scoped Token；重复 UID 应如何换绑；Service/Environment Selector 的授权边界；严格回滚与 ACK timeout 默认值；生产规模和目标 SLO；Go Server v0.25.0 与 Java Client v0.14.0 规范差异。无法由当前 P0 单测证明这些约束。
 
-**重访条件**：出现多实例部署需求、经过测量的连线数量或下发尾延迟超出单体能力、跨租户配置泄漏风险、Java Client 互操作失败、真实 JVM 采样行为与反馈不一致。
+**重访条件**：出现多实例部署需求、经过测量的连线数量或下发尾延迟超出单体能力、跨工作空间配置泄漏风险、Java Client 互操作失败、真实 JVM 采样行为与反馈不一致。
 
 ## Package Document Map
 
 Single-file Design：本文件是 DD-001 的完整阅读入口；模块细节经批准后再独立拆分。
 
 ## Revision Notes
+
+- 2026-10-20 — 用户确认可观测平台 Workspace 是统一资源作用域，不是客户 Tenant；在无需要兼容的生产数据前提下直接改 P1.1 初始化 SQL/Go Schema 为 `workspace_id`。Identity/Workspace IAM 真实集成未完成，本文仍保持 Draft，不推定 Owner 批准。
 
 - 2026-10-19 — P1.1 分支实现参考：PR #3 提交统一 GORM Agent Inventory、Koanf、Goose 与初步 Scoped Credential 身份绑定。此处仅记录 Draft 事实，不代表正式 Design Owner 批准。
 

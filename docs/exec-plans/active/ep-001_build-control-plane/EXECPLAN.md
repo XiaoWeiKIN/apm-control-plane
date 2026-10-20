@@ -40,12 +40,12 @@ This ExecPlan is a bounded living document. Keep current truth synchronized. Pre
 ## Current Snapshot
 
 - Latest checkpoint: none（本执行计划首次创建）。
-- Current milestone: **P1.1 — Durable Agent Inventory implementation (PR #3, under review)**；功能代码已提交，尚未完成 P1 全部身份方案与正式设计审批。
-- Verified baseline: PR #1 的 P0 Go 编译、单测（含 Race Detector）和 Vet 在 GitHub Actions 通过；测试 Agent 的实际双进程手工烟测未执行。
-- Next action: 评审 DD-001 中的凭证到实例/租户绑定模型，确定 PostgreSQL/MySQL 共通 Repository 契约和独立 Migration；增加 internal/storage 与 internal/registry，并在 PostgreSQL/MySQL 均执行重启恢复合同测试。
+- Current milestone: **P1.1 已完成首个 Durable Agent Inventory 增量（PR #3 已合并）**；当前 Workspace-scoped 清理为待合并的独立代码变更，未完成 P1 整体身份方案的正式 Design 批准。
+- Verified baseline: PR #3 在 Go CI、Race Detector、PostgreSQL/MySQL Goose/Agent API 合同测试及 RF 中通过；当前 Workspace-scoped 清理以其独立 CI 为准；测试 Agent 的人工双进程烟测未执行。
+- Next action: 以平台 Workspace 为统一隔离键完成 P1.1 的初始化 Migration、Credential JSON、`auth.Principal.WorkspaceID`、GORM/API 和双数据库测试；随后评审平台 Workspace/IAM 认证、Agent Principal 与 UID 所有权模型。
 - Confirmed product scope (2026-10-19): 多语言 APM Agent + 后续 Collector；P1–P3 只交付通用抽象和 Java 适配链路，不把其他语言或 Collector 执行能力算入验收。
 - Storage requirement (2026-10-19): 多数据库 Driver（至少 PostgreSQL 和 MySQL）是新增范围；技术候选与风险记录在 docs/architecture/technology-selection.md，必须有两数据库实际合同测试。
-- P1 draft evidence (2026-10-19): PR #3 feat/p1-durable-agent-inventory 已提交 Koanf/GORM/Goose、PostgreSQL/MySQL Migration、凭证范围与 Inventory 持久化。一次 GitHub Actions PostgreSQL/MySQL 合同测试已通过；最终 PR checks 和身份授权评审仍需完成。
+- P1 evidence (2026-10-19): PR #3 的 GORM/Goose/Koanf 与 Inventory 持久化已合并，通过 Go/DB/RF CI；本次 Workspace 作用域调整尚需各自最新 CI 和平台授权集成评审。
 - Open: DD-001 尚未批准；没有 accepted ADR；生产 TLS/身份策略尚待明确。不能把这些条件标记为完成。
 
 ## Context and Orientation
@@ -101,11 +101,11 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 ### M1 — P1 Durable Agent Inventory / Identity
 
-修改 internal/opamp、internal/registry、internal/storage（Repository Port + GORM PostgreSQL/MySQL Dialector）、db/migrations/postgres、db/migrations/mysql 和 cmd/server 的装配。新增 AgentKind/DistributionVersion/Capabilities 字段与服务身份映射（Collector 不强制关联 Java Service）。可观察结果：已认证 Agent 的状态持久化；数据库或服务端重启后保留身份与 Last Seen；重复 UID 和租户越权请求被拒绝或明确标记。保持现有 P0 API 兼容。
+修改 internal/opamp、internal/registry、internal/storage（Repository Port + GORM PostgreSQL/MySQL Dialector）、db/migrations/postgres、db/migrations/mysql 和 cmd/server 的装配。新增 AgentKind/DistributionVersion/Capabilities 字段与服务身份映射（Collector 不强制关联 Java Service）。可观察结果：已认证 Agent 的状态持久化；数据库或服务端重启后保留身份与 Last Seen；重复 UID 和工作空间越权请求被拒绝或明确标记。保持现有 P0 API 兼容。
 
 验证范围：使用 Java、Go、Python、Collector 的**身份元数据样本**验证 Registry 通用性；不要求后三类 Agent 运行时真实接入。
 
-验收：执行 go test -race ./...；在 PostgreSQL 与 MySQL 的本地/CI 集成环境分别启动 Agent、重启服务、查询 GET /api/v1/agents/{uid}，验证对应记录未消失并可回连；运行未认证与跨租户负向用例。保存测试结果/CI Run URL。
+验收：执行 go test -race ./...；在 PostgreSQL 与 MySQL 的本地/CI 集成环境分别启动 Agent、重启服务、查询 GET /api/v1/agents/{uid}，验证对应记录未消失并可回连；运行未认证与跨工作空间负向用例。保存测试结果/CI Run URL。
 
 ### M2 — P2 Sampling Policy + Reconciler
 
@@ -139,7 +139,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 - [ ] **P2 Policy**：发布 rate=0.1，测试 Agent 在下一次轮询收到 schema=1 的 JSON；相同 Hash 的 APPLIED 更新 Observed，旧 ACK 不覆盖新 Desired。证据：OpAMP integration trace + DB assertions。
 - [ ] **P2 Reconciliation**：先发布后断开 Agent、重启控制平面、重新接入；期待 Desired Revision 未丢、自动重发并最终收敛。证据：PostgreSQL/MySQL CI integration logs。
 - [ ] **P2 Capabilities/Concurrency**：不支持 RemoteConfig 或不兼容 Java 配置 Schema 的 Agent 均不下发 Java Sampling JSON，且明确返回 UNSUPPORTED；WebSocket 每连接串行推送，HTTP 模式不谎称实时 WS 推送。证据：race test + protocol tests。
-- [ ] **P3 Release**：灰度组失败阻断下一批、回滚产生新审计、跨租户发策略被拒绝；Release 目标 AgentKind 与实例分配一一对应，混合 Kind 下不能错发 Java 配置。证据：批次故障注入和审计记录。
+- [ ] **P3 Release**：灰度组失败阻断下一批、回滚产生新审计、跨工作空间发策略被拒绝；Release 目标 AgentKind 与实例分配一一对应，混合 Kind 下不能错发 Java 配置。证据：批次故障注入和审计记录。
 - [ ] **RF Contract**：执行 repofoundry --repo . validate 与 Spec validate、designctl validate、epctl validate；期待零 error。设计批准和 completion 需以后续真实审批、真实 revision 与证据为依据。
 
 尚未完成任何新里程碑；这些复选框都保持未勾选。完成归档必须由 RF epctl archive-ep 写入 verified_revision、verification_evidence 和 seal。
@@ -154,7 +154,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 - [x] (2026-10-19) 既有 P0 代码和 RepoFoundryAI Harness/Specs 已存在于 PR #1；Go 和 RF 的既有 CI 校验通过（针对当时提交）。
 - [x] (2026-10-19) 建立 DD-001 工作草案和本次 EP-001 计划；当前尚未获得 Design Owner 批准。
-- [x] (2026-10-19) P1.1 代码草案：完成 Koanf 配置、GORM 双 Driver、Goose Schema、基本凭证到 Tenant/UID 绑定与持久化 Inventory；PR #3，非已批准生产实施。
+- [x] (2026-10-19) P1.1 代码草案：完成 Koanf 配置、GORM 双 Driver、Goose Schema、基本凭证到 Workspace/UID 绑定与持久化 Inventory；PR #3，非已批准生产实施。
 - [ ] M1：身份边界、PostgreSQL/MySQL Registry 及双数据库合同测试、断线恢复和验收。
 - [ ] M2：版本化策略、配置协调和 ACK 追踪。
 - [ ] M3：灰度批次、审计、失败隔离和回滚。
@@ -166,6 +166,8 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 - (2026-10-19) 官方 opamp-go 的 OnMessage/Send 语义决定：HTTP 通过请求响应下发；WebSocket 需要串行写和连接所有权管理。
 
 ## Decision Log
+
+- (2026-10-20, user direction) 控制面资源作用域是整个可观测系统的 Workspace，而非独立 Tenant；确认无需要兼容的旧生产数据，本增量将初始数据库、Go 领域命名和凭证配置直接统一为 `workspace_id`，不引入旧列双写、历史映射或回填。平台统一 IAM/Workspace 真实性验证仍保留安全设计任务。
 
 - (2026-10-19, provenance: user direction) 先实现 Control Plane，后实现自定义 Java Agent；不将 Agent 发行版工作纳入本 EP 的完成门槛。
 - (2026-10-19, proposal only) 优先模块化 Go 单体 + PostgreSQL + opamp-go，待 DD-001 审阅；不把提案当成 accepted ADR。
@@ -179,7 +181,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 | ID | Status | Opened | Resolved | Missing capability | Impact | Unblock or resolution |
 | --- | --- | --- | --- | --- | --- | --- |
 | BLK-001 | open | 2026-10-19 | | Design Owner 对 DD-001 的正式评审/批准 | 不能作为已批准设计完成 EP 归档 | 审核 DD-001，按 RF designctl 明确审批；实施中的可逆 P1 实验可先进行 |
-| BLK-002 | open | 2026-10-19 | | Agent 身份绑定机制和重复 UID 冲突规则的批准契约 | 禁止把当前全局 P0 Token 当生产多租户授权 | 提出选项、风险和测试证据，必要时创建 ADR 并获 Owner 接受 |
+| BLK-002 | open | 2026-10-19 | | Agent 身份绑定机制和重复 UID 冲突规则的批准契约 | 禁止把当前全局 P0 Token 当生产多工作空间授权 | 提出选项、风险和测试证据，必要时创建 ADR 并获 Owner 接受 |
 
 ## Outcomes & Retrospective
 
@@ -206,6 +208,8 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 - 未来测试的完整日志、数据库状态和 OpAMP 消息录制应保存至计划 artifacts/，索引仅记录可核验证据路径；当前未产生这些数据。
 
 ## Revision Notes
+
+- 2026-10-20 — P1.1 Workspace-scoped 命名/初始化数据模型整理作为独立实现增量推进。保留 EP-001 blocked 状态与身份安全审批门禁。
 
 - 2026-10-19 — 由 RF epctl 创建初始 active EP，基于用户确认的控制平面范围与 DD-001 工作草案；未假造审批和实现验收。
 - 2026-10-19 — 更新产品范围：通用 OpAMP Agent Control Plane，预留 Java/Go/Python APM Agent 和未来 Collector；本 EP 实施仍仅限 Java 适配与通用控制面，现有 blocked 状态和未完成验收保持不变。

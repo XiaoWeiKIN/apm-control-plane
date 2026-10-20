@@ -42,7 +42,7 @@ func TestRepositoryContractPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			uid := newUID(t)
-			p := auth.Principal{TenantID: "team-alpha", CredentialID: "cred-a"}
+			p := auth.Principal{WorkspaceID: "team-alpha", CredentialID: "cred-a"}
 			obs := Observation{
 				SeenAt: time.Now().UTC(), Transport: "http", Capabilities: 3,
 				Description: &Description{Kind: "java-apm", Distribution: "example-java", DistributionVersion: "1.2.3", Service: "checkout", ServiceVersion: "9.4.1"},
@@ -64,17 +64,17 @@ func TestRepositoryContractPostgresAndMySQL(t *testing.T) {
 				t.Fatalf("lost compressed state: %+v", updated)
 			}
 			// UID ownership stays bound to the credential that registered it.
-			_, err = store.Observe(ctx, auth.Principal{TenantID: "team-alpha", CredentialID: "cred-b"}, uid, obs)
+			_, err = store.Observe(ctx, auth.Principal{WorkspaceID: "team-alpha", CredentialID: "cred-b"}, uid, obs)
 			if !errors.Is(err, ErrOwnership) {
 				t.Fatalf("wrong identity collision: %v", err)
 			}
-			// A different tenant must never see or overwrite this agent.
+			// A different workspace must never see or overwrite this agent.
 			if _, err := store.Get(ctx, "team-beta", uid); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("cross-tenant read: %v", err)
+				t.Fatalf("cross-workspace read: %v", err)
 			}
 			list, err := store.List(ctx, "team-beta")
 			if err != nil || len(list) != 0 {
-				t.Fatalf("cross-tenant listing: %+v %v", list, err)
+				t.Fatalf("cross-workspace listing: %+v %v", list, err)
 			}
 			status := &ConfigStatus{Hash: "aabbcc", Status: "APPLIED"}
 			_, err = store.Observe(ctx, p, uid, Observation{SeenAt: time.Now().UTC(), Transport: "http", Capabilities: 3, Config: status})
@@ -89,7 +89,7 @@ func TestRepositoryContractPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			restored, err := store.Get(ctx, p.TenantID, uid)
+			restored, err := store.Get(ctx, p.WorkspaceID, uid)
 			if err != nil {
 				t.Fatal(err)
 			}

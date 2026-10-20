@@ -59,7 +59,7 @@ func newRegistry(store AgentStore, ttl time.Duration) *registry {
 // No other connection is allowed to overwrite that runtime session.
 var errSessionConflict = errors.New("agent instance already has an active session")
 
-func key(tenant, uid string) string { return tenant + "/" + uid }
+func key(workspace, uid string) string { return workspace + "/" + uid }
 
 func validUID(id string) bool {
 	if len(id) != 32 {
@@ -112,7 +112,7 @@ func description(d *protobufs.AgentDescription) *gormrepo.Description {
 }
 
 func (r *registry) snapshot(rec gormrepo.AgentRecord, now time.Time) map[string]any {
-	id := key(rec.TenantID, rec.InstanceUID)
+	id := key(rec.WorkspaceID, rec.InstanceUID)
 	r.mu.Lock()
 	rt := r.sessions[id]
 	connected := false
@@ -131,7 +131,7 @@ func (r *registry) snapshot(rec gormrepo.AgentRecord, now time.Time) map[string]
 	}
 	return map[string]any{
 		"instance_uid":         rec.InstanceUID,
-		"tenant_id":            rec.TenantID,
+		"workspace_id":            rec.WorkspaceID,
 		"service_name":         rec.ServiceName,
 		"service_namespace":    rec.ServiceNamespace,
 		"environment":          rec.Environment,
@@ -153,7 +153,7 @@ func (r *registry) snapshot(rec gormrepo.AgentRecord, now time.Time) map[string]
 }
 
 func (r *registry) list(ctx context.Context, p auth.Principal) ([]map[string]any, error) {
-	items, err := r.store.List(ctx, p.TenantID)
+	items, err := r.store.List(ctx, p.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func (r *registry) list(ctx context.Context, p auth.Principal) ([]map[string]any
 }
 
 func (r *registry) get(ctx context.Context, p auth.Principal, uid string) (map[string]any, error) {
-	item, err := r.store.Get(ctx, p.TenantID, uid)
+	item, err := r.store.Get(ctx, p.WorkspaceID, uid)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 		return nil, false, fmt.Errorf("instance_uid must be 16 bytes")
 	}
 	id := hex.EncodeToString(msg.InstanceUid)
-	k := key(p.TenantID, id)
+	k := key(p.WorkspaceID, id)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rt := r.sessions[k]
@@ -243,7 +243,7 @@ func (r *registry) disconnect(p auth.Principal, conn types.Connection) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for k, rt := range r.sessions {
-		if strings.HasPrefix(k, p.TenantID+"/") && rt.conn == conn {
+		if strings.HasPrefix(k, p.WorkspaceID+"/") && rt.conn == conn {
 			rt.conn = nil
 		}
 	}
@@ -274,12 +274,12 @@ func (r *registry) assign(ctx context.Context, p auth.Principal, uid string, rat
 	if err != nil {
 		return nil, err
 	}
-	record, err := r.store.Get(ctx, p.TenantID, uid)
+	record, err := r.store.Get(ctx, p.WorkspaceID, uid)
 	if err != nil {
 		return nil, err
 	}
 	r.mu.Lock()
-	k := key(p.TenantID, uid)
+	k := key(p.WorkspaceID, uid)
 	rt := r.sessions[k]
 	if rt == nil {
 		rt = &runtimeAgent{}

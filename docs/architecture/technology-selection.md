@@ -69,7 +69,7 @@ flowchart TB
 
 数据库 Adapter 的一致性契约至少包含：
 
-- Agent Identity 唯一性：在授权 Tenant 范围内唯一，UID 长度 16 字节；写入不存在的 Tenant 不会被授权模型默默接受。
+- Agent Identity 唯一性：在授权 Workspace 范围内唯一，UID 长度 16 字节；写入不存在的 Workspace 不会被授权模型默默接受。
 - Desired Config 可恢复：Server/Agent 重启后，Assignment 的 revision 与 hash 仍存在。
 - 配置发布原子性：一次发布事务中的 Policy/Config Revision、Release、Target Assignment 必须**一起提交或不提交**。
 - 乐观并发与旧回执：Agent 状态写入使用期望版本条件（`UPDATE ... WHERE generation=?`），旧 ACK 不覆盖新的 Desired 状态。
@@ -255,13 +255,13 @@ db/migrations/
 
 HTTP 入口使用 OpenTelemetry Go SDK 与 `otelhttp`，数据库操作初期在 **Repository 边界**打手工 Span/低基数指标，使 PostgreSQL 与 MySQL 的观测行为可比较。`otelpgx` 可在特定 PostgreSQL 优化期引入，但**不能将仅 PG 可用的 Driver 插桩当成唯一数据访问 Telemetry**。
 
-禁用把 AgentUID/ReleaseID 当做 Metrics Label 的默认做法。Token、数据库 DSN、SQL 参数中的秘密、RemoteConfig 正文敏感内容不得进入日志。Agent 的宣告属性只能作为数据，不可决定 Tenant 授权；Principal 绑定机制仍在 DD-001/ADR 中审查。
+禁用把 AgentUID/ReleaseID 当做 Metrics Label 的默认做法。Token、数据库 DSN、SQL 参数中的秘密、RemoteConfig 正文敏感内容不得进入日志。Agent 的宣告属性只能作为数据，不可决定 Workspace 授权；Principal 绑定机制仍在 DD-001/ADR 中审查。
 
 进程启动时：Load/Validate AppConfig → 创建 Logger/Telemetry → 通过 Storage Factory 打开所选 Driver/Pool → PingContext/Schema 兼容性验证 → 构造 Repository + Registry + OpAMP Gateway + Reconciler → Ready。DB 不可用时不能返回管理服务已经 Ready。数据库连接池指标可统一由 `sql.DBStats` 导出，但不同引擎的 Query 语义和延迟应分开观测。
 
 ## 7. 测试与目标工程结构
 
-单元测试保持标准库 `testing`、`httptest` 和 `go test -race`。集成测试使用 Testcontainers-Go 的 PostgreSQL/MySQL 模块，运行同一套 Repository 业务合同：Agent UID 唯一性、CRUD、事务原子性、CAS、旧 ACK、租户授权、重启恢复及连接池关闭。Goose 分数据库目录执行 Migration，并验证 MySQL DDL 失败后的恢复流程。
+单元测试保持标准库 `testing`、`httptest` 和 `go test -race`。集成测试使用 Testcontainers-Go 的 PostgreSQL/MySQL 模块，运行同一套 Repository 业务合同：Agent UID 唯一性、CRUD、事务原子性、CAS、旧 ACK、工作空间授权、重启恢复及连接池关闭。Goose 分数据库目录执行 Migration，并验证 MySQL DDL 失败后的恢复流程。
 
 **不使用 sqlc**，不生成双份 SQL Query 文件。目标结构如下（尚未实现）：
 

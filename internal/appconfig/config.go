@@ -2,6 +2,8 @@ package appconfig
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"fmt"
 	"os"
 	"strconv"
@@ -16,7 +18,7 @@ import (
 // Credential is loaded from secret environment variables, never from public YAML.
 type Credential struct {
 	ID       string `json:"id"`
-	TenantID string `json:"tenant_id"`
+	WorkspaceID string `json:"workspace_id"`
 	Token    string `json:"token"`
 }
 
@@ -122,20 +124,31 @@ func LoadWithEnv(env func(string) string) (Config, error) {
 		cfg.HTTPPollingTTL = d
 	}
 	if val := env("APM_AGENT_CREDENTIALS_JSON"); val != "" {
-		if err := json.Unmarshal([]byte(val), &cfg.AgentCredentials); err != nil {
+		if err := parseCredentials(val, &cfg.AgentCredentials); err != nil {
 			return cfg, fmt.Errorf("APM_AGENT_CREDENTIALS_JSON: %w", err)
 		}
-	} else if legacy := env("APM_OPAMP_TOKEN"); legacy != "" {
-		cfg.AgentCredentials = []Credential{{ID: "legacy-agent", TenantID: "default", Token: legacy}}
 	}
 	if val := env("APM_ADMIN_CREDENTIALS_JSON"); val != "" {
-		if err := json.Unmarshal([]byte(val), &cfg.AdminCredentials); err != nil {
+		if err := parseCredentials(val, &cfg.AdminCredentials); err != nil {
 			return cfg, fmt.Errorf("APM_ADMIN_CREDENTIALS_JSON: %w", err)
 		}
-	} else if legacy := env("APM_ADMIN_TOKEN"); legacy != "" {
-		cfg.AdminCredentials = []Credential{{ID: "legacy-admin", TenantID: "default", Token: legacy}}
 	}
 	return cfg, cfg.Validate()
+}
+
+// parseCredentials rejects obsolete workspace aliases and malformed JSON
+// instead of silently dropping unknown fields during credential loading.
+func parseCredentials(raw string, dst *[]Credential) error {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("unexpected trailing credential JSON")
+	}
+	return nil
 }
 
 func (c Config) Validate() error {
@@ -155,13 +168,13 @@ func (c Config) Validate() error {
 		return fmt.Errorf("invalid database pool configuration")
 	}
 	if len(c.AgentCredentials) == 0 || len(c.AdminCredentials) == 0 {
-		return fmt.Errorf("agent and admin credentials are required")
+		return fmt.Errorf("workspace-scoped agent and admin credentials are required (APM_AGENT_CREDENTIALS_JSON and APM_ADMIN_CREDENTIALS_JSON)")
 	}
 	seenID, seenToken := map[string]bool{}, map[string]bool{}
 	for _, credentials := range [][]Credential{c.AgentCredentials, c.AdminCredentials} {
 		for _, cred := range credentials {
-			if cred.ID == "" || cred.TenantID == "" || len(cred.Token) < 16 {
-				return fmt.Errorf("credentials require nonempty id/tenant and token length >= 16")
+			if cred.ID == "" || cred.WorkspaceID == "" || len(cred.Token) < 16 {
+				return fmt.Errorf("credentials require nonempty id/workspace and token length >= 16")
 			}
 			if seenID[cred.ID] || seenToken[cred.Token] {
 				return fmt.Errorf("credential ids and tokens must be unique across roles")

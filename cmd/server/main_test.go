@@ -27,13 +27,13 @@ func newFakeStore() *fakeStore { return &fakeStore{data: make(map[string]gormrep
 func (s *fakeStore) Observe(_ context.Context, p auth.Principal, id string, o gormrepo.Observation) (gormrepo.AgentRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	k := key(p.TenantID, id)
+	k := key(p.WorkspaceID, id)
 	rec, ok := s.data[k]
 	if ok && rec.CredentialID != p.CredentialID {
 		return rec, gormrepo.ErrOwnership
 	}
 	if !ok {
-		rec = gormrepo.AgentRecord{TenantID: p.TenantID, InstanceUID: id, CredentialID: p.CredentialID, AgentKind: "unknown"}
+		rec = gormrepo.AgentRecord{WorkspaceID: p.WorkspaceID, InstanceUID: id, CredentialID: p.CredentialID, AgentKind: "unknown"}
 	}
 	rec.LastSeen = o.SeenAt
 	rec.LastTransport = o.Transport
@@ -57,21 +57,21 @@ func (s *fakeStore) Observe(_ context.Context, p auth.Principal, id string, o go
 	s.data[k] = rec
 	return rec, nil
 }
-func (s *fakeStore) Get(_ context.Context, tenant, id string) (gormrepo.AgentRecord, error) {
+func (s *fakeStore) Get(_ context.Context, workspace, id string) (gormrepo.AgentRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, ok := s.data[key(tenant, id)]
+	r, ok := s.data[key(workspace, id)]
 	if !ok {
 		return r, gormrepo.ErrNotFound
 	}
 	return r, nil
 }
-func (s *fakeStore) List(_ context.Context, tenant string) ([]gormrepo.AgentRecord, error) {
+func (s *fakeStore) List(_ context.Context, workspace string) ([]gormrepo.AgentRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := []gormrepo.AgentRecord{}
 	for _, rec := range s.data {
-		if rec.TenantID == tenant {
+		if rec.WorkspaceID == workspace {
 			result = append(result, rec)
 		}
 	}
@@ -83,8 +83,8 @@ func uid(first byte) ([]byte, string) {
 	id[0] = first
 	return id, hex.EncodeToString(id)
 }
-func principal(tenant, id string) auth.Principal {
-	return auth.Principal{TenantID: tenant, CredentialID: id}
+func principal(workspace, id string) auth.Principal {
+	return auth.Principal{WorkspaceID: workspace, CredentialID: id}
 }
 
 func TestPolicyDeliveryAndAck(t *testing.T) {
@@ -121,24 +121,24 @@ func TestPolicyDeliveryAndAck(t *testing.T) {
 	}
 }
 
-func TestTenantScopeAndOwnerBinding(t *testing.T) {
+func TestWorkspaceScopeAndOwnerBinding(t *testing.T) {
 	reg := newRegistry(newFakeStore(), 30*time.Second)
 	id, uidHex := uid(2)
 	ctx := context.Background()
 	msg := &protobufs.AgentToServer{InstanceUid: id, SequenceNum: 1}
-	owner := principal("tenant1", "token1")
+	owner := principal("workspace1", "token1")
 	if _, _, err := reg.update(ctx, owner, false, nil, msg); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := reg.update(ctx, principal("tenant1", "other-token"), false, nil, msg)
+	_, _, err := reg.update(ctx, principal("workspace1", "other-token"), false, nil, msg)
 	if !errors.Is(err, gormrepo.ErrOwnership) {
 		t.Fatalf("expected ownership rejection, got %v", err)
 	}
-	if _, err := reg.get(ctx, principal("tenant2", "admin"), uidHex); !errors.Is(err, gormrepo.ErrNotFound) {
-		t.Fatalf("tenant leakage: %v", err)
+	if _, err := reg.get(ctx, principal("workspace2", "admin"), uidHex); !errors.Is(err, gormrepo.ErrNotFound) {
+		t.Fatalf("workspace leakage: %v", err)
 	}
 
-	adminCreds := auth.New([]appconfig.Credential{{ID: "admin1", TenantID: "tenant1", Token: "admin-one-secret-long"}, {ID: "admin2", TenantID: "tenant2", Token: "admin-two-secret-long"}})
+	adminCreds := auth.New([]appconfig.Credential{{ID: "admin1", WorkspaceID: "workspace1", Token: "admin-one-secret-long"}, {ID: "admin2", WorkspaceID: "workspace2", Token: "admin-two-secret-long"}})
 	api := adminHandler(reg, adminCreds)
 	for _, tt := range []struct {
 		token  string
@@ -161,7 +161,7 @@ func TestTransportFreshnessAndIdentityFields(t *testing.T) {
 	st := newFakeStore()
 	reg := newRegistry(st, 15*time.Second)
 	id, uidHex := uid(3)
-	p := principal("tenant1", "agent1")
+	p := principal("workspace1", "agent1")
 	msg := &protobufs.AgentToServer{InstanceUid: id, SequenceNum: 1, AgentDescription: &protobufs.AgentDescription{
 		IdentifyingAttributes: []*protobufs.KeyValue{
 			{Key: "service.name", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: "checkout"}}},
@@ -177,13 +177,13 @@ func TestTransportFreshnessAndIdentityFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item["connected"] != true || item["agent_kind"] != "java-apm" || item["agent_version"] != "agent-2" || item["service_version"] != "app-9" {
+	if item["workspace_id"] != "workspace1" || item["connected"] != true || item["agent_kind"] != "java-apm" || item["agent_version"] != "agent-2" || item["service_version"] != "app-9" {
 		t.Fatalf("invalid snapshot: %+v", item)
 	}
 	st.mu.Lock()
-	rec := st.data[key("tenant1", uidHex)]
+	rec := st.data[key("workspace1", uidHex)]
 	rec.LastSeen = time.Now().Add(-time.Minute)
-	st.data[key("tenant1", uidHex)] = rec
+	st.data[key("workspace1", uidHex)] = rec
 	st.mu.Unlock()
 	item, err = reg.get(ctx, p, uidHex)
 	if err != nil || item["connected"] != false {
@@ -227,7 +227,7 @@ func TestBadSamplingAndUID(t *testing.T) {
 }
 
 func TestAdminUnauthorized(t *testing.T) {
-	handler := adminHandler(newRegistry(newFakeStore(), time.Second), auth.New([]appconfig.Credential{{ID: "x", TenantID: "t", Token: "very-long-admin-token"}}))
+	handler := adminHandler(newRegistry(newFakeStore(), time.Second), auth.New([]appconfig.Credential{{ID: "x", WorkspaceID: "t", Token: "very-long-admin-token"}}))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil))
 	if w.Code != http.StatusUnauthorized {

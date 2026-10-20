@@ -22,7 +22,7 @@ var (
 )
 
 type AgentRecord struct {
-	TenantID            string    `gorm:"column:tenant_id;primaryKey"`
+	WorkspaceID            string    `gorm:"column:workspace_id;primaryKey"`
 	InstanceUID         string    `gorm:"column:instance_uid;primaryKey"`
 	CredentialID        string    `gorm:"column:credential_id"`
 	AgentKind           string    `gorm:"column:agent_kind"`
@@ -108,7 +108,7 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs Observation) (AgentRecord, error) {
-	if p.TenantID == "" || p.CredentialID == "" || len(uid) != 32 || obs.SeenAt.IsZero() {
+	if p.WorkspaceID == "" || p.CredentialID == "" || len(uid) != 32 || obs.SeenAt.IsZero() {
 		return AgentRecord{}, fmt.Errorf("invalid agent identity or observation")
 	}
 	if obs.Capabilities > math.MaxInt64 {
@@ -119,7 +119,7 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 	}
 	seenAt := obs.SeenAt.UTC()
 	seed := AgentRecord{
-		TenantID: p.TenantID, InstanceUID: uid, CredentialID: p.CredentialID,
+		WorkspaceID: p.WorkspaceID, InstanceUID: uid, CredentialID: p.CredentialID,
 		AgentKind: "unknown", LastSeen: seenAt, LastTransport: obs.Transport,
 	}
 	if obs.Description != nil {
@@ -146,7 +146,7 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&seed).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("tenant_id = ? AND instance_uid = ?", p.TenantID, uid).Take(&result).Error; err != nil {
+		if err := tx.Where("workspace_id = ? AND instance_uid = ?", p.WorkspaceID, uid).Take(&result).Error; err != nil {
 			return err
 		}
 		if result.CredentialID != p.CredentialID {
@@ -175,27 +175,27 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 			fields["config_error"] = obs.Config.Error
 		}
 		if err := tx.Model(&AgentRecord{}).
-			Where("tenant_id = ? AND instance_uid = ? AND credential_id = ?", p.TenantID, uid, p.CredentialID).
+			Where("workspace_id = ? AND instance_uid = ? AND credential_id = ?", p.WorkspaceID, uid, p.CredentialID).
 			Updates(fields).Error; err != nil {
 			return err
 		}
-		return tx.Where("tenant_id = ? AND instance_uid = ?", p.TenantID, uid).Take(&result).Error
+		return tx.Where("workspace_id = ? AND instance_uid = ?", p.WorkspaceID, uid).Take(&result).Error
 	})
 	return result, err
 }
 
-func (s *Store) Get(ctx context.Context, tenant, uid string) (AgentRecord, error) {
+func (s *Store) Get(ctx context.Context, workspace, uid string) (AgentRecord, error) {
 	var a AgentRecord
-	err := s.db.WithContext(ctx).Where("tenant_id = ? AND instance_uid = ?", tenant, uid).Take(&a).Error
+	err := s.db.WithContext(ctx).Where("workspace_id = ? AND instance_uid = ?", workspace, uid).Take(&a).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return a, ErrNotFound
 	}
 	return a, err
 }
 
-func (s *Store) List(ctx context.Context, tenant string) ([]AgentRecord, error) {
+func (s *Store) List(ctx context.Context, workspace string) ([]AgentRecord, error) {
 	var records []AgentRecord
-	err := s.db.WithContext(ctx).Where("tenant_id = ?", tenant).
+	err := s.db.WithContext(ctx).Where("workspace_id = ?", workspace).
 		Order("instance_uid ASC").Find(&records).Error
 	if records == nil {
 		records = []AgentRecord{}

@@ -1,7 +1,7 @@
 -- +goose NO TRANSACTION
 -- +goose Up
 CREATE TABLE agent_instances (
-    tenant_id VARCHAR(96) NOT NULL,
+    workspace_id VARCHAR(96) NOT NULL,
     instance_uid CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     credential_id VARCHAR(128) NOT NULL,
     agent_kind VARCHAR(64) NOT NULL DEFAULT 'unknown',
@@ -18,8 +18,8 @@ CREATE TABLE agent_instances (
     reported_hash VARCHAR(64) NOT NULL DEFAULT '',
     config_status VARCHAR(32) NOT NULL DEFAULT '',
     config_error TEXT NOT NULL,
-    PRIMARY KEY (tenant_id, instance_uid),
-    INDEX agent_instances_last_seen_idx (tenant_id, last_seen)
+    PRIMARY KEY (workspace_id, instance_uid),
+    INDEX agent_instances_last_seen_idx (workspace_id, last_seen)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 -- +goose Down
