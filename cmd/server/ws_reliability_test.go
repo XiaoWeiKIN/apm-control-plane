@@ -145,3 +145,61 @@ func TestWSReportFullStateWithoutDesired(t *testing.T) {
 		t.Fatalf("invalid full-state request: %+v", reply)
 	}
 }
+
+
+type blockedWSConnection struct {
+	entered chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func (*blockedWSConnection) Connection() net.Conn { return nil }
+
+func (c *blockedWSConnection) Send(context.Context, *protobufs.ServerToAgent) error {
+	select {
+	case c.entered <- struct{}{}:
+	default:
+	}
+	<-c.closed
+	return io.ErrClosedPipe
+}
+
+func (c *blockedWSConnection) Disconnect() error {
+	c.once.Do(func() { close(c.closed) })
+	return nil
+}
+
+func TestStopClosesBlockedWSSend(t *testing.T) {
+	snapshot, err := config.CompileJavaSampling(0.5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := snapshot.Hash()
+	reg := newRegistry(newFakeStore(), time.Second)
+	reg.delivery = &pushTestDelivery{desired: &gormrepo.DesiredConfig{
+		ConfigMapBytes: snapshot.ConfigMapBytes(), ConfigHash: hex.EncodeToString(hash[:]),
+	}}
+	p := principal("workspace-stop", "credential")
+	uidBytes, uidHex := uid(57)
+	conn := &blockedWSConnection{
+		entered: make(chan struct{}, 1), closed: make(chan struct{}),
+	}
+	reg.sessions[key(p.WorkspaceID, uidHex)] = &runtimeAgent{conn: conn}
+	reg.trackWS(conn)
+	reg.startWriter(p, conn, uidBytes, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	select {
+	case <-conn.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("WS writer did not enter blocking send")
+	}
+	stopped := make(chan error, 1)
+	go func() { stopped <- reg.stop() }()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown failed to drain blocked WS writer")
+	}
+}
