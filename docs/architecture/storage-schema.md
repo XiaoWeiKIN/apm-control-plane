@@ -4,7 +4,7 @@
 >
 > **日期**：2026-10-19；**数据库**：PostgreSQL / MySQL；**运行架构**：单个部署选择一种主数据库，GORM v2 + Goose。
 >
-> **实现状态**：P1.1 的 `agent_instances`、Workspace 凭证配置和管理查询已实现。**本 P2.1 增量**新增 Java Sampling ConfigMap 的确定性编译与 `config_revisions` 持久化（PostgreSQL/MySQL Goose 00002、GORM 创建/查询与双引擎测试）。Policy、Release、Target、Assignment、Reconciler 和 P3 Rollout **仍未实现**。Workspace/IAM 权限真源集成还待安全设计；本文件是详细技术说明，不代替 DD-001 审批。
+> **实现状态**：P1.1 Inventory 与 P2.1 Java Sampling ConfigRevision 已实现。**P2.2 增量**实现单 Agent Release、冻结 Target、当前 Desired Assignment 和审计事件（PostgreSQL/MySQL Goose 00003、Admin HTTP 202、双数据库事务测试）。**Policy/Selector、OpAMP 实际投递和 ACK Reconciler、P3 多 Agent 灰度与回滚仍未实现。** Workspace/IAM 权限真源集成仍待评审；本文不代替 DD-001 批准。
 >
 > **来源**：[DD-001（Draft）](../design-docs/dd-001_opamp-control-plane.md)、[EP-001（Blocked）](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md)、[FR-001—FR-013](../requirements/APM_CONTROL_PLANE.md)、[P1.1 持久化实现](p1-durable-inventory.md)、[技术选型](technology-selection.md)。
 
@@ -54,11 +54,11 @@ erDiagram
 | `policies` | 策略逻辑身份 | 低频更新 | P2 | 未创建 |
 | `policy_revisions` | 不可变策略版本 | Append-only | P2 | 未创建 |
 | `policy_bindings` | Scope/Selector → 生效版本 | 有 CAS 的少量修改 | P2 | 未创建 |
-| `config_revisions` | 按 AgentKind 编译的不可变完整配置 | Append-only | **P2.1** | **Java Sampling 编译 + 双数据库 Goose 00002 已实现；尚无发布入口** |
-| `config_releases` | 一次发布的命令、状态、幂等键、计划 | 发布创建，状态变更 | P2 基本 / P3 灰度 | 未创建 |
-| `release_targets` | 某次发布的**冻结目标快照**与批次结果 | 目标不可变，执行状态可更新 | P2 基本 / P3 灰度 | 未创建 |
-| `agent_assignments` | 每 Agent **当前** Desired/Observed 和 CAS | 可变、可恢复 | P2 | 未创建 |
-| `config_events` | 发布/回执/错误/回滚的审计轨迹 | Append-only | P2 基本 / P3 审计 | 未创建 |
+| `config_revisions` | 按 AgentKind 编译的不可变完整配置 | Append-only | **P2.1** | **编译与 Goose 00002 已实现，P2.2 可引用已有 Revision** |
+| `config_releases` | 一次发布的命令、状态、幂等键、计划 | 发布创建，状态变更 | P2.2 / P3 灰度 | **单 Agent Pending 发布与幂等键已实现；灰度未实现** |
+| `release_targets` | 某次发布的**冻结目标快照**与批次结果 | 目标不可变，执行状态可更新 | P2.2 / P3 灰度 | **单 Agent、batch_no=0、Pending/Superseded 已实现** |
+| `agent_assignments` | 每 Agent **当前** Desired/Observed 和 CAS | 可变、可恢复 | P2.2 / P2.3 | **Desired/Generation/RowVersion CAS 已实现；ACK 状态更新待 P2.3** |
+| `config_events` | 发布/回执/错误/回滚的审计轨迹 | Append-only | P2.2 / P3 审计 | **TARGET_ASSIGNED 事件与发布同事务；其他事件待后续** |
 
 **首选 11 张逻辑表**是全生命周期的总体设计，不表示 P2 必须一次性创建全部。后文另外说明 3 张**非首期必要**的扩展表，避免过早按所有可能场景拆分。
 
@@ -267,6 +267,10 @@ erDiagram
 **关键决定**：Hash 由 Config Adapter 按确定性规范计算并写入，不能依赖数据库 `JSONB`/JSON 的字节排列。应用必须将**同一个** `config_hash` 作为 OpAMP 的 32-byte ConfigHash 发送。不同 `config_revision_id` 可以拥有相同 `config_hash`：内容相同不等于业务版本或发布相同。必要的 `config_map_bytes` 存储对象应做大小校验、密钥/秘密扫描与访问控制；不要将内容或秘密写入普通审计日志。
 
 ### 5.2 `config_releases` — 一次发布操作
+
+**P2.2 实现边界**：`POST /api/v1/agents/{uid}/releases` 需要 Admin Bearer Token，JSON 传入现有 `config_revision_id`，可选 `Idempotency-Key`。`gormrepo.Store.PublishAgentConfig` 锁定同 Workspace 的 Agent，校验 Java AgentKind、ConfigDialect、HashAlgorithm 和 `AcceptsRemoteConfig`，在同一事务中创建 Release、冻结一个 Target、更新 Assignment 的 `desired_generation/row_version` 并写入 `TARGET_ASSIGNED` 审计事件。Release 和 Target 初始均为 `PENDING`，`batch_no=0`；旧的 Pending Target 被新 Release 标记为 `SUPERSEDED`。同 Key/同请求重试返回原 Release，不重复推进 Generation；同 Key 不同请求 Conflict。对现有 ConfigRevision 的引用必须保持同一 Workspace。
+
+**不包含 P2.3 投递语义**：数据库 Pending 不是 Agent 已收到、APPLIED，也不表示真正的 Java Runtime 生效。`observed_hash`/`observed_status` 的 Reconciler 归因、WebSocket Push、HTTP Polling 下发，以及 P3 批次/回滚均未实现。P2.2 的 `config_releases` 和 `config_events` 保留未来字段，但当前操作只写一次业务事件。
 
 **主键**：`(workspace_id,release_id)`。Release 代表**一次人或系统发起的操作**，不是当前生效配置；即使目标为空、全部失败或被下一次发布覆盖，也应有明确的结果记录。
 
