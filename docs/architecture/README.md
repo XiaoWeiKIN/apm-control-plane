@@ -2,7 +2,7 @@
 
 > 面向贡献者和维护者的技术说明。本文介绍系统的整体结构、核心概念、控制流程、状态与接口边界，并为实现和扩展提供源码入口。
 >
-> **文档状态**：开发者技术说明，基于 2026-10-19 仓库 P0 代码及 [DD-001 设计草案](../design-docs/dd-001_opamp-control-plane.md) 编写。文中的 **现状** 表示仓库已有代码或测试；**目标设计** 表示尚待实施或批准的方案；**未来扩展** 表示不在 EP-001 验收范围内的能力。本文件不是新的受治理 DD，不替代 DD-001 的批准流程，也不是已接受的 ADR。
+> **文档状态**：开发者技术说明，已按 2026-10-20 合并的 P1.1 Workspace-scoped Inventory 和 [DD-001 设计草案](../design-docs/dd-001_opamp-control-plane.md) 对照更新。文中的 **现状** 表示仓库已有代码或测试；**目标设计** 表示尚待实施或批准的方案；**未来扩展** 表示不在 EP-001 验收范围内的能力。本文件不是新的受治理 DD，不替代 DD-001 的批准流程，也不是已接受的 ADR。
 >
 > **主要读者**：熟悉 Go、OpenTelemetry 或可观测性系统，准备维护 OpAMP 接入、Agent Inventory、远程配置与策略发布模块的工程师。
 
@@ -10,7 +10,7 @@
 
 第一次接触本项目，建议依次阅读「系统概览 → 三条主要流程 → 核心概念 → 模块与契约」。准备开发新功能时，再阅读「并发与一致性 → 安全与故障 → 扩展一个 Agent 类型 → 源码地图」。
 
-P1 的框架、配置加载、数据库和测试技术建议见 [P1–P3 技术选型（待评审）](technology-selection.md)；选型结论需要 PoC 和独立的 RF 设计/决策流程，不因本文链接而自动批准。
+核心模块职责、状态归属、Go Package 边界与 P2 开发顺序以 [核心模块与职责边界](modules.md) 为阅读入口；数据库字段、关系与 CAS 约束以 [Workspace Schema](storage-schema.md) 为准。已经采用的 Koanf/GORM/Goose 见 [P1–P3 技术选型](technology-selection.md)。这些开发者文档不替代 DD-001 的正式审批。
 
 本项目的业务需求以 [FR-001～FR-013](../requirements/APM_CONTROL_PLANE.md) 为准；架构审批与版本身份由 [DD-001](../design-docs/dd-001_opamp-control-plane.md) 管理；里程碑和验证由 [EP-001](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) 管理。
 
@@ -141,6 +141,8 @@ OpenTelemetry [Instrumentation Agent Guidelines](https://github.com/open-telemet
 
 建议使用 **Go 模块化单体（modular monolith）**。模块名称表示代码职责，不要求每个模块都是独立服务。只在容量、发布节奏或会话所有权有实测依据时拆部署单元。
 
+**模块所有权与实施合同统一见 [核心模块与职责边界](modules.md)**：六个主要功能是 Registry、OpAMP Gateway、Policy、Config、Release、Reconciler；Workspace/Auth、Management API 和 Storage 为三个支撑模块。AgentConfigAdapter 属于 Config，Rollout 属于 Release。下表是概览，不能把模块名或逻辑表名自动映射成独立服务/Repository。
+
 | 逻辑模块 | 输入 | 负责的状态与行为 | 不负责 |
 | --- | --- | --- | --- |
 | Management API | 管理请求、Authenticated Principal | 授权、校验、查询、创建发布操作 | 不直接写 OpAMP WebSocket |
@@ -161,8 +163,8 @@ flowchart LR
     OpAMP["opamp adapter"] --> Domain
     Reconcile["reconcile"] --> Domain
     Domain --> Ports["domain interfaces"]
-    Storage["storage/postgres + storage/mysql"] -.->|"实现"| Ports
-    AgentAdapters["config adapters"] -.->|"实现"| Ports
+    Storage["storage/gormrepo · PG/MySQL Dialector"] -.->|"实现"| Ports
+    AgentAdapters["Java AgentConfigAdapter"] --> Domain
 ~~~
 
 协议模型与业务模型必须隔离：上游 `protobufs.AgentToServer` 可以进入 OpAMP Adapter，但不应直接成为 Policy Manager 或数据库无关 Repository Port 的核心类型。这一点与 Collector 社区通过 Component/Factory 接口隔离具体实现的设计风格类似，**借鉴的是模块边界，不是照搬 Collector 的 Receiver–Processor–Exporter Pipeline**。
@@ -382,21 +384,9 @@ Rollout Controller 将发布目标分成可审计批次。每批使用匹配 Has
 
 ## 8. 数据与一致性模型（目标设计）
 
-**完整数据库逻辑模型、字段字典、复合工作空间外键、事务/CAS、双方言和迁移路径的权威技术详设**见 [P1–P3 Control Plane Schema 设计](storage-schema.md)。以下表仅帮助理解领域概念，不代表当前全部已有物理表，也不替代详设中的 12 张目标逻辑表与按需扩展说明。
+**数据库字段、复合 Workspace 外键、事务/CAS、双方言和迁移路径的详细合同**见 [Workspace Schema 设计](storage-schema.md)：目标共 11 张核心逻辑表与三张按需扩展表，其中目前仅 `agent_instances` 已由 P1.1 持久化。**模块职责与状态归属**见 [核心模块设计](modules.md)。
 
-部署时选择 PostgreSQL 或 MySQL 作为单一主数据库，保存长期的管理状态；Go 进程内存保存活动网络连接。两种存储实现须满足相同的领域契约，但 Schema/Migration/SQL 方言独立，不能只更改 Driver 就自动迁移历史数据。以下表是**逻辑模型**，不是已落库的 Migration，字段和索引须在 P1/P2 做实际评审。
-
-| 逻辑实体 | 关键字段/关系 | 写入时机 |
-| --- | --- | --- |
-| `agent_instances` | Workspace、InstanceUID、Kind、Distribution、Version、认证身份绑定 | 注册与受控身份变更 |
-| `agent_observations` | AgentKey、Capabilities、Health、LastSeen、ReportedConfigHash、ReportedStatus | 每次有实际变更的状态上报 |
-| `services` | Workspace、Environment、Namespace、ServiceName | APM 工作负载发现/归并 |
-| `policy_versions` | PolicyID、Revision、Immutable Body、Actor、CreatedAt | 新策略版本创建 |
-| `policy_bindings` | Workspace Scope、Selector、PolicyRevision、优先级 | 启用或调整策略绑定 |
-| `config_revisions` | AgentKind/Dialect、完整 ConfigMap、ContentHash | Adapter 编译与发布准备 |
-| `config_releases` | ReleaseID、Revision、Target Snapshot、批次状态、Actor | 一次受控发布 |
-| `agent_assignments` | AgentKey、DesiredConfigRevision/Hash、ObservedHash、Status | 发布、Reconcile、Agent 回执 |
-| `config_events` | Release/AgentKey、事件类型、前后状态、时间与因果引用 | 追加审计日志 |
+一个 Control Plane 部署只选择 PostgreSQL 或 MySQL 中的一种主数据库；GORM 使用统一 Repository，Goose Migration 按数据库方言分别维护。当前只有 `agent_instances(workspace_id, instance_uid)` 已落地。未来的 Policy、ConfigRevision、Release、Target、Assignment 和 Event 都需要以数据库为可靠事实源，活动网络 Connection 则只存在于进程内存。
 
 逻辑关键约束：
 
@@ -532,27 +522,30 @@ Agent 凭证最终采用 Scoped Token 还是 mTLS、以及重复 UID 的转移�
 | [`docs/design-docs/dd-001_opamp-control-plane.md`](../design-docs/dd-001_opamp-control-plane.md) | 架构 Design 和开放取舍 | Draft，未批准 |
 | [`docs/exec-plans/active/ep-001_build-control-plane/EXECPLAN.md`](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) | P1–P3 任务、阻塞项、验收 | Blocked |
 
-### 12.2 目标 Go Package Map（未实现）
+### 12.2 Go Package 目标布局（按需求增量演进）
 
 ```text
-cmd/server/                 进程入口和依赖装配
+cmd/
+  server/                      [已有] 进程入口和路由、Gateway 装配
+  testagent/                   [已有] OpAMP HTTP 测试 Agent
 internal/
-  opamp/                    协议、认证上下文、连接读写
-  registry/                 AgentKey、AgentKind、Instance、Observation
-  policy/                   SamplingPolicy、Selector、版本
-  config/                   ConfigRevision、Resolver、AgentConfigAdapter
-  release/                  ConfigRelease、批次、审计
-  reconcile/                Desired/Observed 对账、重试
-  storage/                  Driver-neutral Repository/UnitOfWork Port
-    postgres/                PostgreSQL SQL Adapter
-    mysql/                   MySQL SQL Adapter
-  api/                      管理接口与授权边界
-db/migrations/postgres/     PostgreSQL Goose Migration
-db/migrations/mysql/        MySQL Goose Migration
-tests/integration/          OpAMP + PostgreSQL/MySQL 合同测试
+  appconfig/                   [已有] Koanf 启动配置
+  auth/                        [已有] Workspace Credential / Principal
+  storage/
+    gormrepo/                  [已有] 统一 GORM Repository，PG/MySQL Dialector
+  registry/                    [待拆] Agent Instance、Observation
+  opamp/                       [待拆] OpAMP Handler、HTTP/WS Session
+  config/                      [P2] ConfigRevision、Java AgentConfigAdapter
+  release/                     [P2] Release、Target、审计和回滚
+  reconcile/                   [P2] Desired/Observed 对账与重试
+  policy/                      [P2 后半] Policy Revision、Selector
+  api/                         [按需迁出] Management HTTP API
+db/migrations/
+  postgres/                    [已有 00001]，P2 增量 Schema
+  mysql/                       [已有 00001]，P2 增量 Schema
 ```
 
-目标 Package 分解仅用于说明**允许的依赖方向**。P1.1 已存在 `internal/appconfig`、`internal/auth`、`internal/storage/gormrepo` 及两套 Goose 初始 Migration，尚未实现 Policy/Release/Reconciler 等目标包；不要把尚未创建的目录误当作已有代码。
+具体代码所有权、跨包调用方向、P2.1–P3 验收及当前内存 Demo 的迁移方法见 [核心模块与职责边界](modules.md)。**不要把目标目录当作已存在的文件，也不要仅为分包进行全量重构**。目前 `cmd/server/main.go` 仍包含 Registry、Gateway 与 HTTP API 的部分职责；只有实际 P2 开发需要时再作局部迁移。
 
 ## 13. 本地验证和贡献者交接
 

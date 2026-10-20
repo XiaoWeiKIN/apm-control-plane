@@ -4,9 +4,10 @@ This is the index for the apm-control-plane codebase. Product capability and imp
 
 ## Start here
 
-- [README](../README.md) — start P0 and run the demonstration test agent.
+- [README](../README.md) — 启动 P1.1 Workspace-scoped Control Plane 和测试 Agent。
 - [**P1–P3 技术选型（待评审）**](architecture/technology-selection.md) — 技术栈与 Go 1.25 兼容性矩阵。
-- [**Control Plane 数据模型与 Schema 设计（待评审）**](architecture/storage-schema.md) — P1.1 已实现表、P2/P3 目标表、主外键、索引、事务与迁移路线。
+- [**核心模块与职责边界（P1.1–P3）**](architecture/modules.md) — 六个功能模块、三个支撑模块、状态所有权、模块依赖与 P2 实施顺序。
+- [**Control Plane 数据模型与 Schema 设计（待评审）**](architecture/storage-schema.md) — P1.1 已实现表、P2/P3 目标表、主外键、索引、事务与迁移路线.
 - [**P1.1 Durable Agent Inventory（开发和部署指南）**](architecture/p1-durable-inventory.md) — GORM / Goose、PostgreSQL/MySQL、身份绑定、运行和验收。
 - [**APM Control Plane：开发者架构指南（中文）**](architecture/README.md) — complete developer-oriented architecture, lifecycle, state, protocol contracts, extension model and implementation map.
 - [ARCHITECTURE](../ARCHITECTURE.md) — source-backed P0 boundaries and proposed P1–P3 dependencies.
