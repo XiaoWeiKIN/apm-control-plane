@@ -125,7 +125,7 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 	}
 	// P2.2 需要完整事务表，缺少 Migration 00003 时不得启动可接受发布的 API。
 	for _, table := range []struct {
-		name string
+		name  string
 		model any
 	}{
 		{"config_revisions", &ConfigRevisionRecord{}},
