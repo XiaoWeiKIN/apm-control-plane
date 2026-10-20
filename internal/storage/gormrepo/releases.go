@@ -178,6 +178,7 @@ func (s *Store) PublishAgentConfig(ctx context.Context, workspaceID, instanceUID
 		}
 		if agent.AgentKind != config.JavaAgentKind || revision.AgentKind != config.JavaAgentKind ||
 			revision.ConfigDialect != config.JavaSamplingDialect || revision.PayloadFormat != config.ConfigMapFormat ||
+			revision.HashAlgorithm != config.HashAlgorithm ||
 			(revision.Distribution != "" && revision.Distribution != agent.Distribution) ||
 			uint64(agent.Capabilities)&uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig) == 0 {
 			return ErrUnsupportedReleaseTarget
