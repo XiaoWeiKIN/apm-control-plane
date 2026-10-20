@@ -67,6 +67,7 @@ type Store struct{ db *gorm.DB }
 
 // Open does not create tables. Production schema changes are managed by Goose.
 func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
+	// 1. 根据驱动配置选择 SQL Dialector，未知类型提前失败。
 	var dialector gorm.Dialector
 	switch cfg.Driver {
 	case "postgres":
@@ -87,6 +88,7 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 2. 配置连接池，并确认数据库能在启动期限内响应。
 	sqlDB.SetMaxOpenConns(cfg.MaxOpen)
 	sqlDB.SetMaxIdleConns(cfg.MaxIdle)
 	sqlDB.SetConnMaxLifetime(cfg.MaxLifetime)
@@ -94,6 +96,7 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
+	// 3. 校验所需表和列，旧 Workspace Schema 明确启动失败。
 	if !db.Migrator().HasTable(&AgentRecord{}) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("agent_instances schema missing: run Goose migrations for %s", cfg.Driver)
@@ -131,6 +134,7 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs Observation) (AgentRecord, error) {
+	// 1. 验证可信身份与 Observation 字段范围，拒绝无效状态写入。
 	if p.WorkspaceID == "" || p.CredentialID == "" || len(uid) != 32 || obs.SeenAt.IsZero() {
 		return AgentRecord{}, fmt.Errorf("%w: invalid agent identity or observation", ErrInvalidObservation)
 	}
@@ -164,6 +168,7 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 			return AgentRecord{}, fmt.Errorf("%w: remote config status exceeds storage limits", ErrInvalidObservation)
 		}
 	}
+	// 2. 构造首次注册记录，仅复制本次 Agent 实际上报的元数据。
 	seenAt := obs.SeenAt.UTC()
 	seed := AgentRecord{
 		WorkspaceID: p.WorkspaceID, InstanceUID: uid, CredentialID: p.CredentialID,
@@ -186,6 +191,7 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 	if obs.Config != nil {
 		seed.ReportedHash, seed.ConfigStatus, seed.ConfigError = obs.Config.Hash, obs.Config.Status, obs.Config.Error
 	}
+	// 3. 在事务内绑定 UID 所有权并更新最新状态，失败时整体回滚。
 	var result AgentRecord
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Atomic insert-if-absent preserves the original credential binding,

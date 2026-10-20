@@ -189,6 +189,7 @@ func (r *registry) get(ctx context.Context, p auth.Principal, uid string) (map[s
 // Only requests for the same Agent share a lock; unrelated Agents must not
 // block each other while waiting for a database write.
 func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn types.Connection, msg *protobufs.AgentToServer) (*protobufs.AgentRemoteConfig, bool, error) {
+	// 1. 校验实例身份并获取 Agent 专属写入锁，关闭期间拒绝新状态。
 	if msg == nil || len(msg.InstanceUid) != 16 {
 		return nil, false, fmt.Errorf("instance_uid must be 16 bytes")
 	}
@@ -213,6 +214,8 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 	if rt.conn != nil && rt.conn != conn {
 		return nil, false, errSessionConflict
 	}
+
+	// 2. 转换压缩状态并同步持久化，只有成功后才更新会话序号。
 	first := rt.sequence == 0
 	full := (first && msg.AgentDescription == nil) || (rt.sequence != 0 && msg.SequenceNum != rt.sequence+1)
 	transport := "http"
@@ -240,6 +243,7 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 	if err != nil {
 		return nil, false, err
 	}
+	// 3. 更新该 Agent 的运行时状态并决定本次是否需要下发配置。
 	rt.sequence = msg.SequenceNum
 	if isWS {
 		rt.conn = conn

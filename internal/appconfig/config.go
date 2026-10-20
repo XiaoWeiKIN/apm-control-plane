@@ -45,6 +45,7 @@ type Config struct {
 func Load() (Config, error) { return LoadWithEnv(os.Getenv) }
 
 func LoadWithEnv(env func(string) string) (Config, error) {
+	// 1. 初始化默认参数并加载明确支持的 YAML 配置。
 	cfg := Config{
 		ListenAddress:     "127.0.0.1:4320",
 		ReadHeaderTimeout: 5 * time.Second,
@@ -103,6 +104,7 @@ func LoadWithEnv(env func(string) string) (Config, error) {
 			cfg.Database.MaxLifetime = d
 		}
 	}
+	// 2. 应用环境覆盖并解析数据库与超时设置。
 	if val := env("APM_LISTEN_ADDR"); val != "" {
 		cfg.ListenAddress = val
 	}
@@ -124,6 +126,7 @@ func LoadWithEnv(env func(string) string) (Config, error) {
 		}
 		cfg.HTTPPollingTTL = d
 	}
+	// 3. 只接受显式 Workspace 凭证，再统一验证启动约束。
 	if val := env("APM_AGENT_CREDENTIALS_JSON"); val != "" {
 		if err := parseCredentials(val, &cfg.AgentCredentials); err != nil {
 			return cfg, fmt.Errorf("APM_AGENT_CREDENTIALS_JSON: %w", err)

@@ -20,7 +20,7 @@ jobs:
         run: |
           unformatted="$(gofmt -l cmd internal)"
           if [ -n "$unformatted" ]; then
-            printf 'Go files need gofmt:\\n%s\\n' "$unformatted"
+            printf 'Go files need gofmt:\n%s\n' "$unformatted"
             exit 1
           fi
       - name: Check reproducible module manifests
