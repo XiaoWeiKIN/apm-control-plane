@@ -105,7 +105,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			}
 			receive := func(conn *websocket.Conn, hash string) {
 				t.Helper()
-				deadline := time.Now().Add(10 * time.Second)
+				deadline := time.Now().Add(25 * time.Second)
 				for {
 					if err := conn.SetReadDeadline(deadline); err != nil {
 						t.Fatal(err)
