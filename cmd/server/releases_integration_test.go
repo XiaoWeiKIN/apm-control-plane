@@ -61,7 +61,7 @@ func TestAdminReleaseHTTPPersistencePostgresAndMySQL(t *testing.T) {
 			mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(store, auth.New([]appconfig.Credential{
 				{ID: "admin-a", WorkspaceID: workspace, Token: "admin-a-test-secret-long"},
 				{ID: "admin-b", WorkspaceID: "another-workspace", Token: "admin-b-test-secret-long"},
-			})))
+			}), nil))
 			server := httptest.NewServer(mux)
 			defer server.Close()
 			post := func(token, body, key string) (int, gormrepo.ReleaseResult) {

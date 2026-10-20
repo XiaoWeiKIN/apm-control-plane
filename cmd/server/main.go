@@ -40,6 +40,8 @@ type AgentStore interface {
 type runtimeAgent struct {
 	mu           sync.Mutex
 	conn         types.Connection
+	wake         chan struct{}
+	done         chan struct{}
 	sequence     uint64
 	remote       *protobufs.AgentRemoteConfig
 	desiredHash  string
@@ -248,7 +250,7 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 	var durable *protobufs.AgentRemoteConfig
 	assigned := false
 	if r.delivery != nil {
-		config, exists, err := r.delivery.ReconcileAgentConfig(ctx, p.WorkspaceID, id, status)
+		config, exists, err := r.delivery.ReconcileAgentConfig(ctx, p.WorkspaceID, id, status, !isWS)
 		if err != nil {
 			return nil, false, err
 		}
@@ -308,6 +310,11 @@ func (r *registry) disconnect(p auth.Principal, conn types.Connection) {
 		rt.mu.Lock()
 		if rt.conn == conn {
 			rt.conn = nil
+			if rt.done != nil {
+				close(rt.done)
+				rt.done = nil
+				rt.wake = nil
+			}
 		}
 		rt.mu.Unlock()
 	}
@@ -531,6 +538,13 @@ func makeGateway(reg *registry, agentAuth *auth.Authenticator, log *slog.Logger)
 						log.Warn("opamp status rejected", "error", err)
 						return processingErrorResponse(msg.InstanceUid, err)
 					}
+					if isWS && reg.delivery != nil {
+						// 持久 Config 由单 Session Writer 推送；避免回调同步发送重复配置。
+						reg.startWriter(principal, conn, msg.InstanceUid, log)
+						if config == nil {
+							return nil
+						}
+					}
 					if full {
 						out.Flags = uint64(protobufs.ServerToAgentFlags_ServerToAgentFlags_ReportFullState)
 					}
@@ -605,7 +619,7 @@ func run(ctx context.Context, log *slog.Logger) (runErr error) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { response(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("/v1/opamp", handler)
 	adminAuth := auth.New(cfg.AdminCredentials)
-	mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(store, adminAuth))
+	mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(store, adminAuth, reg.wakeAgent))
 	mux.Handle("/api/", adminHandler(reg, adminAuth))
 	srv := &http.Server{Addr: cfg.ListenAddress, Handler: mux, ConnContext: connCtx, ReadHeaderTimeout: cfg.ReadHeaderTimeout}
 	listener, err := net.Listen("tcp", cfg.ListenAddress)

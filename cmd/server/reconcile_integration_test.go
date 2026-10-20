@@ -178,7 +178,7 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 			if err != nil || a.State != "APPLIED" || a.DesiredGeneration != rel2.DesiredGeneration {
 				t.Fatalf("latest ACK not converged: %+v %v", a, err)
 			}
-			if config, assigned, err := store.ReconcileAgentConfig(ctx, "different-workspace", uid, nil); err != nil || assigned || config != nil {
+			if config, assigned, err := store.ReconcileAgentConfig(ctx, "different-workspace", uid, nil, true); err != nil || assigned || config != nil {
 				t.Fatalf("cross-workspace config leaked: %+v %t %v", config, assigned, err)
 			}
 		})

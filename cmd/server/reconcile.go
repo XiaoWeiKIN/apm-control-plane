@@ -12,7 +12,7 @@ import (
 
 // deliveryStore is the narrow durable Desired/Observed boundary used by OpAMP.
 type deliveryStore interface {
-	ReconcileAgentConfig(context.Context, string, string, *gormrepo.ConfigStatus) (*gormrepo.DesiredConfig, bool, error)
+	ReconcileAgentConfig(context.Context, string, string, *gormrepo.ConfigStatus, bool) (*gormrepo.DesiredConfig, bool, error)
 }
 
 func remoteConfigFromDesired(desired *gormrepo.DesiredConfig) (*protobufs.AgentRemoteConfig, error) {
