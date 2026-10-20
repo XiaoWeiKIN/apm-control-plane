@@ -2,7 +2,7 @@
 
 > **性质**：开发者详细架构 / P2 实现合同草案。本文记录模块划分、依赖方向与增量开发顺序；不是新的 DD-NNN、ADR，也不代表 [DD-001](../design-docs/dd-001_opamp-control-plane.md) 已获批准。[EP-001](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) 的身份安全阻塞继续有效。
 >
-> **事实基线**：`main@67292b7daf7ab5d7b399af0c82250456927c0435` 已合并 P1.1 与 P2.1 ConfigRevision。本 P2.2 分支新增单 Agent Release/Target/Assignment/Event 原子 Pending 发布。**P2.3a 已提交持久 ACK 对账与 HTTP/WS 消息响应下发；WS 主动推送、后台扫描、Policy Selector 和 P3 灰度尚未实现。** `internal/release` 是目标模块边界；现在仅有 `cmd/server/releases.go` 的 API 与 `gormrepo/releases.go` 的事务逻辑，不为了目录对称新增空包。
+> **事实基线**：`main@220edaf1feb13699a65af6ded488d10cac324ef2` 已合并 P1.1、P2.1 ConfigRevision 和 P2.2 单 Agent Release/Target/Assignment/Event 原子 Pending 发布。本 P2.3a 分支在持久 Desired 上增加 OpAMP 响应式配置投递与 ACK 收敛。**P2.3a 已提交持久 ACK 对账与 HTTP/WS 消息响应下发；WS 主动推送、后台扫描、Policy Selector 和 P3 灰度尚未实现。** `internal/release` 是目标模块边界；现在仅有 `cmd/server/releases.go` 的 API 与 `gormrepo/releases.go` 的事务逻辑，不为了目录对称新增空包。
 >
 > **读者任务**：决定某个功能应该放在哪个模块，理解一次配置发布与回执如何流转，按照最小的跨模块依赖开发 P2。表结构与数据库约束的详细来源见 [Workspace Schema 设计](storage-schema.md)。
 
