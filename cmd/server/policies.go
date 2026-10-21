@@ -66,10 +66,10 @@ func policyAPI(store policyStore, credentials *auth.Authenticator) http.Handler 
 				principal.CredentialID, req.PathValue("policy_id"), *body.SamplingRate)
 		case req.Method == http.MethodPost && req.URL.Path == "/api/v1/policy-bindings":
 			var body struct {
-				PolicyRevisionID string `json:"policy_revision_id"`
-				ScopeType        string `json:"scope_type"`
+				PolicyRevisionID string          `json:"policy_revision_id"`
+				ScopeType        string          `json:"scope_type"`
 				Selector         policy.Selector `json:"selector"`
-				Priority         int `json:"priority"`
+				Priority         int             `json:"priority"`
 			}
 			if !decodePolicyRequest(w, req, &body) {
 				return
