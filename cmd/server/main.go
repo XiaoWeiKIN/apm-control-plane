@@ -37,12 +37,12 @@ type AgentStore interface {
 	List(context.Context, string) ([]gormrepo.AgentRecord, error)
 }
 
+// runtimeAgent.users and lastActive are protected by registry.mu.
 type runtimeAgent struct {
 	mu           sync.Mutex
 	conn         types.Connection
 	wake         chan struct{}
 	done         chan struct{}
-	// users and lastActive are protected by registry.mu.
 	users        int
 	lastActive   time.Time
 	sequence     uint64
