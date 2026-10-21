@@ -42,6 +42,8 @@ type runtimeAgent struct {
 	conn         types.Connection
 	wake         chan struct{}
 	done         chan struct{}
+	users        int // protected by registry.mu
+	lastActive   time.Time // protected by registry.mu
 	sequence     uint64
 	remote       *protobufs.AgentRemoteConfig
 	desiredHash  string
@@ -52,6 +54,7 @@ type registry struct {
 	mu            sync.Mutex
 	inFlight      sync.WaitGroup
 	closing       bool
+	lastSweep     time.Time
 	store         AgentStore
 	delivery      deliveryStore
 	sessions      map[string]*runtimeAgent
@@ -203,17 +206,39 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 		r.mu.Unlock()
 		return nil, false, errRegistryClosing
 	}
+	// Periodically evict inactive transport state; durable inventory remains in DB.
+	now := time.Now()
+	if now.Sub(r.lastSweep) >= time.Minute {
+		for sessionKey, idle := range r.sessions {
+			if idle.users != 0 || now.Sub(idle.lastActive) < 5*time.Minute {
+				continue
+			}
+			idle.mu.Lock()
+			if idle.conn == nil && idle.done == nil && idle.remote == nil {
+				delete(r.sessions, sessionKey)
+			}
+			idle.mu.Unlock()
+		}
+		r.lastSweep = now
+	}
 	rt := r.sessions[k]
 	if rt == nil {
 		rt = &runtimeAgent{}
 		r.sessions[k] = rt
 	}
+	rt.users++
+	rt.lastActive = now
 	r.inFlight.Add(1)
 	r.mu.Unlock()
-	defer r.inFlight.Done()
 
 	rt.mu.Lock()
-	defer rt.mu.Unlock()
+	defer func() {
+		rt.mu.Unlock()
+		r.mu.Lock()
+		rt.users--
+		r.mu.Unlock()
+		r.inFlight.Done()
+	}()
 	if rt.conn != nil && rt.conn != conn {
 		return nil, false, errSessionConflict
 	}
@@ -381,6 +406,8 @@ func (r *registry) assign(ctx context.Context, p auth.Principal, uid string, rat
 		rt = &runtimeAgent{}
 		r.sessions[k] = rt
 	}
+	rt.users++
+	rt.lastActive = time.Now()
 	r.mu.Unlock()
 
 	rt.mu.Lock()
@@ -388,6 +415,9 @@ func (r *registry) assign(ctx context.Context, p auth.Principal, uid string, rat
 	rt.desiredHash = hex.EncodeToString(cfg.ConfigHash)
 	rt.configStatus = "PENDING"
 	rt.mu.Unlock()
+	r.mu.Lock()
+	rt.users--
+	r.mu.Unlock()
 	// P1 preserves the existing demo's ephemeral per-instance sampling API;
 	// immutable revisions, durable Desired and WS proactive push belong to P2.
 	return r.snapshot(record, time.Now().UTC()), nil
@@ -539,11 +569,8 @@ func makeGateway(reg *registry, agentAuth *auth.Authenticator, log *slog.Logger)
 						return processingErrorResponse(msg.InstanceUid, err)
 					}
 					if isWS && reg.delivery != nil {
-						// 持久 Config 由单 Session Writer 推送；避免回调同步发送重复配置。
+						// 持久 Config 由单 Session Writer 推送；普通消息仍需响应协议能力。
 						reg.startWriter(principal, conn, msg.InstanceUid, log)
-						if config == nil && !full {
-							return nil
-						}
 					}
 					if full {
 						out.Flags = uint64(protobufs.ServerToAgentFlags_ServerToAgentFlags_ReportFullState)
