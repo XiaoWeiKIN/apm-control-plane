@@ -57,7 +57,7 @@ flowchart TB
 | --- | --- | --- | --- | --- | --- |
 | **Agent Registry** | 已认证的 Agent Status / 描述 / Health | UID 归属、AgentKind、Distribution、Capabilities、最新 Observation、查询和活跃度视图 | 解析 Policy、生成配置、决定发布版本 | `agent_instances` | **P1.1 已实现基础能力** |
 | **OpAMP Gateway** | AgentToServer、HTTP/WS 连接、发送请求 | OpAMP 编解码、连接回调、Session 生命周期、协议错误、按传输模式发送 | 选择策略、保存唯一 Desired、判断业务发布成功 | WS Session 在内存 | **P1.1 已实现接入与响应下发** |
-| **Policy Manager** | 规则版本、Scope、Selector、Priority | 不可变 Policy Revision、Binding、匹配排序与冲突检测 | OpAMP 网络写、生成所有 Agent 共用的固定 JSON | `policies`、`policy_revisions`、`policy_bindings` | **P2.4 分支实现单 Agent Java Policy/Revision/Binding/Selector，待 CI 验证** |
+| **Policy Manager** | 规则版本、Scope、Selector、Priority | 不可变 Policy Revision、Binding、匹配排序与冲突检测 | OpAMP 网络写、生成所有 Agent 共用的固定 JSON | `policies`、`policy_revisions`、`policy_bindings` | **P2.4 分支实现 Java Policy/Revision/Binding 与单 Agent 只读解析；待 PR 评审** |
 | **Config Manager** | 选中的规则、AgentKind/发行版/能力 | 确定性完整 ConfigMap/Hash、不可变 Config Revision；后续按 Agent 能力判定 | 持有网络连接、管理灰度批次 | `config_revisions` | **P2.1 Java 编译和存储已实现；通用 Adapter/能力匹配仍待实现** |
 | **Release Manager** | 经过授权的配置发布/回滚请求 | Release、冻结 Target、Agent 当前 Desired Assignment、提交事务和审计 | 把 SENT 当 APPLIED、在事务内发送 OpAMP | `config_releases`、`release_targets`、`config_events`；与 Assignment 同 Tx | **P2.2 已实现单 Agent Pending 发布；P3 灰度/回滚未实现** |
 | **Reconciler** | 持久 Assignment、当前 Agent 能力/会话、OpAMP ACK | Desired/Observed 对账、ACK 归因、响应式投递、重试期限 | 修改不可变 Revision、绕过授权写新策略 | `agent_assignments`（当前版本与 CAS） | **P2.3a 已合并；P2.3b 单进程 WS Push、在线重试和断线重连已通过双数据库/Go/RF CI** |
