@@ -223,6 +223,52 @@ func TestWebsocketSessionExclusion(t *testing.T) {
 	}
 }
 
+func TestInactiveSessionsAreEvictedWithoutDroppingActiveOrDemoState(t *testing.T) {
+	reg := newRegistry(newFakeStore(), 30*time.Second)
+	p := principal("workspace", "owner")
+	ctx := context.Background()
+	inactiveUID, inactiveID := uid(60)
+	activeUID, activeID := uid(61)
+	demoUID, demoID := uid(62)
+	for _, id := range [][]byte{inactiveUID, activeUID, demoUID} {
+		if _, _, err := reg.update(ctx, p, false, nil, &protobufs.AgentToServer{
+			InstanceUid: id, SequenceNum: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := reg.assign(ctx, p, demoID, 0.25); err != nil {
+		t.Fatal(err)
+	}
+	conn := &mockConnection{id: 62}
+	if _, _, err := reg.update(ctx, p, true, conn, &protobufs.AgentToServer{
+		InstanceUid: activeUID, SequenceNum: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reg.mu.Lock()
+	for _, id := range []string{inactiveID, activeID, demoID} {
+		reg.sessions[key(p.WorkspaceID, id)].lastActive = time.Now().Add(-6 * time.Minute)
+	}
+	reg.lastSweep = time.Now().Add(-2 * time.Minute)
+	reg.mu.Unlock()
+
+	freshUID, _ := uid(63)
+	if _, _, err := reg.update(ctx, p, false, nil, &protobufs.AgentToServer{
+		InstanceUid: freshUID, SequenceNum: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reg.mu.Lock()
+	_, idleExists := reg.sessions[key(p.WorkspaceID, inactiveID)]
+	_, activeExists := reg.sessions[key(p.WorkspaceID, activeID)]
+	_, demoExists := reg.sessions[key(p.WorkspaceID, demoID)]
+	reg.mu.Unlock()
+	if idleExists || !activeExists || !demoExists {
+		t.Fatalf("incorrect session eviction: idle=%t active=%t demo=%t", idleExists, activeExists, demoExists)
+	}
+}
+
 func TestBadSamplingAndUID(t *testing.T) {
 	for _, rate := range []float64{-1, 2} {
 		if _, err := samplingConfig(rate); err == nil {

@@ -1,6 +1,6 @@
 # APM Control Plane
 
-A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Agent distributions, with future Collector support. The first operational increment is **durable, workspace-scoped Agent Inventory**; policy revision, reconciler and staged rollout remain future milestones.
+A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Agent distributions, with future Collector support. The current implementation includes **durable, workspace-scoped Agent Inventory**, immutable Java sampling revisions, single-Agent releases and OpAMP HTTP/WebSocket delivery/ACK. Policy selectors, staged rollout and production identity/HA remain future work.
 
 ## Developer documentation
 
@@ -18,7 +18,7 @@ A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Ag
 - Instance identity `(workspace_id, instance_uid)`; the credential that first registers the UID retains ownership within that Workspace.
 - Service metadata, Agent Kind/Distribution/Version, capabilities, latest health and RemoteConfigStatus snapshots.
 - HTTP polling freshness and WebSocket session handling have separate connection semantics.
-- The existing per-agent `PUT /sampling` endpoint remains an **ephemeral P0 demonstration**. P2.1 adds compiled ConfigRevisions; **P2.2 now persists single-Agent Release/Target/Assignment/audit as Pending without sending OpAMP**. Reconciler and multi-Agent Rollout remain future work.
+- The `PUT /sampling` endpoint remains an **ephemeral P0 demonstration**. P2.1 adds immutable ConfigRevisions; P2.2 persists atomic single-Agent Releases; P2.3 reconciles and delivers Desired via HTTP polling and WebSocket pushes, with durable ACK/audit. Multi-Agent Rollout is not implemented.
 
 **Workspace means a workspace of the larger observability platform**, shared conceptually with logs, metrics, traces and dashboards. This service does **not** create a separate Tenant table or accept Agent-declared Workspace IDs as permission. Current P1.1 obtains trusted scope from operator-supplied credential configuration; integration with the platform's authoritative Workspace/IAM service is a separate security/design task.
 
@@ -36,9 +36,19 @@ P2.2 adds `db/migrations/{postgres,mysql}/00003_single_agent_releases.sql` and t
 
 The endpoint checks the Agent's Workspace, type and advertised remote-config capability before atomically creating `config_releases`, a frozen `release_targets` row, current `agent_assignments` Desired, and a `config_events` audit record. The response is HTTP **202** with `release_id`, `desired_generation` and `status: "PENDING"`. A replay with the same key and request does not advance Generation; changing the request under the same key returns Conflict. New publishes supersede previous pending targets and increment Generation.
 
-**HTTP 202 only confirms a committed Desired state.** There is no Reconciler or new OpAMP delivery in P2.2. The P0 `PUT /sampling` remains in-memory. There is also no management endpoint yet for creating ConfigRevisions: P2.1 creates these from internal Go code; P2.2 references an existing Revision ID. JVM runtime sampling remains unverified.
+**HTTP 202 only confirms a committed Desired state.** P2.3 subsequently delivers the Revision through OpAMP and records Hash-matched ACK, but 202 does not establish delivery or JVM application. The P0 `PUT /sampling` remains in-memory. There is no management endpoint yet for creating ConfigRevisions: P2.1 creates these from internal Go code; P2.2 references an existing Revision ID. JVM runtime sampling remains unverified.
 
 Run Goose `up` for the selected database before startup: **00001, 00002 and 00003 are all required**. Startup fails explicitly if a release table is missing; the service does not alter schemas automatically.
+
+## P2.3: OpAMP RemoteConfig delivery and reconciliation
+
+- An Agent's HTTP polling response can contain the current immutable ConfigMap; authenticated WebSocket sessions receive proactive push after a Release commits.
+- The Gateway stores delivery attempts and reconciles `RemoteConfigStatus` against the current Desired Hash under Agent/Assignment locks. Stale ACKs cannot apply a newer generation; matching FAILED reports retain their error in Assignment/Target and audit.
+- A WebSocket Writer processes release wakeups immediately. It keeps 5-second checks across the 15-second retry window, then backs off idle recovery polling to at most 40 seconds; an outstanding unacknowledged offer normally becomes retryable after 15 seconds. `CONFIG_OFFERED` means a send was prepared, not that the Agent received it.
+- Unused runtime sessions are evicted after five minutes of inactivity on subsequent Agent traffic. Durable Agent Inventory and Assignments remain in the database. The legacy P0 in-memory sampling state is retained.
+- Production IAM/Principal, multi-instance HA, staged rollout and real Java JVM sampler validation are outside this increment.
+
+See [P2.3 delivery contract](docs/architecture/p2-reconcile-delivery.md) for precise status and recovery semantics.
 
 ## Local startup
 
@@ -94,7 +104,7 @@ Never commit real secrets. Local plain HTTP is not a public production authentic
 | GET | `/api/v1/agents` | Workspace-scoped Agent list |
 | GET | `/api/v1/agents/{uid}` | Workspace-scoped instance detail |
 | PUT | `/api/v1/agents/{uid}/sampling` | Ephemeral demo sampling rate, [0,1] |
-| POST | `/api/v1/agents/{uid}/releases` | P2.2 Pending Release intent (Admin token) |
+| POST | `/api/v1/agents/{uid}/releases` | Durable single-Agent Desired; P2.3 delivers and reconciles asynchronously |
 
 ## Validation
 

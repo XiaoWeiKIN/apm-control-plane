@@ -97,7 +97,19 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
-	// 3. 校验所需表和列，旧 Workspace Schema 明确启动失败。
+	// 3. 要求 Goose 至少完成 00003；表检查不能替代迁移版本检查。
+	var schemaVersion int64
+	if err := db.WithContext(ctx).Raw(
+		"SELECT version_id FROM goose_db_version WHERE is_applied = ? ORDER BY id DESC LIMIT 1", true,
+	).Scan(&schemaVersion).Error; err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("inspect Goose schema version: %w", err)
+	}
+	if schemaVersion < 3 {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("Goose schema version %d: run migrations through 00003", schemaVersion)
+	}
+	// 校验必需的表与 Agent Inventory 字段；缺失时明确启动失败。
 	if !db.Migrator().HasTable(&AgentRecord{}) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("agent_instances schema missing: run Goose migrations for %s", cfg.Driver)

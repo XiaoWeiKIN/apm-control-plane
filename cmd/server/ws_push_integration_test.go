@@ -246,6 +246,13 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			server.Config.ConnContext = cc
 			server.Start()
 			defer server.Close()
+			restored, err := store.GetAgentAssignment(ctx, workspace, uid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if restored.DesiredHash != third.ConfigHash || (restored.State != "PENDING" && restored.State != "WAITING_ACK") {
+				t.Fatalf("incorrect restored Desired: %+v", restored)
+			}
 			reconnected := connect()
 			defer reconnected.Close()
 			send(reconnected, 1, nil)

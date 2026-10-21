@@ -144,6 +144,32 @@ func TestWSReportFullStateWithoutDesired(t *testing.T) {
 	if reply.Flags&flag == 0 || reply.RemoteConfig != nil {
 		t.Fatalf("invalid full-state request: %+v", &reply)
 	}
+
+	// A normal subsequent status still requires a protocol response without Desired.
+	wire, err = proto.Marshal(&protobufs.AgentToServer{
+		InstanceUid: id, SequenceNum: 2,
+		AgentDescription: &protobufs.AgentDescription{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, append([]byte{0}, wire...)); err != nil {
+		t.Fatal(err)
+	}
+	_, replyWire, err = conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("missing normal WS status response: %v", err)
+	}
+	if len(replyWire) == 0 || replyWire[0] != 0 {
+		t.Fatalf("unexpected WS response header: %x", replyWire)
+	}
+	var normal protobufs.ServerToAgent
+	if err := proto.Unmarshal(replyWire[1:], &normal); err != nil {
+		t.Fatal(err)
+	}
+	if normal.Capabilities == 0 || normal.Flags != 0 || normal.RemoteConfig != nil {
+		t.Fatalf("invalid normal WS status response: %+v", &normal)
+	}
 }
 
 type blockedWSConnection struct {

@@ -67,10 +67,12 @@ func (r *registry) wakeAgent(workspaceID, uid string) {
 }
 
 // pushLoop is the sole durable-config sender for one WS session.
-// A periodic tick recovers lost wakeups and resends unacknowledged versions.
+// A bounded backoff reduces idle DB polling; wake signals bypass the interval.
 func (r *registry) pushLoop(workspaceID, uid string, rawUID []byte, conn types.Connection, rt *runtimeAgent, wake, done <-chan struct{}, log *slog.Logger) {
 	defer r.inFlight.Done()
-	ticker := time.NewTicker(5 * time.Second)
+	checkInterval := 5 * time.Second
+	idleChecks := 0
+	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
 	for {
@@ -100,8 +102,17 @@ func (r *registry) pushLoop(workspaceID, uid string, rawUID []byte, conn types.C
 			continue
 		}
 		if config == nil {
+			idleChecks++
+			// Keep 5s checks through the persisted 15s retry window after a reconnect.
+			if idleChecks >= 5 && checkInterval < 40*time.Second {
+				checkInterval *= 2
+				ticker.Reset(checkInterval)
+			}
 			continue
 		}
+		idleChecks = 0
+		checkInterval = 5 * time.Second
+		ticker.Reset(checkInterval)
 
 		// 2. 会话可能在 DB 查询时已关闭；不能向旧连接发送当前 Workspace 的配置。
 		rt.mu.Lock()
