@@ -71,6 +71,7 @@ func (r *registry) wakeAgent(workspaceID, uid string) {
 func (r *registry) pushLoop(workspaceID, uid string, rawUID []byte, conn types.Connection, rt *runtimeAgent, wake, done <-chan struct{}, log *slog.Logger) {
 	defer r.inFlight.Done()
 	checkInterval := 5 * time.Second
+	idleChecks := 0
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
@@ -101,12 +102,15 @@ func (r *registry) pushLoop(workspaceID, uid string, rawUID []byte, conn types.C
 			continue
 		}
 		if config == nil {
-			if checkInterval < 40*time.Second {
+			idleChecks++
+			// Keep 5s checks through the persisted 15s retry window after a reconnect.
+			if idleChecks >= 5 && checkInterval < 40*time.Second {
 				checkInterval *= 2
 				ticker.Reset(checkInterval)
 			}
 			continue
 		}
+		idleChecks = 0
 		checkInterval = 5 * time.Second
 		ticker.Reset(checkInterval)
 
