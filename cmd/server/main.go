@@ -42,8 +42,9 @@ type runtimeAgent struct {
 	conn         types.Connection
 	wake         chan struct{}
 	done         chan struct{}
-	users        int // protected by registry.mu
-	lastActive   time.Time // protected by registry.mu
+	// users and lastActive are protected by registry.mu.
+	users        int
+	lastActive   time.Time
 	sequence     uint64
 	remote       *protobufs.AgentRemoteConfig
 	desiredHash  string
