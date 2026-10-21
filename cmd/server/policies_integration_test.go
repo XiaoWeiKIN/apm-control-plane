@@ -106,6 +106,8 @@ func TestPolicyAPIWorkspaceAndDryRunPostgresAndMySQL(t *testing.T) {
 				"admin-policy-b-secret-long", `{"sampling_rate":0.3}`, 404)
 			r := request("POST", "/api/v1/policy-bindings", "admin-policy-a-secret-long",
 				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"SERVICE","selector":{"service_name":"checkout","environment":"prod"},"priority":9}`, 201)
+			request("POST", "/api/v1/policy-bindings", "admin-policy-a-secret-long",
+				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"WORKSPACE","selector":{},"priority":0,"enabled":false}`, 400)
 			var binding gormrepo.PolicyBindingRecord
 			if err := json.Unmarshal(r, &binding); err != nil {
 				t.Fatal(err)
