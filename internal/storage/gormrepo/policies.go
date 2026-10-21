@@ -198,7 +198,7 @@ func (s *Store) CreatePolicyBinding(ctx context.Context, workspace, actor string
 }
 
 func (s *Store) UpdatePolicyBinding(ctx context.Context, workspace, actor, bindingID string, in BindingInput) (PolicyBindingRecord, error) {
-	if !policyIdentityOK(workspace, actor) || len(bindingID) != 36 || len(in.PolicyRevisionID) != 36 || in.RowVersion < 1 {
+	if !policyIdentityOK(workspace, actor) || len(bindingID) != 36 || len(in.PolicyRevisionID) != 36 || (in.RowVersion < 1 || in.RowVersion == math.MaxInt64) {
 		return PolicyBindingRecord{}, policy.ErrInvalid
 	}
 	sel, hash, err := in.Selector.Canonical(in.ScopeType)
