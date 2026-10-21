@@ -97,3 +97,84 @@ func TestConcurrentReleaseAndACKPreservesLatestDesiredPostgresAndMySQL(t *testin
 		})
 	}
 }
+
+func TestFailedACKPersistsReleaseDiagnosticsPostgresAndMySQL(t *testing.T) {
+	for _, tt := range []struct{ driver, env string }{
+		{"postgres", "APM_TEST_POSTGRES_DSN"},
+		{"mysql", "APM_TEST_MYSQL_DSN"},
+	} {
+		t.Run(tt.driver, func(t *testing.T) {
+			dsn := os.Getenv(tt.env)
+			if dsn == "" {
+				t.Skip(tt.env + " not configured")
+			}
+			ctx := context.Background()
+			store, err := Open(ctx, appconfig.Database{
+				Driver: tt.driver, DSN: dsn, MaxOpen: 5, MaxIdle: 2, MaxLifetime: time.Minute,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			workspace, uid := "failed-ack-diagnostics", newUID(t)
+			if _, err := store.Observe(ctx, auth.Principal{WorkspaceID: workspace, CredentialID: "java-agent"},
+				uid, Observation{
+					SeenAt: time.Now().UTC(), Transport: "http",
+					Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
+					Description: &Description{Kind: config.JavaAgentKind},
+				}); err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := config.CompileJavaSampling(0.25)
+			if err != nil {
+				t.Fatal(err)
+			}
+			revision, err := store.CreateConfigRevision(ctx, workspace, "admin", snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			release, err := store.PublishAgentConfig(ctx, workspace, uid, revision.ConfigRevisionID, "admin", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if offered, assigned, err := store.ReconcileAgentConfig(ctx, workspace, uid, nil, true); err != nil || !assigned || offered == nil {
+				t.Fatalf("offer failed: %+v %t %v", offered, assigned, err)
+			}
+			for _, message := range []string{"apply failed", "agent rejected sampling"} {
+				if _, _, err := store.ReconcileAgentConfig(ctx, workspace, uid,
+					&ConfigStatus{Hash: revision.ConfigHash, Status: "FAILED", Error: message}, false); err != nil {
+					t.Fatal(err)
+				}
+				assignment, err := store.GetAgentAssignment(ctx, workspace, uid)
+				if err != nil || assignment.State != "FAILED" || assignment.LastError != message {
+					t.Fatalf("assignment failed diagnostics: %+v %v", assignment, err)
+				}
+				var target ReleaseTargetRecord
+				if err := store.db.Where("workspace_id = ? AND release_id = ? AND instance_uid = ?",
+					workspace, release.ReleaseID, uid).Take(&target).Error; err != nil {
+					t.Fatal(err)
+				}
+				if target.Status != "FAILED" || target.LastError != message {
+					t.Fatalf("target failed diagnostics: %+v", target)
+				}
+				var event ConfigEventRecord
+				if err := store.db.Where("workspace_id = ? AND release_id = ? AND event_type = ?",
+					workspace, release.ReleaseID, "CONFIG_FAILED").Order("occurred_at DESC").Take(&event).Error; err != nil {
+					t.Fatal(err)
+				}
+				if event.DetailsJSON != `{"error":"`+message+`"}` {
+					t.Fatalf("audit diagnostic = %q", event.DetailsJSON)
+				}
+			}
+			next, err := store.PublishAgentConfig(ctx, workspace, uid, revision.ConfigRevisionID, "admin", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			assignment, err := store.GetAgentAssignment(ctx, workspace, uid)
+			if err != nil || assignment.DesiredGeneration != next.DesiredGeneration ||
+				assignment.State != "PENDING" || assignment.LastError != "" {
+				t.Fatalf("new release retained stale failure: %+v %v", assignment, err)
+			}
+		})
+	}
+}
