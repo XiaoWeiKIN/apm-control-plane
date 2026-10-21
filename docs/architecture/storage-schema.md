@@ -238,6 +238,14 @@ erDiagram
 
 **建议索引**：`(workspace_id,agent_kind,enabled,scope_type,priority)`；**精确 Selector 防重复**可选择 `(workspace_id,agent_kind,scope_type,selector_hash,priority)` 唯一（需在正式评审中确认是否允许同 Selector 多条 Disabled 版本）。**部分重叠 Selector 的冲突不能只依赖 SQL 唯一索引**，必须由 Resolver 在稳定排序/冲突检测中拒绝同级不同内容；更新 Binding 与相关发布必须遵循事务和版本检查。Binding 中的 `service.name` 匹配值来自 Agent 声明，匹配动作必须先完成 Workspace 授权和 Adapter 能力判定。
 
+### P2.4 物理落地（Goose 00004）
+
+P2.4 使用 `db/migrations/postgres/00004_policies.sql` 与 `db/migrations/mysql/00004_policies.sql` 实际创建以上三表，并在 `config_revisions.source_policy_revision_id` 上添加同 Workspace 复合 FK。启动时 Store.Open 要求 Goose 至少执行到 00004；缺失必须失败。MySQL 使用 InnoDB/utf8mb4_bin，UUID/FK 字段使用 ascii_bin；MySQL DDL 不假设事务回滚。
+
+首个实际业务合同：**Java Head Sampling**，`policy_type=head_sampling`、`agent_kind=java-apm`。创建 Policy 与首个不可变 Revision 在同一事务内完成；后续 Revision 锁住父 Policy 递增 `revision_number`。Binding 的可变列通过 `row_version` CAS 更新，默认 enabled；同 Workspace 的 SQL FK 阻止跨 Workspace 引用 Revision。暂不启用 `expires_at`：到期策略尚无调用场景，若后续实施临时策略再通过独立 Migration 增加。
+
+`WORKSPACE > ENVIRONMENT` 等优先权由业务明确规范为 `INSTANCE > SERVICE > ENVIRONMENT > WORKSPACE`，同 Scope 再按 Priority 降序；最高同级正文 Hash 不一致返回冲突，正文一致时稳定选择 Binding ID 最小值。细节与只读管理接口见 [P2.4 Policy Resolver](p24-policy-resolution.md)。当前不新增 `config_releases.policy_revision_id` 的外键：单 Agent 直接配置发布仍沿用现有 ConfigRevision，Policy 解析不隐式创建发布。
+
 ## 5. 配置内容、发布与协调域
 
 ### 5.1 `config_revisions` — 不可变编译结果
