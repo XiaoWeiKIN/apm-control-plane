@@ -224,6 +224,7 @@ func (s *Store) ResolveAgentPolicy(ctx context.Context, workspace, uid string) (
 
 	target := policy.Agent{InstanceUID: uid, Environment: agent.Environment, ServiceName: agent.ServiceName}
 	var selected *candidate
+	conflict := false
 	for i := range entries {
 		item := &entries[i]
 		var selector policy.Selector
@@ -233,12 +234,17 @@ func (s *Store) ResolveAgentPolicy(ctx context.Context, workspace, uid string) (
 		rank, top := policy.ScopeRank(item.ScopeType), policy.ScopeRank(selected.ScopeType)
 		if rank > top || (rank == top && item.Priority > selected.Priority) {
 			selected = item
+			conflict = false
 		} else if rank == top && item.Priority == selected.Priority {
-			if item.BodySHA256 != selected.BodySHA256 { return PolicyResolution{}, policy.ErrConflict }
-			if item.BindingID < selected.BindingID { selected = item }
+			if item.BodySHA256 != selected.BodySHA256 {
+				conflict = true
+			} else if item.BindingID < selected.BindingID {
+				selected = item
+			}
 		}
 	}
 	if selected == nil { return PolicyResolution{}, policy.ErrNotFound }
+	if conflict { return PolicyResolution{}, policy.ErrConflict }
 
 	// 3. 读取命中 Revision 的真实内容，不创建 Release 或修改 Assignment。
 	var rev PolicyRevisionRecord
