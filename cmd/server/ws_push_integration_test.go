@@ -51,7 +51,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			uid := hex.EncodeToString(uidBytes)
 			reg := newRegistry(store, time.Second)
 			reg.delivery = store
-			log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 			handler, cc, err := makeGateway(reg, auth.New([]appconfig.Credential{
 				{ID: "java-credential", WorkspaceID: workspace, Token: "ws-agent-token-long"},
 			}), log)
@@ -250,7 +250,9 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Logf("restored desired state=%s hash=%s retry=%v", restored.State, restored.DesiredHash, restored.NextRetryAt)
+			if restored.DesiredHash != third.ConfigHash || (restored.State != "PENDING" && restored.State != "WAITING_ACK") {
+				t.Fatalf("incorrect restored Desired: %+v", restored)
+			}
 			reconnected := connect()
 			defer reconnected.Close()
 			send(reconnected, 1, nil)
