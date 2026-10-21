@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -71,9 +72,11 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 				oldStatus = *assignment.ObservedStatus
 			}
 			state := assignment.State
+			lastError := assignment.LastError
 			eventType := "CONFIG_ACK_STALE"
 			matched := reported.Hash == assignment.DesiredHash && assignment.LastSentAt != nil
 			if matched {
+				lastError = reported.Error
 				switch reported.Status {
 				case "APPLIED":
 					state, eventType = "APPLIED", "CONFIG_APPLIED"
@@ -86,12 +89,13 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 				}
 			} else if state == "APPLIED" && reported.Hash != assignment.DesiredHash {
 				state = "PENDING"
+				lastError = ""
 			}
-			if oldHash != reported.Hash || oldStatus != reported.Status || state != assignment.State {
+			if oldHash != reported.Hash || oldStatus != reported.Status || state != assignment.State || lastError != assignment.LastError {
 				updates := map[string]any{
 					"observed_hash": reported.Hash, "observed_status": reported.Status,
 					"observed_at": now, "row_version": assignment.RowVersion + 1,
-					"state": state, "updated_at": now,
+					"state": state, "last_error": lastError, "updated_at": now,
 				}
 				r := tx.Model(&AgentAssignmentRecord{}).
 					Where("workspace_id = ? AND instance_uid = ? AND desired_generation = ? AND row_version = ?",
@@ -105,16 +109,16 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 				assignment.RowVersion++
 				previousState := assignment.State
 				assignment.State = state
-				if state != previousState {
+				if state != previousState || lastError != assignment.LastError {
 					targetState := state
 					if state == "APPLYING" {
 						targetState = "WAITING_ACK"
 					}
-					if err := setReleaseDeliveryStatus(tx, assignment, targetState, now); err != nil {
+					if err := setReleaseDeliveryStatus(tx, assignment, targetState, lastError, now); err != nil {
 						return err
 					}
 				}
-				if err := insertDeliveryEvent(tx, assignment, eventType, &reported.Hash, &reported.Status, now); err != nil {
+				if err := insertDeliveryEvent(tx, assignment, eventType, &reported.Hash, &reported.Status, reported.Error, now); err != nil {
 					return err
 				}
 			}
@@ -155,10 +159,10 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 			if r.RowsAffected != 1 {
 				return ErrAssignmentConflict
 			}
-			if err := setReleaseDeliveryStatus(tx, assignment, "UNSUPPORTED", now); err != nil {
+			if err := setReleaseDeliveryStatus(tx, assignment, "UNSUPPORTED", "", now); err != nil {
 				return err
 			}
-			return insertDeliveryEvent(tx, assignment, "CONFIG_UNSUPPORTED", nil, nil, now)
+			return insertDeliveryEvent(tx, assignment, "CONFIG_UNSUPPORTED", nil, nil, "", now)
 		}
 		sum := sha256.Sum256(revision.ConfigMapBytes)
 		if revision.ConfigHash != assignment.DesiredHash || hex.EncodeToString(sum[:]) != assignment.DesiredHash {
@@ -184,10 +188,10 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 		if r.RowsAffected != 1 {
 			return ErrAssignmentConflict
 		}
-		if err := setReleaseDeliveryStatus(tx, assignment, "WAITING_ACK", now); err != nil {
+		if err := setReleaseDeliveryStatus(tx, assignment, "WAITING_ACK", "", now); err != nil {
 			return err
 		}
-		if err := insertDeliveryEvent(tx, assignment, "CONFIG_OFFERED", &assignment.DesiredHash, nil, now); err != nil {
+		if err := insertDeliveryEvent(tx, assignment, "CONFIG_OFFERED", &assignment.DesiredHash, nil, "", now); err != nil {
 			return err
 		}
 		desired = &DesiredConfig{ConfigMapBytes: revision.ConfigMapBytes, ConfigHash: assignment.DesiredHash}
@@ -197,11 +201,11 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 }
 
 // setReleaseDeliveryStatus applies to the current P2.2 single-target release.
-func setReleaseDeliveryStatus(tx *gorm.DB, a AgentAssignmentRecord, state string, now time.Time) error {
+func setReleaseDeliveryStatus(tx *gorm.DB, a AgentAssignmentRecord, state, lastError string, now time.Time) error {
 	if err := tx.Model(&ReleaseTargetRecord{}).
 		Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND desired_generation = ?",
 			a.WorkspaceID, a.ReleaseID, a.InstanceUID, a.DesiredGeneration).
-		Updates(map[string]any{"status": state, "updated_at": now}).Error; err != nil {
+		Updates(map[string]any{"status": state, "last_error": lastError, "updated_at": now}).Error; err != nil {
 		return err
 	}
 	return tx.Model(&ConfigReleaseRecord{}).
@@ -209,16 +213,24 @@ func setReleaseDeliveryStatus(tx *gorm.DB, a AgentAssignmentRecord, state string
 		Updates(map[string]any{"status": state}).Error
 }
 
-func insertDeliveryEvent(tx *gorm.DB, a AgentAssignmentRecord, eventType string, hash, status *string, now time.Time) error {
+func insertDeliveryEvent(tx *gorm.DB, a AgentAssignmentRecord, eventType string, hash, status *string, errorMessage string, now time.Time) error {
 	id, err := newReleaseUUID()
 	if err != nil {
 		return err
+	}
+	details := "{}"
+	if errorMessage != "" {
+		data, err := json.Marshal(map[string]string{"error": errorMessage})
+		if err != nil {
+			return err
+		}
+		details = string(data)
 	}
 	releaseID, uid, generation := a.ReleaseID, a.InstanceUID, a.DesiredGeneration
 	return tx.Create(&ConfigEventRecord{
 		WorkspaceID: a.WorkspaceID, EventID: id, EventType: eventType,
 		ReleaseID: &releaseID, InstanceUID: &uid, DesiredGeneration: &generation,
 		ConfigHash: hash, ReportedStatus: status, ActorType: "AGENT",
-		ActorID: uid, DetailsJSON: "{}", OccurredAt: now,
+		ActorID: uid, DetailsJSON: details, OccurredAt: now,
 	}).Error
 }
