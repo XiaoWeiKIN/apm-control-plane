@@ -8,9 +8,9 @@ import (
 func TestSelectorScopesAndCanonicalHash(t *testing.T) {
 	a := Agent{InstanceUID: "00112233445566778899aabbccddeeff", Environment: "prod", ServiceName: "checkout"}
 	for _, tt := range []struct {
-		scope string
+		scope    string
 		selector Selector
-		matches bool
+		matches  bool
 	}{
 		{ScopeWorkspace, Selector{}, true},
 		{ScopeEnvironment, Selector{Environment: "prod"}, true},
@@ -35,7 +35,7 @@ func TestSelectorScopesAndCanonicalHash(t *testing.T) {
 		})
 	}
 	for _, tt := range []struct {
-		scope string
+		scope    string
 		selector Selector
 	}{
 		{ScopeWorkspace, Selector{Environment: "prod"}},

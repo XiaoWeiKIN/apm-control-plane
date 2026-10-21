@@ -11,16 +11,16 @@ import (
 )
 
 var (
-	ErrInvalid = errors.New("invalid policy or selector")
+	ErrInvalid  = errors.New("invalid policy or selector")
 	ErrConflict = errors.New("policy selector conflict")
 	ErrNotFound = errors.New("policy not found")
 )
 
 const (
-	ScopeWorkspace = "WORKSPACE"
+	ScopeWorkspace   = "WORKSPACE"
 	ScopeEnvironment = "ENVIRONMENT"
-	ScopeService = "SERVICE"
-	ScopeInstance = "INSTANCE"
+	ScopeService     = "SERVICE"
+	ScopeInstance    = "INSTANCE"
 )
 
 // Selector uses only Agent inventory attributes; it never carries an authorization scope.
@@ -108,8 +108,8 @@ func JavaSamplingBody(rate float64) (string, string, error) {
 	}
 	body := struct {
 		SchemaVersion int `json:"schema_version"`
-		Sampling struct {
-			Type string `json:"type"`
+		Sampling      struct {
+			Type string  `json:"type"`
 			Rate float64 `json:"rate"`
 		} `json:"sampling"`
 	}{SchemaVersion: 1}

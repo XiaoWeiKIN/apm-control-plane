@@ -24,17 +24,23 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 	} {
 		t.Run(tt.driver, func(t *testing.T) {
 			dsn := os.Getenv(tt.env)
-			if dsn == "" { t.Skip(tt.env + " is not set") }
+			if dsn == "" {
+				t.Skip(tt.env + " is not set")
+			}
 			ctx := context.Background()
 			store, err := Open(ctx, appconfig.Database{Driver: tt.driver, DSN: dsn, MaxOpen: 10, MaxIdle: 2, MaxLifetime: time.Minute})
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer store.Close()
 
 			p := auth.Principal{WorkspaceID: "policy-resolution-contract", CredentialID: "java-owner"}
 			id := newUID(t)
 			capability := uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig)
 			if _, err := store.Observe(ctx, p, id, Observation{SeenAt: time.Now().UTC(), Transport: "http",
-				Capabilities: capability, Description: &Description{Kind: config.JavaAgentKind, Service: "checkout", Environment: "prod"}}); err != nil { t.Fatal(err) }
+				Capabilities: capability, Description: &Description{Kind: config.JavaAgentKind, Service: "checkout", Environment: "prod"}}); err != nil {
+				t.Fatal(err)
+			}
 
 			// Workspace must be scoped by trusted principal, never by the selector.
 			if _, err := store.ResolveAgentPolicy(ctx, "other-workspace", id); !errors.Is(err, ErrNotFound) {
@@ -45,13 +51,21 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 			}
 
 			_, base, err := store.CreatePolicy(ctx, p.WorkspaceID, "admin", "default", 0.1)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			_, env, err := store.CreatePolicy(ctx, p.WorkspaceID, "admin", "production", 0.2)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			_, service, err := store.CreatePolicy(ctx, p.WorkspaceID, "admin", "checkout", 0.3)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			_, contender, err := store.CreatePolicy(ctx, p.WorkspaceID, "admin", "collision", 0.4)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			if _, err := store.CreatePolicyRevision(ctx, "other-workspace", "admin", base.PolicyID, 0.5); !errors.Is(err, policy.ErrNotFound) {
 				t.Fatalf("cross-workspace revision creation: %v", err)
 			}
@@ -60,7 +74,9 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 				b, err := store.CreatePolicyBinding(ctx, p.WorkspaceID, "admin", BindingInput{
 					PolicyRevisionID: revisionID, ScopeType: scope, Selector: selector, Priority: priority,
 				})
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 				return b
 			}
 			workspace := createBinding(base.PolicyRevisionID, policy.ScopeWorkspace, policy.Selector{}, 100)
@@ -72,7 +88,9 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 				if err != nil || got.PolicyRevisionID != want {
 					t.Fatalf("resolved revision %+v, want %s: %v", got, want, err)
 				}
-				if len(got.Body) == 0 || got.BodySHA256 == "" { t.Fatalf("missing immutable body: %+v", got) }
+				if len(got.Body) == 0 || got.BodySHA256 == "" {
+					t.Fatalf("missing immutable body: %+v", got)
+				}
 			}
 			resolve(service.PolicyRevisionID)
 			other := createBinding(contender.PolicyRevisionID, policy.ScopeService, policy.Selector{ServiceName: "checkout", Environment: "prod"}, 1)
@@ -86,11 +104,15 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 			if _, err := store.UpdatePolicyBinding(ctx, p.WorkspaceID, "admin", higher.BindingID, BindingInput{
 				PolicyRevisionID: higher.PolicyRevisionID, ScopeType: higher.ScopeType, Selector: policy.Selector{ServiceName: "checkout"},
 				Priority: higher.Priority, Enabled: false, RowVersion: higher.RowVersion,
-			}); err != nil { t.Fatal(err) }
+			}); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := store.UpdatePolicyBinding(ctx, p.WorkspaceID, "admin", higher.BindingID, BindingInput{
 				PolicyRevisionID: higher.PolicyRevisionID, ScopeType: higher.ScopeType, Selector: policy.Selector{ServiceName: "checkout"},
 				Priority: higher.Priority, Enabled: true, RowVersion: higher.RowVersion,
-			}); !errors.Is(err, policy.ErrConflict) { t.Fatalf("stale Binding CAS not rejected: %v", err) }
+			}); !errors.Is(err, policy.ErrConflict) {
+				t.Fatalf("stale Binding CAS not rejected: %v", err)
+			}
 			if _, err := store.ResolveAgentPolicy(ctx, p.WorkspaceID, id); !errors.Is(err, policy.ErrConflict) {
 				t.Fatalf("conflicting fallback not restored: %v", err)
 			}
@@ -98,18 +120,22 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 				PolicyRevisionID: other.PolicyRevisionID, ScopeType: other.ScopeType,
 				Selector: policy.Selector{ServiceName: "checkout", Environment: "prod"},
 				Priority: 1, Enabled: false, RowVersion: 1,
-			}); err != nil { t.Fatal(err) }
+			}); err != nil {
+				t.Fatal(err)
+			}
 			resolve(service.PolicyRevisionID)
 			for _, b := range []PolicyBindingRecord{serviceBinding, envBinding, workspace} {
 				selectors := map[string]policy.Selector{
-					policy.ScopeService: {ServiceName: "checkout"},
+					policy.ScopeService:     {ServiceName: "checkout"},
 					policy.ScopeEnvironment: {Environment: "prod"},
-					policy.ScopeWorkspace: {},
+					policy.ScopeWorkspace:   {},
 				}
 				if _, err := store.UpdatePolicyBinding(ctx, p.WorkspaceID, "admin", b.BindingID, BindingInput{
 					PolicyRevisionID: b.PolicyRevisionID, ScopeType: b.ScopeType, Selector: selectors[b.ScopeType],
 					Priority: b.Priority, Enabled: false, RowVersion: b.RowVersion,
-				}); err != nil { t.Fatal(err) }
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if _, err := store.ResolveAgentPolicy(ctx, p.WorkspaceID, id); !errors.Is(err, policy.ErrNotFound) {
 				t.Fatalf("disabled rules still matched: %v", err)
@@ -124,18 +150,27 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					rev, err := store.CreatePolicyRevision(ctx, p.WorkspaceID, "admin", base.PolicyID, 0.6)
-					if err != nil { errs <- err; return }
+					if err != nil {
+						errs <- err
+						return
+					}
 					numbers <- rev.RevisionNumber
 				}()
 			}
 			wg.Wait()
 			close(errs)
 			close(numbers)
-			for err := range errs { t.Fatalf("concurrent revision failed: %v", err) }
+			for err := range errs {
+				t.Fatalf("concurrent revision failed: %v", err)
+			}
 			seen := map[int64]bool{}
-			for number := range numbers { seen[number] = true }
+			for number := range numbers {
+				seen[number] = true
+			}
 			for i := int64(2); i <= 6; i++ {
-				if !seen[i] { t.Fatalf("missing concurrent PolicyRevision %d: %+v", i, seen) }
+				if !seen[i] {
+					t.Fatalf("missing concurrent PolicyRevision %d: %+v", i, seen)
+				}
 			}
 		})
 	}

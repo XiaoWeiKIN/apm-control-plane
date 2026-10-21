@@ -37,10 +37,12 @@ func policyAPI(store policyStore, credentials *auth.Authenticator) http.Handler 
 		switch {
 		case req.Method == http.MethodPost && req.URL.Path == "/api/v1/policies":
 			var body struct {
-				Name string `json:"name"`
+				Name         string   `json:"name"`
 				SamplingRate *float64 `json:"sampling_rate"`
 			}
-			if !decodePolicyRequest(w, req, &body) { return }
+			if !decodePolicyRequest(w, req, &body) {
+				return
+			}
 			if body.SamplingRate == nil {
 				http.Error(w, "sampling_rate is required", http.StatusBadRequest)
 				return
@@ -50,8 +52,12 @@ func policyAPI(store policyStore, credentials *auth.Authenticator) http.Handler 
 			p, rev, err = store.CreatePolicy(req.Context(), principal.WorkspaceID, principal.CredentialID, body.Name, *body.SamplingRate)
 			result = map[string]any{"policy": p, "revision": rev}
 		case req.Method == http.MethodPost && req.PathValue("policy_id") != "":
-			var body struct { SamplingRate *float64 `json:"sampling_rate"` }
-			if !decodePolicyRequest(w, req, &body) { return }
+			var body struct {
+				SamplingRate *float64 `json:"sampling_rate"`
+			}
+			if !decodePolicyRequest(w, req, &body) {
+				return
+			}
 			if body.SamplingRate == nil {
 				http.Error(w, "sampling_rate is required", http.StatusBadRequest)
 				return
@@ -60,11 +66,15 @@ func policyAPI(store policyStore, credentials *auth.Authenticator) http.Handler 
 				principal.CredentialID, req.PathValue("policy_id"), *body.SamplingRate)
 		case req.Method == http.MethodPost && req.URL.Path == "/api/v1/policy-bindings":
 			var body gormrepo.BindingInput
-			if !decodePolicyRequest(w, req, &body) { return }
+			if !decodePolicyRequest(w, req, &body) {
+				return
+			}
 			result, err = store.CreatePolicyBinding(req.Context(), principal.WorkspaceID, principal.CredentialID, body)
 		case req.Method == http.MethodPut && req.PathValue("binding_id") != "":
 			var body gormrepo.BindingInput
-			if !decodePolicyRequest(w, req, &body) { return }
+			if !decodePolicyRequest(w, req, &body) {
+				return
+			}
 			result, err = store.UpdatePolicyBinding(req.Context(), principal.WorkspaceID,
 				principal.CredentialID, req.PathValue("binding_id"), body)
 			statusCode = http.StatusOK
