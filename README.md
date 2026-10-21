@@ -44,7 +44,7 @@ Run Goose `up` for the selected database before startup: **00001, 00002 and 0000
 
 - An Agent's HTTP polling response can contain the current immutable ConfigMap; authenticated WebSocket sessions receive proactive push after a Release commits.
 - The Gateway stores delivery attempts and reconciles `RemoteConfigStatus` against the current Desired Hash under Agent/Assignment locks. Stale ACKs cannot apply a newer generation; matching FAILED reports retain their error in Assignment/Target and audit.
-- A WebSocket Writer processes release wakeups immediately. For idle sessions it backs off recovery polling from 5 to at most 40 seconds; an outstanding unacknowledged offer normally becomes retryable after 15 seconds. `CONFIG_OFFERED` means a send was prepared, not that the Agent received it.
+- A WebSocket Writer processes release wakeups immediately. It keeps 5-second checks across the 15-second retry window, then backs off idle recovery polling to at most 40 seconds; an outstanding unacknowledged offer normally becomes retryable after 15 seconds. `CONFIG_OFFERED` means a send was prepared, not that the Agent received it.
 - Unused runtime sessions are evicted after five minutes of inactivity on subsequent Agent traffic. Durable Agent Inventory and Assignments remain in the database. The legacy P0 in-memory sampling state is retained.
 - Production IAM/Principal, multi-instance HA, staged rollout and real Java JVM sampler validation are outside this increment.
 
