@@ -65,11 +65,18 @@ func policyAPI(store policyStore, credentials *auth.Authenticator) http.Handler 
 			result, err = store.CreatePolicyRevision(req.Context(), principal.WorkspaceID,
 				principal.CredentialID, req.PathValue("policy_id"), *body.SamplingRate)
 		case req.Method == http.MethodPost && req.URL.Path == "/api/v1/policy-bindings":
-			var body gormrepo.BindingInput
+			var body struct {
+				PolicyRevisionID string `json:"policy_revision_id"`
+				ScopeType        string `json:"scope_type"`
+				Selector         policy.Selector `json:"selector"`
+				Priority         int `json:"priority"`
+			}
 			if !decodePolicyRequest(w, req, &body) {
 				return
 			}
-			result, err = store.CreatePolicyBinding(req.Context(), principal.WorkspaceID, principal.CredentialID, body)
+			result, err = store.CreatePolicyBinding(req.Context(), principal.WorkspaceID, principal.CredentialID,
+				gormrepo.BindingInput{PolicyRevisionID: body.PolicyRevisionID, ScopeType: body.ScopeType,
+					Selector: body.Selector, Priority: body.Priority})
 		case req.Method == http.MethodPut && req.PathValue("binding_id") != "":
 			var body gormrepo.BindingInput
 			if !decodePolicyRequest(w, req, &body) {
