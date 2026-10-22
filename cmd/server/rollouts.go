@@ -30,6 +30,7 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 		var result gormrepo.RolloutView
 		var err error
 		code := http.StatusOK
+		advance := false
 		switch {
 		case req.Method == http.MethodPost && req.URL.Path == "/api/v1/rollouts":
 			var body struct {
@@ -52,6 +53,7 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 				body.ConfigRevisionID, body.InstanceUIDs, body.BatchSize, req.Header.Get("Idempotency-Key"))
 			code = http.StatusAccepted
 		case req.Method == http.MethodPost && req.PathValue("release_id") != "":
+			advance = true
 			result, err = store.AdvanceRollout(req.Context(), principal.WorkspaceID,
 				req.PathValue("release_id"), principal.CredentialID)
 		case req.Method == http.MethodGet && req.PathValue("release_id") != "":
@@ -81,7 +83,7 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 					onPublished(principal.WorkspaceID, uid)
 				}
 			}
-			if result.Status == "PAUSED" {
+			if advance && result.Status == "PAUSED" {
 				code = http.StatusConflict
 			}
 			response(w, code, result)
