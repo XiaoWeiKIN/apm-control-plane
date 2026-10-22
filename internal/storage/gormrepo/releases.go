@@ -119,7 +119,7 @@ func newReleaseUUID() (string, error) {
 }
 
 // PublishAgentConfig creates one frozen target and replaces one Agent's Desired.
-// No OpAMP message is emitted in P2.2; the future Reconciler reads this state.
+// The committed Desired is delivered asynchronously by the existing Reconciler.
 func (s *Store) PublishAgentConfig(ctx context.Context, workspaceID, instanceUID, configRevisionID, requestedBy, idempotencyKey string) (ReleaseResult, error) {
 	// 1. 拒绝非法 Workspace、Agent、Revision 和幂等键，不启动无效事务。
 	if workspaceID == "" || utf8.RuneCountInString(workspaceID) > 96 ||
@@ -150,7 +150,7 @@ func (s *Store) PublishAgentConfig(ctx context.Context, workspaceID, instanceUID
 // Callers must already be inside a transaction; no OpAMP sends occur here.
 func publishAgentConfigTx(tx *gorm.DB, workspaceID, instanceUID, configRevisionID, requestedBy,
 	idempotencyKey, requestHash string, sourcePolicyRevisionID *string, result *ReleaseResult) error {
-	// 2. 锁住目标 Agent；同一实例的发布按提交顺序递增 Generation。
+	// 1. 锁住目标 Agent；同一实例的发布按提交顺序递增 Generation。
 	var agent AgentRecord
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("workspace_id = ? AND instance_uid = ?", workspaceID, instanceUID).
@@ -161,7 +161,7 @@ func publishAgentConfigTx(tx *gorm.DB, workspaceID, instanceUID, configRevisionI
 		return err
 	}
 
-	// 3. 已处理的同一幂等请求直接返回原 Release，不能再次更新 Desired。
+	// 2. 已处理的同一幂等请求直接返回原 Release，不能再次更新 Desired。
 	if idempotencyKey != "" {
 		var previous ConfigReleaseRecord
 		err := tx.Where("workspace_id = ? AND idempotency_key = ?", workspaceID, idempotencyKey).Take(&previous).Error
@@ -181,7 +181,7 @@ func publishAgentConfigTx(tx *gorm.DB, workspaceID, instanceUID, configRevisionI
 		}
 	}
 
-	// 4. 校验目标配置与 Agent 类型/远程配置能力匹配。
+	// 3. 校验目标配置与 Agent 类型/远程配置能力匹配。
 	var revision ConfigRevisionRecord
 	if err := tx.Where("workspace_id = ? AND config_revision_id = ?", workspaceID, configRevisionID).Take(&revision).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -200,7 +200,7 @@ func publishAgentConfigTx(tx *gorm.DB, workspaceID, instanceUID, configRevisionI
 		return ErrUnsupportedReleaseTarget
 	}
 
-	// 5. 读取上次 Assignment，写入同事务的新 Release 与冻结目标。
+	// 4. 读取上次 Assignment，写入同事务的新 Release 与冻结目标。
 	var current AgentAssignmentRecord
 	err := tx.Where("workspace_id = ? AND instance_uid = ?", workspaceID, instanceUID).Take(&current).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -252,7 +252,7 @@ func publishAgentConfigTx(tx *gorm.DB, workspaceID, instanceUID, configRevisionI
 		return err
 	}
 
-	// 6. 更新唯一当前 Desired，并保留先前 Observed 历史，防止旧状态冒认成功。
+	// 5. 更新唯一当前 Desired，并保留先前 Observed 历史，防止旧状态冒认成功。
 	if existing {
 		updates := map[string]any{
 			"release_id": releaseID, "config_revision_id": configRevisionID,
@@ -286,7 +286,7 @@ func publishAgentConfigTx(tx *gorm.DB, workspaceID, instanceUID, configRevisionI
 		}
 	}
 
-	// 7. 审计事件和发布状态同事务提交，失败时不留下半完成发布。
+	// 6. 审计事件和发布状态同事务提交，失败时不留下半完成发布。
 	event := ConfigEventRecord{
 		WorkspaceID: workspaceID, EventID: eventID, EventType: "TARGET_ASSIGNED",
 		ReleaseID: &releaseID, InstanceUID: &instanceUID, DesiredGeneration: &generation,
