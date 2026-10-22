@@ -42,7 +42,7 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			if _, err := store.Observe(ctx, owner, uid, Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",
 				Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
-				Description: &Description{Kind: config.JavaAgentKind, Service: "checkout", Environment: "prod"},
+				Description:  &Description{Kind: config.JavaAgentKind, Service: "checkout", Environment: "prod"},
 			}); err != nil {
 				t.Fatal(err)
 			}

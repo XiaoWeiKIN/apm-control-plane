@@ -177,7 +177,7 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 				t.Fatalf("OpAMP ConfigMap/hash differs from durable policy compilation: %+v %v", remote, err)
 			}
 			applied := &protobufs.RemoteConfigStatus{
-				Status: protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
+				Status:               protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
 				LastRemoteConfigHash: remote.ConfigHash,
 			}
 			send(3, applied)

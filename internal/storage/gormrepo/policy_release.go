@@ -76,8 +76,8 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 		}
 		var document struct {
 			SchemaVersion int `json:"schema_version"`
-			Sampling struct {
-				Type string `json:"type"`
+			Sampling      struct {
+				Type string  `json:"type"`
 				Rate float64 `json:"rate"`
 			} `json:"sampling"`
 		}
@@ -105,7 +105,7 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 		configRevision := ConfigRevisionRecord{
 			WorkspaceID: workspaceID, ConfigRevisionID: configID,
 			SourcePolicyRevisionID: &expectedPolicyRevisionID,
-			AgentKind: snapshot.AgentKind(), ConfigDialect: snapshot.ConfigDialect(),
+			AgentKind:              snapshot.AgentKind(), ConfigDialect: snapshot.ConfigDialect(),
 			PayloadFormat: config.ConfigMapFormat, ConfigMapBytes: data,
 			ConfigHash: hex.EncodeToString(sum[:]), HashAlgorithm: config.HashAlgorithm,
 			PayloadSizeBytes: int64(len(data)), CreatedAt: time.Now().UTC(), CreatedBy: requestedBy,
