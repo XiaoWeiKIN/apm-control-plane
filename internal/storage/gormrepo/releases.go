@@ -137,6 +137,19 @@ func (s *Store) PublishAgentConfig(ctx context.Context, workspaceID, instanceUID
 	var result ReleaseResult
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return publishAgentConfigTx(tx, workspaceID, instanceUID, configRevisionID, requestedBy,
+			idempotencyKey, requestHash, nil, &result)
+	})
+	if err != nil {
+		return ReleaseResult{}, err
+	}
+	return result, nil
+}
+
+// publishAgentConfigTx owns the Release/Target/Assignment/Event transaction body.
+// Callers must already be inside a transaction; no OpAMP sends occur here.
+func publishAgentConfigTx(tx *gorm.DB, workspaceID, instanceUID, configRevisionID, requestedBy,
+	idempotencyKey, requestHash string, sourcePolicyRevisionID *string, result *ReleaseResult) error {
 		// 2. 锁住目标 Agent；同一实例的发布按提交顺序递增 Generation。
 		var agent AgentRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -160,7 +173,7 @@ func (s *Store) PublishAgentConfig(ctx context.Context, workspaceID, instanceUID
 				if err := tx.Where("workspace_id = ? AND release_id = ? AND instance_uid = ?", workspaceID, previous.ReleaseID, instanceUID).Take(&target).Error; err != nil {
 					return err
 				}
-				result = ReleaseResult{workspaceID, previous.ReleaseID, instanceUID, target.ConfigRevisionID, target.DesiredGeneration, target.Status}
+				*result = ReleaseResult{workspaceID, previous.ReleaseID, instanceUID, target.ConfigRevisionID, target.DesiredGeneration, target.Status}
 				return nil
 			}
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -220,6 +233,7 @@ func (s *Store) PublishAgentConfig(ctx context.Context, workspaceID, instanceUID
 		release := ConfigReleaseRecord{
 			WorkspaceID: workspaceID, ReleaseID: releaseID, AgentKind: revision.AgentKind,
 			TargetSelectorJSON: selector, RequestSHA256: requestHash, IdempotencyKey: idem,
+			PolicyRevisionID: sourcePolicyRevisionID,
 			RolloutPlanJSON: `{"batches":1}`, Status: "PENDING", RowVersion: 1,
 			RequestedBy: requestedBy, CreatedAt: now,
 		}
@@ -282,14 +296,10 @@ func (s *Store) PublishAgentConfig(ctx context.Context, workspaceID, instanceUID
 		if err := tx.Create(&event).Error; err != nil {
 			return err
 		}
-		result = ReleaseResult{workspaceID, releaseID, instanceUID, configRevisionID, generation, "PENDING"}
+		*result = ReleaseResult{workspaceID, releaseID, instanceUID, configRevisionID, generation, "PENDING"}
 		return nil
-	})
-	if err != nil {
-		return ReleaseResult{}, err
-	}
-	return result, nil
 }
+
 
 func (s *Store) GetAgentAssignment(ctx context.Context, workspaceID, instanceUID string) (AgentAssignmentRecord, error) {
 	var a AgentAssignmentRecord
