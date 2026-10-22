@@ -244,19 +244,20 @@ func (s *Store) UpdatePolicyBinding(ctx context.Context, workspace, actor, bindi
 
 // ResolveAgentPolicy is read-only. A matched Policy is never silently published as Desired.
 func (s *Store) ResolveAgentPolicy(ctx context.Context, workspace, uid string) (PolicyResolution, error) {
-	return s.resolveAgentPolicy(ctx, workspace, uid, false)
-}
-
-// Publishing locks the selected bindings against concurrent updates. Normal preview is read-only.
-func (s *Store) resolveAgentPolicy(ctx context.Context, workspace, uid string, lockBindings bool) (PolicyResolution, error) {
-	// 1. 可信 Workspace 范围内查找 Agent，Java 以外的 Kind 明确拒绝。
 	agent, err := s.Get(ctx, workspace, uid)
 	if err != nil {
 		return PolicyResolution{}, err
 	}
+	return s.resolveAgentPolicy(ctx, workspace, agent, false)
+}
+
+// Publishing uses the already locked Agent and locks existing Bindings; preview is read-only.
+func (s *Store) resolveAgentPolicy(ctx context.Context, workspace string, agent AgentRecord, lockBindings bool) (PolicyResolution, error) {
+	// 1. 校验 Java 类型，直接使用已读取的 Agent 属性匹配策略。
 	if agent.AgentKind != config.JavaAgentKind {
 		return PolicyResolution{}, ErrUnsupportedReleaseTarget
 	}
+	uid := agent.InstanceUID
 
 	// 2. 一次读取当前有效 Binding 与不可变正文 Hash，再做确定性匹配。
 	type candidate struct {
