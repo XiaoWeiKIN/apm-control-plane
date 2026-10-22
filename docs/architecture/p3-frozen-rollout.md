@@ -43,7 +43,7 @@ sequenceDiagram
 
 - Target 使用 `QUEUED`（尚未激活）、`PENDING`、`WAITING_ACK`、`APPLYING`、`APPLIED`、`FAILED`、`UNSUPPORTED`、`SUPERSEDED` 等值。已有数据库状态列是字符串，无需新 Migration。
 - Release `RUNNING` 表示有未完成目标；只有**所有**冻结 Target 都得到当前 Desired Hash 的 `APPLIED` 才标记 `COMPLETED`。
-- 任一目标 `FAILED`/`UNSUPPORTED`/`TIMED_OUT`，或后续批次发现冻结 Generation 与当前 Agent Assignment 不一致时，整次 Release 转为**粘性 `PAUSED`**，不继续推进。新的单 Agent 发布或 Rollout 若覆盖已激活的旧 Target，会在同一事务中将旧 Target 置为 `SUPERSEDED`、将旧多 Agent Release 置为 `PAUSED` 并记录审计事件，不等待旧 Agent 再次 ACK 或管理端再次 Advance。当前没有原地恢复/重试审批接口；纠正后通过新的受审计 Release 发布。
+- 任一目标 `FAILED`/`UNSUPPORTED`/`TIMED_OUT`，或后续批次发现冻结 Generation 与当前 Agent Assignment 不一致时，整次 Release 转为**粘性 `PAUSED`**，不继续推进。新的单 Agent 发布或 Rollout 若覆盖处于 `RUNNING` 的旧 Rollout 的已激活 Target（包括已 `APPLIED`、但仍有其他目标未完成的情形），会在同一事务中将旧 Target 置为 `SUPERSEDED`、旧多 Agent Release 置为 `PAUSED` 并记录审计事件，不等待旧 Agent 再次 ACK 或管理端再次 Advance。已经 `COMPLETED` 的 Release 保留历史 `APPLIED` 结果。当前没有原地恢复/重试审批接口；纠正后通过新的受审计 Release 发布。
 - 旧 ACK 依然由 P2.3 使用 Hash、Generation、RowVersion CAS 保护，不能使更晚发布误判为 APPLIED。相同 Hash 的报告只证明配置内容，不证明重复应用动作。
 - 手动推进与单 Agent 发布使用同一 Agent 锁顺序；确认冻结 UID 列表后锁定 Agent，再对 Release 使用 CAS。数据写入与网络发送分离，事务成功后才以可丢失通知唤醒在线 WS，HTTP 在下次 Polling 时读取 Desired。
 - 重启后从 Release/Targets/Assignments 读取进度；未激活的批次不需要进程内调度队列。重复 Advance 在未收敛时返回 409；Completed 再次 Advance 返回 Completed 快照，不产生新的 Assignment。GET 对 `PAUSED` 仍返回 HTTP 200；同 Key 的 POST 幂等重试仍返回 HTTP 202，不再次激活；Advance 返回 409。
