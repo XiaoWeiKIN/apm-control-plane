@@ -269,10 +269,7 @@ func publishAgentConfigTx(tx *gorm.DB, workspaceID, instanceUID, configRevisionI
 		if r.RowsAffected != 1 {
 			return ErrAssignmentConflict
 		}
-		if err := tx.Model(&ReleaseTargetRecord{}).
-			Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND status IN ?",
-				workspaceID, current.ReleaseID, instanceUID, []string{"PENDING", "WAITING_ACK"}).
-			Updates(map[string]any{"status": "SUPERSEDED", "updated_at": now}).Error; err != nil {
+		if err := supersedePreviousTargetTx(tx, current, requestedBy, now); err != nil {
 			return err
 		}
 	} else {
