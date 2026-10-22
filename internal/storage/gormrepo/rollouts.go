@@ -212,7 +212,7 @@ func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID s
 			if current != nil {
 				generation = current.DesiredGeneration + 1
 			}
-			if err := rolloutAssignTx(tx, workspace, uid, id, configID, revision.ConfigHash, generation, current, now); err != nil {
+			if err := rolloutAssignTx(tx, workspace, uid, id, configID, revision.ConfigHash, generation, current, actor, now); err != nil {
 				return err
 			}
 			if err := rolloutEventTx(tx, workspace, id, uid, generation, "TARGET_ASSIGNED", actor, now); err != nil {
@@ -400,7 +400,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 				return ErrAssignmentConflict
 			}
 			if err := rolloutAssignTx(tx, workspace, target.InstanceUID, releaseID, target.ConfigRevisionID,
-				revision.ConfigHash, target.DesiredGeneration, current[target.InstanceUID], now); err != nil {
+				revision.ConfigHash, target.DesiredGeneration, current[target.InstanceUID], actor, now); err != nil {
 				return err
 			}
 			if err := rolloutEventTx(tx, workspace, releaseID, target.InstanceUID,
@@ -425,7 +425,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 }
 
 func rolloutAssignTx(tx *gorm.DB, workspace, uid, releaseID, configID, hash string,
-	generation int64, current *AgentAssignmentRecord, now time.Time) error {
+	generation int64, current *AgentAssignmentRecord, actor string, now time.Time) error {
 	if current == nil {
 		return tx.Create(&AgentAssignmentRecord{
 			WorkspaceID: workspace, InstanceUID: uid, ReleaseID: releaseID, ConfigRevisionID: configID,
@@ -448,10 +448,42 @@ func rolloutAssignTx(tx *gorm.DB, workspace, uid, releaseID, configID, hash stri
 	if r.RowsAffected != 1 {
 		return ErrAssignmentConflict
 	}
-	return tx.Model(&ReleaseTargetRecord{}).
+	return supersedePreviousTargetTx(tx, *current, actor, now)
+}
+
+// supersedePreviousTargetTx stops the old multi-Agent rollout as soon as an
+// active Target loses its Desired, rather than waiting for another ACK/Advance.
+func supersedePreviousTargetTx(tx *gorm.DB, current AgentAssignmentRecord, actor string, now time.Time) error {
+	r := tx.Model(&ReleaseTargetRecord{}).
 		Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND status IN ?",
-			workspace, current.ReleaseID, uid, []string{"PENDING", "WAITING_ACK", "APPLYING"}).
-		Updates(map[string]any{"status": "SUPERSEDED", "updated_at": now}).Error
+			current.WorkspaceID, current.ReleaseID, current.InstanceUID,
+			[]string{"PENDING", "WAITING_ACK", "APPLYING"}).
+		Updates(map[string]any{"status": "SUPERSEDED", "updated_at": now})
+	if r.Error != nil {
+		return r.Error
+	}
+	if r.RowsAffected == 0 {
+		return nil
+	}
+
+	var previous ConfigReleaseRecord
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("workspace_id = ? AND release_id = ?", current.WorkspaceID, current.ReleaseID).
+		Take(&previous).Error; err != nil {
+		return err
+	}
+	var plan rolloutPlan
+	if err := json.Unmarshal([]byte(previous.RolloutPlanJSON), &plan); err != nil {
+		return err
+	}
+	if plan.BatchSize == 0 || previous.Status != "RUNNING" {
+		return nil
+	}
+	if err := rolloutStateTx(tx, previous, "PAUSED", now); err != nil {
+		return err
+	}
+	return rolloutEventTx(tx, current.WorkspaceID, current.ReleaseID, current.InstanceUID,
+		current.DesiredGeneration, "ROLLOUT_PAUSED", actor, now)
 }
 
 func rolloutEventTx(tx *gorm.DB, workspace, releaseID, uid string, generation int64,
