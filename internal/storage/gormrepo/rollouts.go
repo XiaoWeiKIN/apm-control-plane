@@ -454,18 +454,21 @@ func rolloutAssignTx(tx *gorm.DB, workspace, uid, releaseID, configID, hash stri
 // supersedePreviousTargetTx stops the old multi-Agent rollout as soon as an
 // active Target loses its Desired, rather than waiting for another ACK/Advance.
 func supersedePreviousTargetTx(tx *gorm.DB, current AgentAssignmentRecord, actor string, now time.Time) error {
-	r := tx.Model(&ReleaseTargetRecord{}).
-		Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND status IN ?",
-			current.WorkspaceID, current.ReleaseID, current.InstanceUID,
-			[]string{"PENDING", "WAITING_ACK", "APPLYING"}).
-		Updates(map[string]any{"status": "SUPERSEDED", "updated_at": now})
-	if r.Error != nil {
-		return r.Error
+	// 1. 锁定旧 Target，避免与同一 Agent 的状态回执交错。
+	var target ReleaseTargetRecord
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("workspace_id = ? AND release_id = ? AND instance_uid = ?",
+			current.WorkspaceID, current.ReleaseID, current.InstanceUID).
+		Take(&target).Error; err != nil {
+		return err
 	}
-	if r.RowsAffected == 0 {
+	switch target.Status {
+	case "PENDING", "WAITING_ACK", "APPLYING", "APPLIED":
+	default:
 		return nil
 	}
 
+	// 2. 已完成的历史发布保留 APPLIED；未完成的多 Agent 发布立即暂停。
 	var previous ConfigReleaseRecord
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("workspace_id = ? AND release_id = ?", current.WorkspaceID, current.ReleaseID).
@@ -475,6 +478,19 @@ func supersedePreviousTargetTx(tx *gorm.DB, current AgentAssignmentRecord, actor
 	var plan rolloutPlan
 	if err := json.Unmarshal([]byte(previous.RolloutPlanJSON), &plan); err != nil {
 		return err
+	}
+	if target.Status == "APPLIED" && (plan.BatchSize == 0 || previous.Status != "RUNNING") {
+		return nil
+	}
+	r := tx.Model(&ReleaseTargetRecord{}).
+		Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND status = ?",
+			current.WorkspaceID, current.ReleaseID, current.InstanceUID, target.Status).
+		Updates(map[string]any{"status": "SUPERSEDED", "updated_at": now})
+	if r.Error != nil {
+		return r.Error
+	}
+	if r.RowsAffected != 1 {
+		return ErrAssignmentConflict
 	}
 	if plan.BatchSize == 0 || previous.Status != "RUNNING" {
 		return nil
