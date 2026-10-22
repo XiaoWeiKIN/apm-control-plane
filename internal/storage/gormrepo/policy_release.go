@@ -12,6 +12,7 @@ import (
 
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/config"
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/policy"
+	"github.com/open-telemetry/opamp-go/protobufs"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -66,7 +67,13 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 			}
 		}
 
-		// 3. 按当前 Binding 重新解析目标并校验期望 Revision，拒绝静默发布其他版本。
+		// 3. 提前拒绝不具备 Java RemoteConfig 能力的 Agent，再解析策略与编译内容。
+		if agent.AgentKind != config.JavaAgentKind ||
+			uint64(agent.Capabilities)&uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig) == 0 {
+			return ErrUnsupportedReleaseTarget
+		}
+
+		// 4. 按当前 Binding 重新解析目标并校验期望 Revision，拒绝静默发布其他版本。
 		resolved, err := (&Store{db: tx}).ResolveAgentPolicy(ctx, workspaceID, instanceUID)
 		if err != nil {
 			return err
@@ -95,7 +102,7 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 			return policy.ErrInvalid
 		}
 
-		// 4. 同一事务保存完整不可变 ConfigMap 和 Policy 来源，不留下失败发布的孤立 Revision。
+		// 5. 同一事务保存完整不可变 ConfigMap 和 Policy 来源，不留下失败发布的孤立 Revision。
 		configID, err := newReleaseUUID()
 		if err != nil {
 			return err
@@ -114,7 +121,7 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 			return err
 		}
 
-		// 5. 复用 P2.2 的 Release/Target/Assignment/Event 原子事务，提交后由 Gateway 唤醒。
+		// 6. 复用 P2.2 的 Release/Target/Assignment/Event 原子事务，提交后由 Gateway 唤醒。
 		return publishAgentConfigTx(tx, workspaceID, instanceUID, configID, requestedBy,
 			idempotencyKey, requestHash, &expectedPolicyRevisionID, &result)
 	})
