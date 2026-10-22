@@ -72,6 +72,23 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 				t.Fatalf("rejected request created ConfigRevision: %d %v", count, err)
 			}
 
+			// 缺少 RemoteConfig Capability 时提前失败，不插入孤立 ConfigRevision。
+			unsupportedUID := newUID(t)
+			if _, err := store.Observe(ctx, owner, unsupportedUID, Observation{
+				SeenAt: time.Now().UTC(), Transport: "http",
+				Capabilities: 0,
+				Description: &Description{Kind: config.JavaAgentKind, Service: "checkout", Environment: "prod"},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.PublishAgentPolicy(ctx, workspace, unsupportedUID,
+				revision.PolicyRevisionID, "admin", ""); !errors.Is(err, ErrUnsupportedReleaseTarget) {
+				t.Fatalf("Agent without RemoteConfig capability accepted: %v", err)
+			}
+			if err := store.db.Model(&ConfigRevisionRecord{}).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 0 {
+				t.Fatalf("unsupported Agent left ConfigRevision: %d %v", count, err)
+			}
+
 			// 2. 事务提交后，ConfigRevision/Release/Target/Assignment/Event 必须保持相同来源。
 			key := "p25-" + uid[:16]
 			first, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID, "admin", key)
