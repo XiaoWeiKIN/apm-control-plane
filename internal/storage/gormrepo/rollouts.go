@@ -233,6 +233,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 
 		// 3. 已启动批次必须全部 APPLIED；失败或被替代时禁止继续扩散。
 		nextBatch := -1
+		blocked := ""
 		for _, target := range frozen {
 			if target.Status == "QUEUED" {
 				if nextBatch < 0 { nextBatch = target.BatchNo }
@@ -240,9 +241,18 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 			}
 			if target.Status == "FAILED" || target.Status == "UNSUPPORTED" ||
 				target.Status == "TIMED_OUT" || target.Status == "SUPERSEDED" {
-				return ErrRolloutBlocked
+				blocked = target.InstanceUID
+				break
 			}
 			if target.Status != "APPLIED" { return ErrRolloutNotReady }
+		}
+		if blocked != "" {
+			now := time.Now().UTC()
+			if err := rolloutStateTx(tx, release, "PAUSED", now); err != nil { return err }
+			if err := rolloutEventTx(tx, workspace, releaseID, blocked, 0, "ROLLOUT_PAUSED", actor, now); err != nil { return err }
+			result, err = rolloutViewTx(tx, release)
+			if err == nil { result.Status = "PAUSED"; result.RowVersion++ }
+			return err
 		}
 		if nextBatch < 0 { return ErrRolloutNotReady }
 		var next []ReleaseTargetRecord
