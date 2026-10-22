@@ -201,6 +201,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 	if len(frozen) == 0 { return RolloutView{}, ErrRolloutNotFound }
 	var result RolloutView
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
 		// 2. 按 UID 顺序锁住所有冻结 Agent，再读取 Release 和最新 Target 状态。
 		agents := make(map[string]AgentRecord, len(frozen))
 		for _, target := range frozen {
@@ -263,7 +264,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 		if err := tx.Where("workspace_id = ? AND config_revision_id = ?", workspace, next[0].ConfigRevisionID).
 			Take(&revision).Error; err != nil { return err }
 		current := make(map[string]*AgentAssignmentRecord, len(next))
-		blocked := ""
+		blocked = ""
 		blockedStatus := ""
 		for _, target := range next {
 			agent := agents[target.InstanceUID]
