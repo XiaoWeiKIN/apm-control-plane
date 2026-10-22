@@ -33,9 +33,9 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 		switch {
 		case req.Method == http.MethodPost && req.URL.Path == "/api/v1/rollouts":
 			var body struct {
-				ConfigRevisionID string `json:"config_revision_id"`
-				InstanceUIDs []string `json:"instance_uids"`
-				BatchSize int `json:"batch_size"`
+				ConfigRevisionID string   `json:"config_revision_id"`
+				InstanceUIDs     []string `json:"instance_uids"`
+				BatchSize        int      `json:"batch_size"`
 			}
 			decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, 4<<10))
 			decoder.DisallowUnknownFields()
@@ -77,9 +77,13 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 			http.Error(w, "storage unavailable", http.StatusServiceUnavailable)
 		default:
 			if onPublished != nil {
-				for _, uid := range result.Activated { onPublished(principal.WorkspaceID, uid) }
+				for _, uid := range result.Activated {
+					onPublished(principal.WorkspaceID, uid)
+				}
 			}
-			if result.Status == "PAUSED" { code = http.StatusConflict }
+			if result.Status == "PAUSED" {
+				code = http.StatusConflict
+			}
 			response(w, code, result)
 		}
 	})

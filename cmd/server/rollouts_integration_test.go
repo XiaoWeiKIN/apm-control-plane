@@ -28,37 +28,51 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 	} {
 		t.Run(tt.driver, func(t *testing.T) {
 			dsn := os.Getenv(tt.env)
-			if dsn == "" { t.Skip(tt.env + " not configured") }
+			if dsn == "" {
+				t.Skip(tt.env + " not configured")
+			}
 			ctx := context.Background()
 			store, err := gormrepo.Open(ctx, appconfig.Database{
 				Driver: tt.driver, DSN: dsn, MaxOpen: 8, MaxIdle: 2, MaxLifetime: time.Minute,
 			})
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer store.Close()
 			workspace := "p3-rollout-http"
 			owner := auth.Principal{WorkspaceID: workspace, CredentialID: "java-owner"}
 			uids := make([]string, 3)
 			for i := range uids {
 				raw := make([]byte, 16)
-				if _, err := rand.Read(raw); err != nil { t.Fatal(err) }
+				if _, err := rand.Read(raw); err != nil {
+					t.Fatal(err)
+				}
 				uids[i] = hex.EncodeToString(raw)
 				if _, err := store.Observe(ctx, owner, uids[i], gormrepo.Observation{
 					SeenAt: time.Now().UTC(), Transport: "http",
 					Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
-					Description: &gormrepo.Description{Kind: config.JavaAgentKind},
-				}); err != nil { t.Fatal(err) }
+					Description:  &gormrepo.Description{Kind: config.JavaAgentKind},
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			snapshot, err := config.CompileJavaSampling(0.5)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			revision, err := store.CreateConfigRevision(ctx, workspace, "admin", snapshot)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			creds := auth.New([]appconfig.Credential{
 				{ID: "admin", WorkspaceID: workspace, Token: "rollout-admin-a-long"},
 				{ID: "other", WorkspaceID: "p3-other", Token: "rollout-admin-b-long"},
 			})
 			var waked []string
 			h := adminRolloutHandler(store, creds, func(ws, uid string) {
-				if ws != workspace { t.Errorf("cross Workspace notification: %s", ws) }
+				if ws != workspace {
+					t.Errorf("cross Workspace notification: %s", ws)
+				}
 				waked = append(waked, uid)
 			})
 			mux := http.NewServeMux()
@@ -70,24 +84,34 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 			call := func(method, path, token, payload string, status int) gormrepo.RolloutView {
 				t.Helper()
 				req, err := http.NewRequest(method, server.URL+path, bytes.NewBufferString(payload))
-				if err != nil { t.Fatal(err) }
-				if token != "" { req.Header.Set("Authorization", "Bearer "+token) }
+				if err != nil {
+					t.Fatal(err)
+				}
+				if token != "" {
+					req.Header.Set("Authorization", "Bearer "+token)
+				}
 				resp, err := server.Client().Do(req)
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 				defer resp.Body.Close()
 				if resp.StatusCode != status {
 					t.Fatalf("%s %s HTTP %d, want %d", method, path, resp.StatusCode, status)
 				}
 				var view gormrepo.RolloutView
 				if resp.StatusCode == 200 || resp.StatusCode == 202 {
-					if err := json.NewDecoder(resp.Body).Decode(&view); err != nil { t.Fatal(err) }
+					if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
+						t.Fatal(err)
+					}
 				}
 				return view
 			}
 			command, err := json.Marshal(map[string]any{
 				"config_revision_id": revision.ConfigRevisionID, "instance_uids": uids, "batch_size": 1,
 			})
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			call("POST", "/api/v1/rollouts", "", string(command), 401)
 			call("POST", "/api/v1/rollouts", "rollout-admin-b-long", string(command), 404)
 			call("POST", "/api/v1/rollouts", "rollout-admin-a-long", `{"batch_size":1,"unexpected":true}`, 400)
@@ -102,7 +126,9 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 				view := call("GET", "/api/v1/rollouts/"+id, "rollout-admin-a-long", "", 200)
 				target := view.Targets[batch]
 				offered, _, err := store.ReconcileAgentConfig(ctx, workspace, target.InstanceUID, nil, true)
-				if err != nil || offered == nil { t.Fatalf("batch %d not offered: %v", batch, err) }
+				if err != nil || offered == nil {
+					t.Fatalf("batch %d not offered: %v", batch, err)
+				}
 				if _, _, err := store.ReconcileAgentConfig(ctx, workspace, target.InstanceUID,
 					&gormrepo.ConfigStatus{Hash: offered.ConfigHash, Status: "APPLIED"}, false); err != nil {
 					t.Fatal(err)

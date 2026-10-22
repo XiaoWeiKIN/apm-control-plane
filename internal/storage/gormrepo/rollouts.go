@@ -18,38 +18,40 @@ import (
 )
 
 var (
-	ErrInvalidRollout = errors.New("invalid rollout request")
+	ErrInvalidRollout  = errors.New("invalid rollout request")
 	ErrRolloutNotFound = errors.New("release not found")
 	ErrRolloutNotReady = errors.New("current rollout batch is not applied")
-	ErrRolloutBlocked = errors.New("rollout is paused or blocked")
+	ErrRolloutBlocked  = errors.New("rollout is paused or blocked")
 )
 
 const maxRolloutTargets = 16
 
 type RolloutTarget struct {
-	InstanceUID string `json:"instance_uid"`
-	ConfigRevisionID string `json:"config_revision_id"`
-	BatchNo int `json:"batch_no"`
-	Status string `json:"status"`
-	DesiredGeneration int64 `json:"desired_generation"`
+	InstanceUID       string `json:"instance_uid"`
+	ConfigRevisionID  string `json:"config_revision_id"`
+	BatchNo           int    `json:"batch_no"`
+	Status            string `json:"status"`
+	DesiredGeneration int64  `json:"desired_generation"`
 }
 
 type RolloutView struct {
-	WorkspaceID string `json:"workspace_id"`
-	ReleaseID string `json:"release_id"`
-	Status string `json:"status"`
-	RowVersion int64 `json:"row_version"`
-	Targets []RolloutTarget `json:"targets"`
-	Activated []string `json:"activated,omitempty"`
+	WorkspaceID string          `json:"workspace_id"`
+	ReleaseID   string          `json:"release_id"`
+	Status      string          `json:"status"`
+	RowVersion  int64           `json:"row_version"`
+	Targets     []RolloutTarget `json:"targets"`
+	Activated   []string        `json:"activated,omitempty"`
 }
 
 type rolloutPlan struct {
 	BatchSize int `json:"batch_size"`
-	Batches int `json:"batches"`
+	Batches   int `json:"batches"`
 }
 
 func validRolloutUID(uid string) bool {
-	if len(uid) != 32 { return false }
+	if len(uid) != 32 {
+		return false
+	}
 	raw, err := hex.DecodeString(uid)
 	return err == nil && len(raw) == 16 && hex.EncodeToString(raw) == uid
 }
@@ -71,15 +73,17 @@ func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID s
 			return RolloutView{}, ErrInvalidRollout
 		}
 	}
-	plan := rolloutPlan{BatchSize: batchSize, Batches: (len(targets)+batchSize-1)/batchSize}
+	plan := rolloutPlan{BatchSize: batchSize, Batches: (len(targets) + batchSize - 1) / batchSize}
 	request, err := json.Marshal(struct {
-		Kind string `json:"kind"`
-		ConfigRevisionID string `json:"config_revision_id"`
-		InstanceUIDs []string `json:"instance_uids"`
-		BatchSize int `json:"batch_size"`
-		Actor string `json:"actor"`
+		Kind             string   `json:"kind"`
+		ConfigRevisionID string   `json:"config_revision_id"`
+		InstanceUIDs     []string `json:"instance_uids"`
+		BatchSize        int      `json:"batch_size"`
+		Actor            string   `json:"actor"`
 	}{"batch-rollout", configID, targets, batchSize, actor})
-	if err != nil { return RolloutView{}, err }
+	if err != nil {
+		return RolloutView{}, err
+	}
 	sum := sha256.Sum256(request)
 	requestHash := hex.EncodeToString(sum[:])
 	var result RolloutView
@@ -92,7 +96,9 @@ func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID s
 			var agent AgentRecord
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 				Where("workspace_id = ? AND instance_uid = ?", workspace, uid).Take(&agent).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) { return ErrNotFound }
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrNotFound
+				}
 				return err
 			}
 			agents[uid] = agent
@@ -101,16 +107,22 @@ func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID s
 			var previous ConfigReleaseRecord
 			err := tx.Where("workspace_id = ? AND idempotency_key = ?", workspace, key).Take(&previous).Error
 			if err == nil {
-				if previous.RequestSHA256 != requestHash { return ErrReleaseConflict }
+				if previous.RequestSHA256 != requestHash {
+					return ErrReleaseConflict
+				}
 				result, err = rolloutViewTx(tx, previous)
 				return err
 			}
-			if !errors.Is(err, gorm.ErrRecordNotFound) { return err }
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
 		}
 		var revision ConfigRevisionRecord
 		if err := tx.Where("workspace_id = ? AND config_revision_id = ?", workspace, configID).
 			Take(&revision).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) { return ErrConfigRevisionNotFound }
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrConfigRevisionNotFound
+			}
 			return err
 		}
 		if revision.AgentKind != config.JavaAgentKind || revision.ConfigDialect != config.JavaSamplingDialect ||
@@ -127,7 +139,9 @@ func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID s
 			}
 			var current AgentAssignmentRecord
 			err := tx.Where("workspace_id = ? AND instance_uid = ?", workspace, uid).Take(&current).Error
-			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { return err }
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
 			if err == nil {
 				if current.DesiredGeneration == math.MaxInt64 || current.RowVersion == math.MaxInt64 {
 					return ErrAssignmentConflict
@@ -138,16 +152,24 @@ func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID s
 
 		// 3. 同事务冻结全部目标的 ConfigRevision、BatchNo 和预期 Generation。
 		id, err := newReleaseUUID()
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		now := time.Now().UTC()
-		selector, err := json.Marshal(struct{
+		selector, err := json.Marshal(struct {
 			InstanceUIDs []string `json:"instance_uids"`
 		}{targets})
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		rolloutJSON, err := json.Marshal(plan)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		var idem *string
-		if key != "" { idem = &key }
+		if key != "" {
+			idem = &key
+		}
 		release := ConfigReleaseRecord{
 			WorkspaceID: workspace, ReleaseID: id, AgentKind: revision.AgentKind,
 			TargetSelectorJSON: string(selector), RequestSHA256: requestHash,
@@ -156,33 +178,51 @@ func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID s
 			CreatedAt: now, StartedAt: &now,
 		}
 		if err := tx.Create(&release).Error; err != nil {
-			if key != "" && errors.Is(err, gorm.ErrDuplicatedKey) { return ErrReleaseConflict }
+			if key != "" && errors.Is(err, gorm.ErrDuplicatedKey) {
+				return ErrReleaseConflict
+			}
 			return err
 		}
 		for i, uid := range targets {
 			generation := int64(1)
-			if current := assignments[uid]; current != nil { generation = current.DesiredGeneration + 1 }
+			if current := assignments[uid]; current != nil {
+				generation = current.DesiredGeneration + 1
+			}
 			status := "QUEUED"
-			if i < batchSize { status = "PENDING" }
+			if i < batchSize {
+				status = "PENDING"
+			}
 			target := ReleaseTargetRecord{
 				WorkspaceID: workspace, ReleaseID: id, InstanceUID: uid,
-				ConfigRevisionID: configID, BatchNo: i/batchSize, Status: status,
+				ConfigRevisionID: configID, BatchNo: i / batchSize, Status: status,
 				DesiredGeneration: generation, LastError: "", CreatedAt: now, UpdatedAt: now,
 			}
-			if err := tx.Create(&target).Error; err != nil { return err }
-			if err := rolloutEventTx(tx, workspace, id, uid, generation, "TARGET_FROZEN", actor, now); err != nil { return err }
+			if err := tx.Create(&target).Error; err != nil {
+				return err
+			}
+			if err := rolloutEventTx(tx, workspace, id, uid, generation, "TARGET_FROZEN", actor, now); err != nil {
+				return err
+			}
 		}
 
 		// 4. 只对首批提交 Desired；未激活目标保留原 Assignment，等待显式 Advance。
 		for _, uid := range targets[:batchSize] {
 			current := assignments[uid]
 			generation := int64(1)
-			if current != nil { generation = current.DesiredGeneration + 1 }
-			if err := rolloutAssignTx(tx, workspace, uid, id, configID, revision.ConfigHash, generation, current, now); err != nil { return err }
-			if err := rolloutEventTx(tx, workspace, id, uid, generation, "TARGET_ASSIGNED", actor, now); err != nil { return err }
+			if current != nil {
+				generation = current.DesiredGeneration + 1
+			}
+			if err := rolloutAssignTx(tx, workspace, uid, id, configID, revision.ConfigHash, generation, current, now); err != nil {
+				return err
+			}
+			if err := rolloutEventTx(tx, workspace, id, uid, generation, "TARGET_ASSIGNED", actor, now); err != nil {
+				return err
+			}
 		}
 		result, err = rolloutViewTx(tx, release)
-		if err == nil { result.Activated = slices.Clone(targets[:batchSize]) }
+		if err == nil {
+			result.Activated = slices.Clone(targets[:batchSize])
+		}
 		return err
 	})
 	return result, err
@@ -197,8 +237,12 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 	// 1. 不可变目标列表在事务外读取，避免 MySQL RR 创建过早的读快照。
 	var frozen []ReleaseTargetRecord
 	if err := s.db.WithContext(ctx).Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
-		Order("instance_uid").Find(&frozen).Error; err != nil { return RolloutView{}, err }
-	if len(frozen) == 0 { return RolloutView{}, ErrRolloutNotFound }
+		Order("instance_uid").Find(&frozen).Error; err != nil {
+		return RolloutView{}, err
+	}
+	if len(frozen) == 0 {
+		return RolloutView{}, ErrRolloutNotFound
+	}
 	var result RolloutView
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
@@ -208,36 +252,48 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 			var agent AgentRecord
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 				Where("workspace_id = ? AND instance_uid = ?", workspace, target.InstanceUID).
-				Take(&agent).Error; err != nil { return err }
+				Take(&agent).Error; err != nil {
+				return err
+			}
 			agents[target.InstanceUID] = agent
 		}
 		var release ConfigReleaseRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
 			Take(&release).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) { return ErrRolloutNotFound }
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrRolloutNotFound
+			}
 			return err
 		}
 		var plan rolloutPlan
 		if err := json.Unmarshal([]byte(release.RolloutPlanJSON), &plan); err != nil || plan.BatchSize < 1 {
 			return ErrInvalidRollout
 		}
-		if release.Status == "PAUSED" { return ErrRolloutBlocked }
+		if release.Status == "PAUSED" {
+			return ErrRolloutBlocked
+		}
 		if release.Status == "COMPLETED" {
 			var err error
 			result, err = rolloutViewTx(tx, release)
 			return err
 		}
-		if release.Status != "RUNNING" { return ErrRolloutBlocked }
+		if release.Status != "RUNNING" {
+			return ErrRolloutBlocked
+		}
 		if err := tx.Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
-			Order("batch_no, instance_uid").Find(&frozen).Error; err != nil { return err }
+			Order("batch_no, instance_uid").Find(&frozen).Error; err != nil {
+			return err
+		}
 
 		// 3. 已启动批次必须全部 APPLIED；失败或被替代时禁止继续扩散。
 		nextBatch := -1
 		blocked := ""
 		for _, target := range frozen {
 			if target.Status == "QUEUED" {
-				if nextBatch < 0 { nextBatch = target.BatchNo }
+				if nextBatch < 0 {
+					nextBatch = target.BatchNo
+				}
 				continue
 			}
 			if target.Status == "FAILED" || target.Status == "UNSUPPORTED" ||
@@ -245,24 +301,39 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 				blocked = target.InstanceUID
 				break
 			}
-			if target.Status != "APPLIED" { return ErrRolloutNotReady }
+			if target.Status != "APPLIED" {
+				return ErrRolloutNotReady
+			}
 		}
 		if blocked != "" {
 			now := time.Now().UTC()
-			if err := rolloutStateTx(tx, release, "PAUSED", now); err != nil { return err }
-			if err := rolloutEventTx(tx, workspace, releaseID, blocked, 0, "ROLLOUT_PAUSED", actor, now); err != nil { return err }
+			if err := rolloutStateTx(tx, release, "PAUSED", now); err != nil {
+				return err
+			}
+			if err := rolloutEventTx(tx, workspace, releaseID, blocked, 0, "ROLLOUT_PAUSED", actor, now); err != nil {
+				return err
+			}
 			result, err = rolloutViewTx(tx, release)
-			if err == nil { result.Status = "PAUSED"; result.RowVersion++ }
+			if err == nil {
+				result.Status = "PAUSED"
+				result.RowVersion++
+			}
 			return err
 		}
-		if nextBatch < 0 { return ErrRolloutNotReady }
+		if nextBatch < 0 {
+			return ErrRolloutNotReady
+		}
 		var next []ReleaseTargetRecord
 		for _, target := range frozen {
-			if target.BatchNo == nextBatch { next = append(next, target) }
+			if target.BatchNo == nextBatch {
+				next = append(next, target)
+			}
 		}
 		var revision ConfigRevisionRecord
 		if err := tx.Where("workspace_id = ? AND config_revision_id = ?", workspace, next[0].ConfigRevisionID).
-			Take(&revision).Error; err != nil { return err }
+			Take(&revision).Error; err != nil {
+			return err
+		}
 		current := make(map[string]*AgentAssignmentRecord, len(next))
 		blocked = ""
 		blockedStatus := ""
@@ -277,10 +348,14 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 			var assignment AgentAssignmentRecord
 			err := tx.Where("workspace_id = ? AND instance_uid = ?", workspace, target.InstanceUID).
 				Take(&assignment).Error
-			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { return err }
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
 			generation := int64(1)
 			if err == nil {
-				if assignment.DesiredGeneration == math.MaxInt64 || assignment.RowVersion == math.MaxInt64 { return ErrAssignmentConflict }
+				if assignment.DesiredGeneration == math.MaxInt64 || assignment.RowVersion == math.MaxInt64 {
+					return ErrAssignmentConflict
+				}
 				generation = assignment.DesiredGeneration + 1
 				current[target.InstanceUID] = &assignment
 			}
@@ -295,11 +370,20 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 			if err := tx.Model(&ReleaseTargetRecord{}).
 				Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND status = 'QUEUED'",
 					workspace, releaseID, blocked).
-				Updates(map[string]any{"status": blockedStatus, "updated_at": now}).Error; err != nil { return err }
-			if err := rolloutStateTx(tx, release, "PAUSED", now); err != nil { return err }
-			if err := rolloutEventTx(tx, workspace, releaseID, blocked, 0, "ROLLOUT_PAUSED", actor, now); err != nil { return err }
+				Updates(map[string]any{"status": blockedStatus, "updated_at": now}).Error; err != nil {
+				return err
+			}
+			if err := rolloutStateTx(tx, release, "PAUSED", now); err != nil {
+				return err
+			}
+			if err := rolloutEventTx(tx, workspace, releaseID, blocked, 0, "ROLLOUT_PAUSED", actor, now); err != nil {
+				return err
+			}
 			result, err = rolloutViewTx(tx, release)
-			if err == nil { result.Status = "PAUSED"; result.RowVersion++ }
+			if err == nil {
+				result.Status = "PAUSED"
+				result.RowVersion++
+			}
 			return err
 		}
 
@@ -309,17 +393,31 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 				Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND status = 'QUEUED'",
 					workspace, releaseID, target.InstanceUID).
 				Updates(map[string]any{"status": "PENDING", "updated_at": now})
-			if r.Error != nil { return r.Error }
-			if r.RowsAffected != 1 { return ErrAssignmentConflict }
+			if r.Error != nil {
+				return r.Error
+			}
+			if r.RowsAffected != 1 {
+				return ErrAssignmentConflict
+			}
 			if err := rolloutAssignTx(tx, workspace, target.InstanceUID, releaseID, target.ConfigRevisionID,
-				revision.ConfigHash, target.DesiredGeneration, current[target.InstanceUID], now); err != nil { return err }
+				revision.ConfigHash, target.DesiredGeneration, current[target.InstanceUID], now); err != nil {
+				return err
+			}
 			if err := rolloutEventTx(tx, workspace, releaseID, target.InstanceUID,
-				target.DesiredGeneration, "TARGET_ASSIGNED", actor, now); err != nil { return err }
+				target.DesiredGeneration, "TARGET_ASSIGNED", actor, now); err != nil {
+				return err
+			}
 		}
-		if err := rolloutStateTx(tx, release, "RUNNING", now); err != nil { return err }
+		if err := rolloutStateTx(tx, release, "RUNNING", now); err != nil {
+			return err
+		}
 		result, err = rolloutViewTx(tx, release)
-		if err != nil { return err }
-		for _, target := range next { result.Activated = append(result.Activated, target.InstanceUID) }
+		if err != nil {
+			return err
+		}
+		for _, target := range next {
+			result.Activated = append(result.Activated, target.InstanceUID)
+		}
 		result.RowVersion++
 		return nil
 	})
@@ -340,12 +438,16 @@ func rolloutAssignTx(tx *gorm.DB, workspace, uid, releaseID, configID, hash stri
 			workspace, uid, current.DesiredGeneration, current.RowVersion).
 		Updates(map[string]any{
 			"release_id": releaseID, "config_revision_id": configID, "desired_hash": hash,
-			"desired_generation": generation, "row_version": current.RowVersion+1,
+			"desired_generation": generation, "row_version": current.RowVersion + 1,
 			"state": "PENDING", "attempt_count": 0, "last_sent_at": nil,
 			"next_retry_at": nil, "last_error": "", "updated_at": now,
 		})
-	if r.Error != nil { return r.Error }
-	if r.RowsAffected != 1 { return ErrAssignmentConflict }
+	if r.Error != nil {
+		return r.Error
+	}
+	if r.RowsAffected != 1 {
+		return ErrAssignmentConflict
+	}
 	return tx.Model(&ReleaseTargetRecord{}).
 		Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND status IN ?",
 			workspace, current.ReleaseID, uid, []string{"PENDING", "WAITING_ACK", "APPLYING"}).
@@ -355,9 +457,13 @@ func rolloutAssignTx(tx *gorm.DB, workspace, uid, releaseID, configID, hash stri
 func rolloutEventTx(tx *gorm.DB, workspace, releaseID, uid string, generation int64,
 	eventType, actor string, now time.Time) error {
 	id, err := newReleaseUUID()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	var gen *int64
-	if generation > 0 { gen = &generation }
+	if generation > 0 {
+		gen = &generation
+	}
 	return tx.Create(&ConfigEventRecord{
 		WorkspaceID: workspace, EventID: id, ReleaseID: &releaseID, InstanceUID: &uid,
 		DesiredGeneration: gen, EventType: eventType, ActorType: "ADMIN",
@@ -366,14 +472,22 @@ func rolloutEventTx(tx *gorm.DB, workspace, releaseID, uid string, generation in
 }
 
 func rolloutStateTx(tx *gorm.DB, release ConfigReleaseRecord, status string, now time.Time) error {
-	if release.RowVersion == math.MaxInt64 { return ErrAssignmentConflict }
-	updates := map[string]any{"status": status, "row_version": release.RowVersion+1}
-	if status == "PAUSED" || status == "COMPLETED" { updates["finished_at"] = now }
+	if release.RowVersion == math.MaxInt64 {
+		return ErrAssignmentConflict
+	}
+	updates := map[string]any{"status": status, "row_version": release.RowVersion + 1}
+	if status == "PAUSED" || status == "COMPLETED" {
+		updates["finished_at"] = now
+	}
 	r := tx.Model(&ConfigReleaseRecord{}).
 		Where("workspace_id = ? AND release_id = ? AND row_version = ?",
 			release.WorkspaceID, release.ReleaseID, release.RowVersion).Updates(updates)
-	if r.Error != nil { return r.Error }
-	if r.RowsAffected != 1 { return ErrAssignmentConflict }
+	if r.Error != nil {
+		return r.Error
+	}
+	if r.RowsAffected != 1 {
+		return ErrAssignmentConflict
+	}
 	return nil
 }
 
@@ -381,7 +495,9 @@ func rolloutViewTx(tx *gorm.DB, release ConfigReleaseRecord) (RolloutView, error
 	var frozen []ReleaseTargetRecord
 	err := tx.Where("workspace_id = ? AND release_id = ?", release.WorkspaceID, release.ReleaseID).
 		Order("batch_no, instance_uid").Find(&frozen).Error
-	if err != nil { return RolloutView{}, err }
+	if err != nil {
+		return RolloutView{}, err
+	}
 	result := RolloutView{WorkspaceID: release.WorkspaceID, ReleaseID: release.ReleaseID,
 		Status: release.Status, RowVersion: release.RowVersion, Targets: make([]RolloutTarget, 0, len(frozen))}
 	for _, target := range frozen {
@@ -396,12 +512,15 @@ func rolloutViewTx(tx *gorm.DB, release ConfigReleaseRecord) (RolloutView, error
 func (s *Store) GetRollout(ctx context.Context, workspace, releaseID string) (RolloutView, error) {
 	var release ConfigReleaseRecord
 	err := s.db.WithContext(ctx).Where("workspace_id = ? AND release_id = ?", workspace, releaseID).Take(&release).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) { return RolloutView{}, ErrRolloutNotFound }
-	if err != nil { return RolloutView{}, err }
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return RolloutView{}, ErrRolloutNotFound
+	}
+	if err != nil {
+		return RolloutView{}, err
+	}
 	var plan rolloutPlan
 	if err := json.Unmarshal([]byte(release.RolloutPlanJSON), &plan); err != nil || plan.BatchSize < 1 {
 		return RolloutView{}, ErrRolloutNotFound
 	}
 	return rolloutViewTx(s.db.WithContext(ctx), release)
 }
-

@@ -207,16 +207,24 @@ func setReleaseDeliveryStatus(tx *gorm.DB, a AgentAssignmentRecord, state, lastE
 		Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND desired_generation = ?",
 			a.WorkspaceID, a.ReleaseID, a.InstanceUID, a.DesiredGeneration).
 		Updates(map[string]any{"status": state, "last_error": lastError, "updated_at": now})
-	if r.Error != nil { return r.Error }
-	if r.RowsAffected != 1 { return ErrAssignmentConflict }
+	if r.Error != nil {
+		return r.Error
+	}
+	if r.RowsAffected != 1 {
+		return ErrAssignmentConflict
+	}
 
 	// 1. 先锁 Release，避免并发 Agent ACK 把汇总状态互相覆盖。
 	var release ConfigReleaseRecord
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("workspace_id = ? AND release_id = ?", a.WorkspaceID, a.ReleaseID).
-		Take(&release).Error; err != nil { return err }
+		Take(&release).Error; err != nil {
+		return err
+	}
 	var plan rolloutPlan
-	if err := json.Unmarshal([]byte(release.RolloutPlanJSON), &plan); err != nil { return err }
+	if err := json.Unmarshal([]byte(release.RolloutPlanJSON), &plan); err != nil {
+		return err
+	}
 	if plan.BatchSize == 0 {
 		return tx.Model(&ConfigReleaseRecord{}).
 			Where("workspace_id = ? AND release_id = ?", a.WorkspaceID, a.ReleaseID).
@@ -224,19 +232,27 @@ func setReleaseDeliveryStatus(tx *gorm.DB, a AgentAssignmentRecord, state, lastE
 	}
 
 	// 2. PAUSED 是粘性停止状态；只有全部冻结目标真正 APPLIED 才结束发布。
-	if release.Status == "PAUSED" { return nil }
+	if release.Status == "PAUSED" {
+		return nil
+	}
 	if state == "FAILED" || state == "TIMED_OUT" || state == "UNSUPPORTED" || state == "SUPERSEDED" {
 		return rolloutStateTx(tx, release, "PAUSED", now)
 	}
 	var pending int64
 	if err := tx.Model(&ReleaseTargetRecord{}).
 		Where("workspace_id = ? AND release_id = ? AND status <> 'APPLIED'", a.WorkspaceID, a.ReleaseID).
-		Count(&pending).Error; err != nil { return err }
+		Count(&pending).Error; err != nil {
+		return err
+	}
 	if pending == 0 {
-		if release.Status != "COMPLETED" { return rolloutStateTx(tx, release, "COMPLETED", now) }
+		if release.Status != "COMPLETED" {
+			return rolloutStateTx(tx, release, "COMPLETED", now)
+		}
 		return nil
 	}
-	if release.Status == "COMPLETED" { return rolloutStateTx(tx, release, "PAUSED", now) }
+	if release.Status == "COMPLETED" {
+		return rolloutStateTx(tx, release, "PAUSED", now)
+	}
 	return nil
 }
 
