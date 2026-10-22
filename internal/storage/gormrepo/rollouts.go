@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"slices"
 	"time"
@@ -195,13 +194,14 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 	if !policyIdentityOK(workspace, actor) || len(releaseID) != 36 {
 		return RolloutView{}, ErrInvalidRollout
 	}
+	// 1. 不可变目标列表在事务外读取，避免 MySQL RR 创建过早的读快照。
+	var frozen []ReleaseTargetRecord
+	if err := s.db.WithContext(ctx).Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
+		Order("instance_uid").Find(&frozen).Error; err != nil { return RolloutView{}, err }
+	if len(frozen) == 0 { return RolloutView{}, ErrRolloutNotFound }
 	var result RolloutView
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 1. 从不可变 Target 快照取 UID，再按 UID 排序锁定全部 Agent。
-		var frozen []ReleaseTargetRecord
-		if err := tx.Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
-			Order("instance_uid").Find(&frozen).Error; err != nil { return err }
-		if len(frozen) == 0 { return ErrRolloutNotFound }
+		// 2. 按 UID 顺序锁住所有冻结 Agent，再读取 Release 和最新 Target 状态。
 		agents := make(map[string]AgentRecord, len(frozen))
 		for _, target := range frozen {
 			var agent AgentRecord
@@ -231,7 +231,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 		if err := tx.Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
 			Order("batch_no, instance_uid").Find(&frozen).Error; err != nil { return err }
 
-		// 2. 已启动批次必须全部 APPLIED；失败或被替代时禁止继续扩散。
+		// 3. 已启动批次必须全部 APPLIED；失败或被替代时禁止继续扩散。
 		nextBatch := -1
 		for _, target := range frozen {
 			if target.Status == "QUEUED" {
@@ -280,7 +280,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 		}
 		now := time.Now().UTC()
 		if blocked != "" {
-			// 3. 后续目标发生能力变化或 Generation 冲突时记录暂停，不激活任何目标。
+			// 4. 后续目标发生能力变化或 Generation 冲突时记录暂停，不激活任何目标。
 			if err := tx.Model(&ReleaseTargetRecord{}).
 				Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND status = 'QUEUED'",
 					workspace, releaseID, blocked).
@@ -292,7 +292,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 			return err
 		}
 
-		// 4. 下一批所有 Target/Assignment/审计在一个事务中推进。
+		// 5. 下一批所有 Target/Assignment/审计在一个事务中推进。
 		for _, target := range next {
 			r := tx.Model(&ReleaseTargetRecord{}).
 				Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND status = 'QUEUED'",
@@ -304,7 +304,6 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 				revision.ConfigHash, target.DesiredGeneration, current[target.InstanceUID], now); err != nil { return err }
 			if err := rolloutEventTx(tx, workspace, releaseID, target.InstanceUID,
 				target.DesiredGeneration, "TARGET_ASSIGNED", actor, now); err != nil { return err }
-			result.Activated = append(result.Activated, target.InstanceUID)
 		}
 		if err := rolloutStateTx(tx, release, "RUNNING", now); err != nil { return err }
 		result, err = rolloutViewTx(tx, release)
@@ -395,5 +394,3 @@ func (s *Store) GetRollout(ctx context.Context, workspace, releaseID string) (Ro
 	return rolloutViewTx(s.db.WithContext(ctx), release)
 }
 
-// Ensure fmt remains used by domain errors only when the rollout has invalid provenance.
-var _ = fmt.Sprintf
