@@ -333,3 +333,92 @@ func TestRolloutStopAndRollbackPostgresAndMySQL(t *testing.T) {
 		})
 	}
 }
+
+func TestSupersededActiveRolloutPausesPostgresAndMySQL(t *testing.T) {
+	for _, tt := range []struct{ driver, env string }{
+		{"postgres", "APM_TEST_POSTGRES_DSN"},
+		{"mysql", "APM_TEST_MYSQL_DSN"},
+	} {
+		for _, mode := range []string{"direct", "rollout"} {
+			t.Run(tt.driver+"/"+mode, func(t *testing.T) {
+				dsn := os.Getenv(tt.env)
+				if dsn == "" {
+					t.Skip(tt.env + " not configured")
+				}
+				ctx := context.Background()
+				store, err := Open(ctx, appconfig.Database{Driver: tt.driver, DSN: dsn,
+					MaxOpen: 8, MaxIdle: 2, MaxLifetime: time.Minute})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer store.Close()
+
+				workspace := "p3-supersede-" + mode
+				owner := auth.Principal{WorkspaceID: workspace, CredentialID: "agent"}
+				uids := []string{newUID(t), newUID(t), newUID(t)}
+				for _, uid := range uids {
+					if _, err := store.Observe(ctx, owner, uid, Observation{
+						SeenAt: time.Now().UTC(), Transport: "http",
+						Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
+						Description:  &Description{Kind: config.JavaAgentKind},
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				snapshot, err := config.CompileJavaSampling(0.55)
+				if err != nil {
+					t.Fatal(err)
+				}
+				revision, err := store.CreateConfigRevision(ctx, workspace, "admin", snapshot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				old, err := store.PublishRollout(ctx, workspace, "admin", revision.ConfigRevisionID, uids[:2], 1, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				active := old.Activated[0]
+				if mode == "direct" {
+					// 覆盖 WAITING_ACK；新 Rollout 模式覆盖 PENDING。
+					offered, _, err := store.ReconcileAgentConfig(ctx, workspace, active, nil, true)
+					if err != nil || offered == nil {
+						t.Fatalf("cannot offer original Desired: %v", err)
+					}
+					if _, err := store.PublishAgentConfig(ctx, workspace, active, revision.ConfigRevisionID, "admin", ""); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if _, err := store.PublishRollout(ctx, workspace, "admin", revision.ConfigRevisionID,
+						[]string{active, uids[2]}, 2, ""); err != nil {
+						t.Fatal(err)
+					}
+				}
+				view, err := store.GetRollout(ctx, workspace, old.ReleaseID)
+				if err != nil || view.Status != "PAUSED" {
+					t.Fatalf("superseded rollout did not stop: %+v %v", view, err)
+				}
+				for _, target := range view.Targets {
+					if target.InstanceUID == active && target.Status != "SUPERSEDED" ||
+						target.InstanceUID != active && target.Status != "QUEUED" {
+						t.Fatalf("unexpected frozen target state: %+v", target)
+					}
+					if target.InstanceUID != active {
+						if _, err := store.GetAgentAssignment(ctx, workspace, target.InstanceUID); !errors.Is(err, ErrNotFound) {
+							t.Fatalf("queued target unexpectedly activated: %v", err)
+						}
+					}
+				}
+				var events int64
+				if err := store.db.Model(&ConfigEventRecord{}).
+					Where("workspace_id = ? AND release_id = ? AND event_type = ?",
+						workspace, old.ReleaseID, "ROLLOUT_PAUSED").
+					Count(&events).Error; err != nil || events != 1 {
+					t.Fatalf("missing old rollout pause audit event: count=%d err=%v", events, err)
+				}
+				if _, err := store.AdvanceRollout(ctx, workspace, old.ReleaseID, "admin"); !errors.Is(err, ErrRolloutBlocked) {
+					t.Fatalf("superseded rollout still advanceable: %v", err)
+				}
+			})
+		}
+	}
+}
