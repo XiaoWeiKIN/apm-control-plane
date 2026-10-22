@@ -648,6 +648,7 @@ func run(ctx context.Context, log *slog.Logger) (runErr error) {
 	mux.HandleFunc("/v1/opamp", handler)
 	adminAuth := auth.New(cfg.AdminCredentials)
 	mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(store, adminAuth, reg.wakeAgent))
+	mux.Handle("POST /api/v1/agents/{uid}/policy-releases", adminPolicyReleaseHandler(store, adminAuth, reg.wakeAgent))
 	policyHandler := policyAPI(store, adminAuth)
 	mux.Handle("POST /api/v1/policies", policyHandler)
 	mux.Handle("POST /api/v1/policies/{policy_id}/revisions", policyHandler)
