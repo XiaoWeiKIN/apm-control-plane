@@ -191,6 +191,15 @@ func TestFrozenBatchRolloutPostgresAndMySQL(t *testing.T) {
 			if _, err := store.GetRollout(ctx, "other-workspace", batch.ReleaseID); !errors.Is(err, ErrRolloutNotFound) {
 				t.Fatalf("cross-workspace rollout read: %v", err)
 			}
+			// 已完成发布记录为历史状态；后续直接发布不能反向修改 APPLIED 证明。
+			if _, err := store.PublishAgentConfig(ctx, workspace, batch.Targets[0].InstanceUID,
+				revision.ConfigRevisionID, "admin", ""); err != nil {
+				t.Fatal(err)
+			}
+			historical, err := store.GetRollout(ctx, workspace, batch.ReleaseID)
+			if err != nil || historical.Status != "COMPLETED" || historical.Targets[0].Status != "APPLIED" {
+				t.Fatalf("completed release history changed after newer Desired: %+v %v", historical, err)
+			}
 			if result, err := store.AdvanceRollout(ctx, workspace, batch.ReleaseID, "admin"); err != nil || result.Status != "COMPLETED" || len(result.Activated) != 0 {
 				t.Fatalf("completed rollout was advanced: %+v %v", result, err)
 			}
@@ -339,7 +348,7 @@ func TestSupersededActiveRolloutPausesPostgresAndMySQL(t *testing.T) {
 		{"postgres", "APM_TEST_POSTGRES_DSN"},
 		{"mysql", "APM_TEST_MYSQL_DSN"},
 	} {
-		for _, mode := range []string{"direct", "rollout", "fully-activated"} {
+		for _, mode := range []string{"direct", "rollout", "fully-activated", "applied-then-superseded"} {
 			t.Run(tt.driver+"/"+mode, func(t *testing.T) {
 				dsn := os.Getenv(tt.env)
 				if dsn == "" {
@@ -383,10 +392,16 @@ func TestSupersededActiveRolloutPausesPostgresAndMySQL(t *testing.T) {
 				}
 				active := old.Activated[0]
 				if mode != "rollout" {
-					// 覆盖 WAITING_ACK；新 Rollout 模式覆盖 PENDING。
+					// 检验 WAITING_ACK、已 APPLIED 但仍有未发布批次，以及全批激活的覆盖。
 					offered, _, err := store.ReconcileAgentConfig(ctx, workspace, active, nil, true)
 					if err != nil || offered == nil {
 						t.Fatalf("cannot offer original Desired: %v", err)
+					}
+					if mode == "applied-then-superseded" {
+						if _, _, err := store.ReconcileAgentConfig(ctx, workspace, active,
+							&ConfigStatus{Hash: offered.ConfigHash, Status: "APPLIED"}, false); err != nil {
+							t.Fatal(err)
+						}
 					}
 					if _, err := store.PublishAgentConfig(ctx, workspace, active, revision.ConfigRevisionID, "admin", ""); err != nil {
 						t.Fatal(err)
