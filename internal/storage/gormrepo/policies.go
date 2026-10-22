@@ -166,7 +166,8 @@ type BindingInput struct {
 }
 
 func (s *Store) CreatePolicyBinding(ctx context.Context, workspace, actor string, in BindingInput) (PolicyBindingRecord, error) {
-	if !policyIdentityOK(workspace, actor) || len(in.PolicyRevisionID) != 36 {
+	if !policyIdentityOK(workspace, actor) || len(in.PolicyRevisionID) != 36 ||
+		in.Priority < math.MinInt32 || in.Priority > math.MaxInt32 {
 		return PolicyBindingRecord{}, policy.ErrInvalid
 	}
 	sel, hash, err := in.Selector.Canonical(in.ScopeType)
@@ -198,7 +199,8 @@ func (s *Store) CreatePolicyBinding(ctx context.Context, workspace, actor string
 }
 
 func (s *Store) UpdatePolicyBinding(ctx context.Context, workspace, actor, bindingID string, in BindingInput) (PolicyBindingRecord, error) {
-	if !policyIdentityOK(workspace, actor) || len(bindingID) != 36 || len(in.PolicyRevisionID) != 36 || (in.RowVersion < 1 || in.RowVersion == math.MaxInt64) {
+	if !policyIdentityOK(workspace, actor) || len(bindingID) != 36 || len(in.PolicyRevisionID) != 36 ||
+		in.Priority < math.MinInt32 || in.Priority > math.MaxInt32 || in.RowVersion < 1 || in.RowVersion == math.MaxInt64 {
 		return PolicyBindingRecord{}, policy.ErrInvalid
 	}
 	sel, hash, err := in.Selector.Canonical(in.ScopeType)
@@ -225,6 +227,14 @@ func (s *Store) UpdatePolicyBinding(ctx context.Context, workspace, actor, bindi
 			return r.Error
 		}
 		if r.RowsAffected != 1 {
+			var count int64
+			if err := tx.Model(&PolicyBindingRecord{}).
+				Where("workspace_id = ? AND binding_id = ?", workspace, bindingID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return policy.ErrNotFound
+			}
 			return policy.ErrConflict
 		}
 		return tx.Where("workspace_id = ? AND binding_id = ?", workspace, bindingID).Take(&updated).Error

@@ -78,12 +78,21 @@ func policyAPI(store policyStore, credentials *auth.Authenticator) http.Handler 
 				gormrepo.BindingInput{PolicyRevisionID: body.PolicyRevisionID, ScopeType: body.ScopeType,
 					Selector: body.Selector, Priority: body.Priority})
 		case req.Method == http.MethodPut && req.PathValue("binding_id") != "":
-			var body gormrepo.BindingInput
+			var body struct {
+				gormrepo.BindingInput
+				Enabled *bool `json:"enabled"`
+			}
 			if !decodePolicyRequest(w, req, &body) {
 				return
 			}
+			if body.Enabled == nil {
+				http.Error(w, "enabled is required", http.StatusBadRequest)
+				return
+			}
+			input := body.BindingInput
+			input.Enabled = *body.Enabled
 			result, err = store.UpdatePolicyBinding(req.Context(), principal.WorkspaceID,
-				principal.CredentialID, req.PathValue("binding_id"), body)
+				principal.CredentialID, req.PathValue("binding_id"), input)
 			statusCode = http.StatusOK
 		case req.Method == http.MethodGet && req.PathValue("uid") != "":
 			uid := req.PathValue("uid")
@@ -117,7 +126,7 @@ func policyAPI(store policyStore, credentials *auth.Authenticator) http.Handler 
 }
 
 func decodePolicyRequest(w http.ResponseWriter, req *http.Request, value any) bool {
-	d := json.NewDecoder(io.LimitReader(req.Body, 64<<10))
+	d := json.NewDecoder(http.MaxBytesReader(w, req.Body, 64<<10))
 	d.DisallowUnknownFields()
 	if err := d.Decode(value); err != nil {
 		http.Error(w, "invalid policy JSON", http.StatusBadRequest)

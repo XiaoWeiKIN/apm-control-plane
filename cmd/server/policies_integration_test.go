@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +103,8 @@ func TestPolicyAPIWorkspaceAndDryRunPostgresAndMySQL(t *testing.T) {
 			if created.Policy.PolicyID == "" || created.Revision.RevisionNumber != 1 {
 				t.Fatalf("bad policy creation: %s", raw)
 			}
+			request("POST", "/api/v1/policies", "admin-policy-a-secret-long",
+				`{"name":"oversize","sampling_rate":0.2}`+strings.Repeat(" ", 64<<10), 400)
 			request("POST", "/api/v1/policies/"+created.Policy.PolicyID+"/revisions",
 				"admin-policy-b-secret-long", `{"sampling_rate":0.3}`, 404)
 			r := request("POST", "/api/v1/policy-bindings", "admin-policy-a-secret-long",
@@ -117,6 +120,8 @@ func TestPolicyAPIWorkspaceAndDryRunPostgresAndMySQL(t *testing.T) {
 			}
 			request("POST", "/api/v1/policy-bindings", "admin-policy-a-secret-long",
 				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"ENVIRONMENT","selector":{"service_name":"checkout"},"priority":9}`, 400)
+			request("POST", "/api/v1/policy-bindings", "admin-policy-a-secret-long",
+				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"WORKSPACE","selector":{},"priority":2147483648}`, 400)
 			resolved := request("GET", "/api/v1/agents/"+uid+"/policy-resolution", "admin-policy-a-secret-long", "", 200)
 			var resolution gormrepo.PolicyResolution
 			if err := json.Unmarshal(resolved, &resolution); err != nil {
@@ -129,7 +134,17 @@ func TestPolicyAPIWorkspaceAndDryRunPostgresAndMySQL(t *testing.T) {
 				t.Fatalf("dry-run created an Assignment: %v", err)
 			}
 			request("PUT", "/api/v1/policy-bindings/"+binding.BindingID, "admin-policy-a-secret-long",
+				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"SERVICE","selector":{"service_name":"checkout","environment":"prod"},"priority":9,"row_version":1}`, 400)
+			request("PUT", "/api/v1/policy-bindings/"+binding.BindingID, "admin-policy-a-secret-long",
+				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"SERVICE","selector":{"service_name":"checkout","environment":"prod"},"priority":2147483648,"enabled":false,"row_version":1}`, 400)
+			request("PUT", "/api/v1/policy-bindings/11111111-1111-4111-8111-111111111111", "admin-policy-a-secret-long",
+				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"SERVICE","selector":{"service_name":"checkout","environment":"prod"},"priority":9,"enabled":false,"row_version":1}`, 404)
+			request("PUT", "/api/v1/policy-bindings/"+binding.BindingID, "admin-policy-b-secret-long",
+				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"SERVICE","selector":{"service_name":"checkout","environment":"prod"},"priority":9,"enabled":false,"row_version":1}`, 404)
+			request("PUT", "/api/v1/policy-bindings/"+binding.BindingID, "admin-policy-a-secret-long",
 				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"SERVICE","selector":{"service_name":"checkout","environment":"prod"},"priority":9,"enabled":false,"row_version":1}`, 200)
+			request("PUT", "/api/v1/policy-bindings/"+binding.BindingID, "admin-policy-a-secret-long",
+				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"SERVICE","selector":{"service_name":"checkout","environment":"prod"},"priority":9,"enabled":false,"row_version":1}`, 409)
 			request("GET", "/api/v1/agents/"+uid+"/policy-resolution", "admin-policy-a-secret-long", "", 404)
 		})
 	}

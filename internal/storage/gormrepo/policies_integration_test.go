@@ -100,6 +100,22 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 			// A strictly higher priority resolves an otherwise ambiguous lower level.
 			higher := createBinding(service.PolicyRevisionID, policy.ScopeService, policy.Selector{ServiceName: "checkout"}, 2)
 			resolve(service.PolicyRevisionID)
+			// Missing or cross-Workspace bindings must not be reported as stale CAS conflicts.
+			update := BindingInput{
+				PolicyRevisionID: service.PolicyRevisionID, ScopeType: policy.ScopeService,
+				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 1, Enabled: true, RowVersion: 1,
+			}
+			if _, err := store.UpdatePolicyBinding(ctx, p.WorkspaceID, "admin", "11111111-1111-4111-8111-111111111111", update); !errors.Is(err, policy.ErrNotFound) {
+				t.Fatalf("missing binding should be 404: %v", err)
+			}
+			_, foreignRevision, err := store.CreatePolicy(ctx, "other-workspace", "admin", "foreign", 0.2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			update.PolicyRevisionID = foreignRevision.PolicyRevisionID
+			if _, err := store.UpdatePolicyBinding(ctx, "other-workspace", "admin", serviceBinding.BindingID, update); !errors.Is(err, policy.ErrNotFound) {
+				t.Fatalf("cross-Workspace binding should be 404: %v", err)
+			}
 			// Concurrent callers cannot overwrite a newer Binding row_version.
 			if _, err := store.UpdatePolicyBinding(ctx, p.WorkspaceID, "admin", higher.BindingID, BindingInput{
 				PolicyRevisionID: higher.PolicyRevisionID, ScopeType: higher.ScopeType, Selector: policy.Selector{ServiceName: "checkout"},
