@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -141,9 +142,41 @@ func TestFrozenBatchRolloutPostgresAndMySQL(t *testing.T) {
 			if _, err := store.GetAgentAssignment(ctx, workspace, batch.Targets[2].InstanceUID); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("failed advance left an Assignment: %v", err)
 			}
-			advanced, err := store.AdvanceRollout(ctx, workspace, batch.ReleaseID, "admin")
-			if err != nil || advanced.Status != "RUNNING" || len(advanced.Activated) != 2 {
-				t.Fatalf("next batch not activated: %+v %v", advanced, err)
+			// 并发推进同一批时，最多一次激活，另一请求应明确 NotReady。
+			var wg sync.WaitGroup
+			views := make(chan RolloutView, 2)
+			errs := make(chan error, 2)
+			for i := 0; i < 2; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					view, err := store.AdvanceRollout(ctx, workspace, batch.ReleaseID, "admin")
+					views <- view
+					errs <- err
+				}()
+			}
+			wg.Wait()
+			close(views)
+			close(errs)
+			success, rejected := 0, 0
+			var advanced RolloutView
+			for view := range views {
+				if len(view.Activated) == 2 {
+					advanced = view
+					success++
+				}
+			}
+			for err := range errs {
+				if err == nil {
+					continue
+				}
+				if !errors.Is(err, ErrRolloutNotReady) {
+					t.Fatalf("unexpected concurrent Advance error: %v", err)
+				}
+				rejected++
+			}
+			if success != 1 || rejected != 1 || advanced.Status != "RUNNING" {
+				t.Fatalf("concurrent Advance not serialized: success=%d rejected=%d view=%+v", success, rejected, advanced)
 			}
 			for _, target := range advanced.Targets[2:] {
 				if target.Status != "PENDING" {
