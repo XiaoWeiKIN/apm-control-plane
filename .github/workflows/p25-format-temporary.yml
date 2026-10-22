@@ -1,0 +1,25 @@
+name: Temporary P2.5 gofmt
+on:
+  push:
+    branches:
+      - feat/p25-policy-agent-release
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/p25-policy-agent-release
+      - name: Format P2.5 Go changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          gofmt -w internal/storage/gormrepo/releases.go internal/storage/gormrepo/policy_release.go internal/storage/gormrepo/policy_release_integration_test.go cmd/server/policy_releases.go cmd/server/policy_releases_integration_test.go cmd/server/main.go
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add internal/storage/gormrepo/releases.go internal/storage/gormrepo/policy_release.go internal/storage/gormrepo/policy_release_integration_test.go cmd/server/policy_releases.go cmd/server/policy_releases_integration_test.go cmd/server/main.go
+          git commit -m "style: gofmt P2.5 policy release changes"
+          git push origin HEAD:feat/p25-policy-agent-release
