@@ -339,7 +339,7 @@ func TestSupersededActiveRolloutPausesPostgresAndMySQL(t *testing.T) {
 		{"postgres", "APM_TEST_POSTGRES_DSN"},
 		{"mysql", "APM_TEST_MYSQL_DSN"},
 	} {
-		for _, mode := range []string{"direct", "rollout"} {
+		for _, mode := range []string{"direct", "rollout", "fully-activated"} {
 			t.Run(tt.driver+"/"+mode, func(t *testing.T) {
 				dsn := os.Getenv(tt.env)
 				if dsn == "" {
@@ -373,12 +373,16 @@ func TestSupersededActiveRolloutPausesPostgresAndMySQL(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				old, err := store.PublishRollout(ctx, workspace, "admin", revision.ConfigRevisionID, uids[:2], 1, "")
+				batchSize := 1
+				if mode == "fully-activated" {
+					batchSize = 2
+				}
+				old, err := store.PublishRollout(ctx, workspace, "admin", revision.ConfigRevisionID, uids[:2], batchSize, "")
 				if err != nil {
 					t.Fatal(err)
 				}
 				active := old.Activated[0]
-				if mode == "direct" {
+				if mode != "rollout" {
 					// 覆盖 WAITING_ACK；新 Rollout 模式覆盖 PENDING。
 					offered, _, err := store.ReconcileAgentConfig(ctx, workspace, active, nil, true)
 					if err != nil || offered == nil {
@@ -398,11 +402,17 @@ func TestSupersededActiveRolloutPausesPostgresAndMySQL(t *testing.T) {
 					t.Fatalf("superseded rollout did not stop: %+v %v", view, err)
 				}
 				for _, target := range view.Targets {
-					if target.InstanceUID == active && target.Status != "SUPERSEDED" ||
-						target.InstanceUID != active && target.Status != "QUEUED" {
-						t.Fatalf("unexpected frozen target state: %+v", target)
-					}
+					want := "SUPERSEDED"
 					if target.InstanceUID != active {
+						want = "QUEUED"
+						if mode == "fully-activated" {
+							want = "PENDING"
+						}
+					}
+					if target.Status != want {
+						t.Fatalf("unexpected frozen target state: %+v, want %s", target, want)
+					}
+					if want == "QUEUED" {
 						if _, err := store.GetAgentAssignment(ctx, workspace, target.InstanceUID); !errors.Is(err, ErrNotFound) {
 							t.Fatalf("queued target unexpectedly activated: %v", err)
 						}
