@@ -326,7 +326,7 @@ func (s *Store) resolveAgentPolicy(ctx context.Context, workspace string, agent 
 		// 同样使用当前读，避免新绑定指向的 Revision 在旧快照中不可见。
 		revisionQuery = revisionQuery.Clauses(clause.Locking{Strength: "SHARE"})
 	}
-	err := revisionQuery.Take(&rev).Error
+	err = revisionQuery.Take(&rev).Error
 	if err != nil {
 		return PolicyResolution{}, err
 	}
