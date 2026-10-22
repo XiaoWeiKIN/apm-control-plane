@@ -200,17 +200,44 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 	return desired, true, err
 }
 
-// setReleaseDeliveryStatus applies to the current P2.2 single-target release.
+// setReleaseDeliveryStatus updates the target and keeps multi-Agent rollout
+// progress separate from the historical single-Agent Release status contract.
 func setReleaseDeliveryStatus(tx *gorm.DB, a AgentAssignmentRecord, state, lastError string, now time.Time) error {
-	if err := tx.Model(&ReleaseTargetRecord{}).
+	r := tx.Model(&ReleaseTargetRecord{}).
 		Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND desired_generation = ?",
 			a.WorkspaceID, a.ReleaseID, a.InstanceUID, a.DesiredGeneration).
-		Updates(map[string]any{"status": state, "last_error": lastError, "updated_at": now}).Error; err != nil {
-		return err
-	}
-	return tx.Model(&ConfigReleaseRecord{}).
+		Updates(map[string]any{"status": state, "last_error": lastError, "updated_at": now})
+	if r.Error != nil { return r.Error }
+	if r.RowsAffected != 1 { return ErrAssignmentConflict }
+
+	// 1. 先锁 Release，避免并发 Agent ACK 把汇总状态互相覆盖。
+	var release ConfigReleaseRecord
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("workspace_id = ? AND release_id = ?", a.WorkspaceID, a.ReleaseID).
-		Updates(map[string]any{"status": state}).Error
+		Take(&release).Error; err != nil { return err }
+	var plan rolloutPlan
+	if err := json.Unmarshal([]byte(release.RolloutPlanJSON), &plan); err != nil { return err }
+	if plan.BatchSize == 0 {
+		return tx.Model(&ConfigReleaseRecord{}).
+			Where("workspace_id = ? AND release_id = ?", a.WorkspaceID, a.ReleaseID).
+			Updates(map[string]any{"status": state}).Error
+	}
+
+	// 2. PAUSED 是粘性停止状态；只有全部冻结目标真正 APPLIED 才结束发布。
+	if release.Status == "PAUSED" { return nil }
+	if state == "FAILED" || state == "TIMED_OUT" || state == "UNSUPPORTED" || state == "SUPERSEDED" {
+		return rolloutStateTx(tx, release, "PAUSED", now)
+	}
+	var pending int64
+	if err := tx.Model(&ReleaseTargetRecord{}).
+		Where("workspace_id = ? AND release_id = ? AND status <> 'APPLIED'", a.WorkspaceID, a.ReleaseID).
+		Count(&pending).Error; err != nil { return err }
+	if pending == 0 {
+		if release.Status != "COMPLETED" { return rolloutStateTx(tx, release, "COMPLETED", now) }
+		return nil
+	}
+	if release.Status == "COMPLETED" { return rolloutStateTx(tx, release, "PAUSED", now) }
+	return nil
 }
 
 func insertDeliveryEvent(tx *gorm.DB, a AgentAssignmentRecord, eventType string, hash, status *string, errorMessage string, now time.Time) error {
