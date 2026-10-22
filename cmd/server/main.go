@@ -648,6 +648,12 @@ func run(ctx context.Context, log *slog.Logger) (runErr error) {
 	mux.HandleFunc("/v1/opamp", handler)
 	adminAuth := auth.New(cfg.AdminCredentials)
 	mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(store, adminAuth, reg.wakeAgent))
+	policyHandler := policyAPI(store, adminAuth)
+	mux.Handle("POST /api/v1/policies", policyHandler)
+	mux.Handle("POST /api/v1/policies/{policy_id}/revisions", policyHandler)
+	mux.Handle("POST /api/v1/policy-bindings", policyHandler)
+	mux.Handle("PUT /api/v1/policy-bindings/{binding_id}", policyHandler)
+	mux.Handle("GET /api/v1/agents/{uid}/policy-resolution", policyHandler)
 	mux.Handle("/api/", adminHandler(reg, adminAuth))
 	srv := &http.Server{Addr: cfg.ListenAddress, Handler: mux, ConnContext: connCtx, ReadHeaderTimeout: cfg.ReadHeaderTimeout}
 	listener, err := net.Listen("tcp", cfg.ListenAddress)

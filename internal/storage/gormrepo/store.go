@@ -97,7 +97,7 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
-	// 3. 要求 Goose 至少完成 00003；表检查不能替代迁移版本检查。
+	// 3. 要求 Goose 至少完成 00004；表检查不能替代迁移版本检查。
 	var schemaVersion int64
 	if err := db.WithContext(ctx).Raw(
 		"SELECT version_id FROM goose_db_version WHERE is_applied = ? ORDER BY id DESC LIMIT 1", true,
@@ -105,9 +105,9 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("inspect Goose schema version: %w", err)
 	}
-	if schemaVersion < 3 {
+	if schemaVersion < 4 {
 		_ = sqlDB.Close()
-		return nil, fmt.Errorf("Goose schema version %d: run migrations through 00003", schemaVersion)
+		return nil, fmt.Errorf("Goose schema version %d: run migrations through 00004", schemaVersion)
 	}
 	// 校验必需的表与 Agent Inventory 字段；缺失时明确启动失败。
 	if !db.Migrator().HasTable(&AgentRecord{}) {
@@ -145,6 +145,9 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 		{"release_targets", &ReleaseTargetRecord{}},
 		{"agent_assignments", &AgentAssignmentRecord{}},
 		{"config_events", &ConfigEventRecord{}},
+		{"policies", &PolicyRecord{}},
+		{"policy_revisions", &PolicyRevisionRecord{}},
+		{"policy_bindings", &PolicyBindingRecord{}},
 	} {
 		if !db.Migrator().HasTable(table.model) {
 			_ = sqlDB.Close()
