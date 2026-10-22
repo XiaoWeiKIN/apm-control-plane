@@ -46,15 +46,16 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			_, revision, err := store.CreatePolicy(ctx, workspace, "admin", "checkout-sampling", 0.2)
+			createdPolicy, revision, err := store.CreatePolicy(ctx, workspace, "admin", "checkout-sampling", 0.2)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.CreatePolicyBinding(ctx, workspace, "admin", BindingInput{
+			selector := policy.Selector{ServiceName: "checkout", Environment: "prod"}
+			binding, err := store.CreatePolicyBinding(ctx, workspace, "admin", BindingInput{
 				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
-				Selector: policy.Selector{ServiceName: "checkout", Environment: "prod"},
-				Priority: 1,
-			}); err != nil {
+				Selector: selector, Priority: 1,
+			})
+			if err != nil {
 				t.Fatal(err)
 			}
 
@@ -89,7 +90,62 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 				t.Fatalf("unsupported Agent left ConfigRevision: %d %v", count, err)
 			}
 
-			// 2. 事务提交后，ConfigRevision/Release/Target/Assignment/Event 必须保持相同来源。
+			// 2. Binding 在发布读取快照后更新时，不能发布过期的 Revision（MySQL RR）。
+			nextRevision, err := store.CreatePolicyRevision(ctx, workspace, "admin", createdPolicy.PolicyID, 0.4)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entered, resume := make(chan struct{}), make(chan struct{})
+			var gate sync.Once
+			const resolveGate = "test:pause-policy-release-resolution"
+			if err := store.db.Callback().Query().Before("gorm:query").Register(resolveGate, func(tx *gorm.DB) {
+				_, locking := tx.Statement.Clauses["FOR"]
+				if tx.Statement.Table == "policy_bindings" && locking {
+					gate.Do(func() {
+						close(entered)
+						<-resume
+					})
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			publishErrs := make(chan error, 1)
+			go func() {
+				_, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID,
+					"admin", "binding-race-"+uid[:16])
+				publishErrs <- err
+			}()
+			select {
+			case <-entered:
+			case <-time.After(10 * time.Second):
+				close(resume)
+				t.Fatal("policy release did not reach locked binding read")
+			}
+			updated, err := store.UpdatePolicyBinding(ctx, workspace, "admin", binding.BindingID, BindingInput{
+				PolicyRevisionID: nextRevision.PolicyRevisionID, ScopeType: policy.ScopeService,
+				Selector: selector, Priority: 1, Enabled: true, RowVersion: binding.RowVersion,
+			})
+			close(resume)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := <-publishErrs; !errors.Is(err, policy.ErrConflict) {
+				t.Fatalf("stale binding was published: %v", err)
+			}
+			if err := store.db.Callback().Query().Remove(resolveGate); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.UpdatePolicyBinding(ctx, workspace, "admin", binding.BindingID, BindingInput{
+				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
+				Selector: selector, Priority: 1, Enabled: true, RowVersion: updated.RowVersion,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.db.Model(&ConfigRevisionRecord{}).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 0 {
+				t.Fatalf("stale binding release created ConfigRevision: %d %v", count, err)
+			}
+
+			// 3. 事务提交后，ConfigRevision/Release/Target/Assignment/Event 必须保持相同来源。
 			key := "p25-" + uid[:16]
 			first, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID, "admin", key)
 			if err != nil {

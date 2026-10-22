@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -29,6 +30,12 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 	}
 	uid, err := hex.DecodeString(instanceUID)
 	if err != nil || len(uid) != 16 || hex.EncodeToString(uid) != instanceUID {
+		return ReleaseResult{}, ErrInvalidReleaseRequest
+	}
+	revisionBytes, err := hex.DecodeString(strings.ReplaceAll(expectedPolicyRevisionID, "-", ""))
+	if err != nil || len(revisionBytes) != 16 ||
+		fmt.Sprintf("%x-%x-%x-%x-%x", revisionBytes[:4], revisionBytes[4:6],
+			revisionBytes[6:8], revisionBytes[8:10], revisionBytes[10:]) != expectedPolicyRevisionID {
 		return ReleaseResult{}, ErrInvalidReleaseRequest
 	}
 	hash := sha256.Sum256([]byte("policy\x00" + instanceUID + "\x00" + expectedPolicyRevisionID + "\x00" + requestedBy))
@@ -74,7 +81,7 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 		}
 
 		// 4. 按当前 Binding 重新解析目标并校验期望 Revision，拒绝静默发布其他版本。
-		resolved, err := (&Store{db: tx}).ResolveAgentPolicy(ctx, workspaceID, instanceUID)
+		resolved, err := (&Store{db: tx}).resolveAgentPolicy(ctx, workspaceID, instanceUID, true)
 		if err != nil {
 			return err
 		}

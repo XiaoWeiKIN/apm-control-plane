@@ -244,6 +244,11 @@ func (s *Store) UpdatePolicyBinding(ctx context.Context, workspace, actor, bindi
 
 // ResolveAgentPolicy is read-only. A matched Policy is never silently published as Desired.
 func (s *Store) ResolveAgentPolicy(ctx context.Context, workspace, uid string) (PolicyResolution, error) {
+	return s.resolveAgentPolicy(ctx, workspace, uid, false)
+}
+
+// Publishing locks the selected bindings against concurrent updates. Normal preview is read-only.
+func (s *Store) resolveAgentPolicy(ctx context.Context, workspace, uid string, lockBindings bool) (PolicyResolution, error) {
 	// 1. 可信 Workspace 范围内查找 Agent，Java 以外的 Kind 明确拒绝。
 	agent, err := s.Get(ctx, workspace, uid)
 	if err != nil {
@@ -264,11 +269,15 @@ func (s *Store) ResolveAgentPolicy(ctx context.Context, workspace, uid string) (
 		BodySHA256       string `gorm:"column:body_sha256"`
 	}
 	var entries []candidate
-	err = s.db.WithContext(ctx).Table("policy_bindings").
+	query := s.db.WithContext(ctx).Table("policy_bindings").
 		Select("policy_bindings.binding_id, policy_revisions.policy_id, policy_bindings.policy_revision_id, policy_bindings.scope_type, policy_bindings.selector_json, policy_bindings.priority, policy_revisions.body_sha256").
 		Joins("JOIN policy_revisions ON policy_revisions.workspace_id = policy_bindings.workspace_id AND policy_revisions.policy_revision_id = policy_bindings.policy_revision_id").
-		Where("policy_bindings.workspace_id = ? AND policy_bindings.agent_kind = ? AND policy_bindings.enabled = ?", workspace, config.JavaAgentKind, true).
-		Find(&entries).Error
+		Where("policy_bindings.workspace_id = ? AND policy_bindings.agent_kind = ? AND policy_bindings.enabled = ?", workspace, config.JavaAgentKind, true)
+	if lockBindings {
+		// 当前读绕过 MySQL RR 的旧快照，并阻止匹配集合中已有 Binding 并发更新。
+		query = query.Clauses(clause.Locking{Strength: "SHARE"})
+	}
+	err = query.Find(&entries).Error
 	if err != nil {
 		return PolicyResolution{}, err
 	}
@@ -310,7 +319,13 @@ func (s *Store) ResolveAgentPolicy(ctx context.Context, workspace, uid string) (
 
 	// 3. 读取命中 Revision 的真实内容，不创建 Release 或修改 Assignment。
 	var rev PolicyRevisionRecord
-	err = s.db.WithContext(ctx).Where("workspace_id = ? AND policy_revision_id = ?", workspace, selected.PolicyRevisionID).Take(&rev).Error
+	revisionQuery := s.db.WithContext(ctx).
+		Where("workspace_id = ? AND policy_revision_id = ?", workspace, selected.PolicyRevisionID)
+	if lockBindings {
+		// 同样使用当前读，避免新绑定指向的 Revision 在旧快照中不可见。
+		revisionQuery = revisionQuery.Clauses(clause.Locking{Strength: "SHARE"})
+	}
+	err = revisionQuery.Take(&rev).Error
 	if err != nil {
 		return PolicyResolution{}, err
 	}
