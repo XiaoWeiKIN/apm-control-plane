@@ -81,7 +81,7 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 			mux.Handle("GET /api/v1/rollouts/{release_id}", h)
 			server := httptest.NewServer(mux)
 			defer server.Close()
-			call := func(method, path, token, payload string, status int) gormrepo.RolloutView {
+			call := func(method, path, token, payload string, status int, idempotencyKey ...string) gormrepo.RolloutView {
 				t.Helper()
 				req, err := http.NewRequest(method, server.URL+path, bytes.NewBufferString(payload))
 				if err != nil {
@@ -89,6 +89,9 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 				}
 				if token != "" {
 					req.Header.Set("Authorization", "Bearer "+token)
+				}
+				if len(idempotencyKey) > 0 {
+					req.Header.Set("Idempotency-Key", idempotencyKey[0])
 				}
 				resp, err := server.Client().Do(req)
 				if err != nil {
@@ -144,6 +147,36 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 			if final.Status != "COMPLETED" || len(waked) != 3 {
 				t.Fatalf("rollout did not complete: %+v wakes=%v", final, waked)
 			}
+
+			// PAUSED 是合法查询和幂等重试结果，不应错误地映射为 HTTP 409。
+			pausedKey := "paused-" + id[:12]
+			paused := call("POST", "/api/v1/rollouts", "rollout-admin-a-long",
+				string(command), http.StatusAccepted, pausedKey)
+			if len(paused.Activated) != 1 {
+				t.Fatalf("second rollout did not activate first batch: %+v", paused)
+			}
+			offered, _, err := store.ReconcileAgentConfig(ctx, workspace, paused.Activated[0], nil, true)
+			if err != nil || offered == nil {
+				t.Fatalf("paused release offer missing: %v", err)
+			}
+			if _, _, err := store.ReconcileAgentConfig(ctx, workspace, paused.Activated[0],
+				&gormrepo.ConfigStatus{Hash: offered.ConfigHash, Status: "FAILED", Error: "rejected"}, false); err != nil {
+				t.Fatal(err)
+			}
+			got := call("GET", "/api/v1/rollouts/"+paused.ReleaseID, "rollout-admin-a-long",
+				"", http.StatusOK)
+			if got.Status != "PAUSED" {
+				t.Fatalf("GET failed to return paused state: %+v", got)
+			}
+			wakes := len(waked)
+			replayed := call("POST", "/api/v1/rollouts", "rollout-admin-a-long",
+				string(command), http.StatusAccepted, pausedKey)
+			if replayed.Status != "PAUSED" || replayed.ReleaseID != paused.ReleaseID ||
+				len(replayed.Activated) != 0 || len(waked) != wakes {
+				t.Fatalf("idempotent replay changed paused rollout: %+v wakes=%v", replayed, waked)
+			}
+			call("POST", "/api/v1/rollouts/"+paused.ReleaseID+"/advance",
+				"rollout-admin-a-long", "", http.StatusConflict)
 		})
 	}
 }
