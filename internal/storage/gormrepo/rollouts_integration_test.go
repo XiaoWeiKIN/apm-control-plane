@@ -117,6 +117,30 @@ func TestFrozenBatchRolloutPostgresAndMySQL(t *testing.T) {
 			for _, target := range batch.Targets[:2] {
 				ack(target.InstanceUID)
 			}
+
+			// 下一批审计失败时，所有 Queued Target 和新 Assignment 必须回滚。
+			const callback = "p3:reject-advance-audit"
+			auditErr := errors.New("injected advance audit failure")
+			if err := store.db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+				if tx.Statement != nil && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "config_events" {
+					tx.AddError(auditErr)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.AdvanceRollout(ctx, workspace, batch.ReleaseID, "admin"); !errors.Is(err, auditErr) {
+				t.Fatalf("advance audit failure not propagated: %v", err)
+			}
+			if err := store.db.Callback().Create().Remove(callback); err != nil {
+				t.Fatal(err)
+			}
+			unchanged, err := store.GetRollout(ctx, workspace, batch.ReleaseID)
+			if err != nil || unchanged.Targets[2].Status != "QUEUED" || unchanged.RowVersion != 1 {
+				t.Fatalf("failed advance mutated frozen state: %+v %v", unchanged, err)
+			}
+			if _, err := store.GetAgentAssignment(ctx, workspace, batch.Targets[2].InstanceUID); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("failed advance left an Assignment: %v", err)
+			}
 			advanced, err := store.AdvanceRollout(ctx, workspace, batch.ReleaseID, "admin")
 			if err != nil || advanced.Status != "RUNNING" || len(advanced.Activated) != 2 {
 				t.Fatalf("next batch not activated: %+v %v", advanced, err)
