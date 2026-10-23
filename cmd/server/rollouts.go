@@ -16,6 +16,7 @@ type rolloutStore interface {
 	PublishRollout(context.Context, string, string, string, []string, int, string) (gormrepo.RolloutView, error)
 	PublishPolicyRollout(context.Context, string, string, string, gormrepo.PolicyRolloutFilter, int, string) (gormrepo.RolloutView, error)
 	ResumeRollout(context.Context, string, string, string, int64) (gormrepo.RolloutView, error)
+	PublishRollback(context.Context, string, string, string, string, int64, int, string) (gormrepo.RolloutView, error)
 	AdvanceRollout(context.Context, string, string, string) (gormrepo.RolloutView, error)
 	GetRollout(context.Context, string, string) (gormrepo.RolloutView, error)
 }
@@ -54,6 +55,28 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 			}
 			result, err = store.PublishRollout(req.Context(), principal.WorkspaceID, principal.CredentialID,
 				body.ConfigRevisionID, body.InstanceUIDs, body.BatchSize, req.Header.Get("Idempotency-Key"))
+			code = http.StatusAccepted
+		case req.Method == http.MethodPost && req.PathValue("release_id") != "" &&
+			req.URL.Path == "/api/v1/rollouts/"+req.PathValue("release_id")+"/rollback":
+			var body struct {
+				ConfigRevisionID string `json:"config_revision_id"`
+				RowVersion int64 `json:"row_version"`
+				BatchSize int `json:"batch_size"`
+			}
+			decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, 4<<10))
+			decoder.DisallowUnknownFields()
+			if decodeErr := decoder.Decode(&body); decodeErr != nil {
+				http.Error(w, "invalid rollback JSON", http.StatusBadRequest)
+				return
+			}
+			var trailing any
+			if decodeErr := decoder.Decode(&trailing); !errors.Is(decodeErr, io.EOF) {
+				http.Error(w, "unexpected trailing JSON", http.StatusBadRequest)
+				return
+			}
+			result, err = store.PublishRollback(req.Context(), principal.WorkspaceID,
+				principal.CredentialID, req.PathValue("release_id"), body.ConfigRevisionID,
+				body.RowVersion, body.BatchSize, req.Header.Get("Idempotency-Key"))
 			code = http.StatusAccepted
 		case req.Method == http.MethodPost && req.URL.Path == "/api/v1/policy-rollouts":
 			var body struct {
