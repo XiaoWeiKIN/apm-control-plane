@@ -48,7 +48,6 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 	sum := sha256.Sum256(request)
 	requestHash := hex.EncodeToString(sum[:])
 
-
 	// 2. 事务外无锁读取幂等 Key，避免 MySQL RR 缺失 Key 的间隙锁竞争。
 	if key != "" {
 		var previous ConfigReleaseRecord
