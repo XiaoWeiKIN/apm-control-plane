@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -213,6 +214,267 @@ func TestRollbackAuditFailureIsAtomicPostgresAndMySQL(t *testing.T) {
 				if err == nil && assignment.ConfigRevisionID == b.ConfigRevisionID {
 					t.Fatalf("rollback changed Desired after failed audit: %+v", assignment)
 				}
+			}
+		})
+	}
+}
+
+func TestRollbackBlocksSourceProgressPostgresAndMySQL(t *testing.T) {
+	for _, tt := range []struct{ driver, env string }{
+		{"postgres", "APM_TEST_POSTGRES_DSN"},
+		{"mysql", "APM_TEST_MYSQL_DSN"},
+	} {
+		t.Run(tt.driver, func(t *testing.T) {
+			dsn := os.Getenv(tt.env)
+			if dsn == "" {
+				t.Skip(tt.env + " not configured")
+			}
+			ctx := context.Background()
+			store, err := Open(ctx, appconfig.Database{
+				Driver: tt.driver, DSN: dsn, MaxOpen: 8, MaxIdle: 2, MaxLifetime: time.Minute,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			const workspace = "p33-rollback-block-source"
+			uids := []string{newUID(t), newUID(t)}
+			for _, uid := range uids {
+				if _, err := store.Observe(ctx, auth.Principal{WorkspaceID: workspace, CredentialID: "agent"}, uid,
+					Observation{
+						SeenAt: time.Now().UTC(), Transport: "http",
+						Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
+						Description: &Description{Kind: config.JavaAgentKind},
+					}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			newSnapshot, _ := config.CompileJavaSampling(0.9)
+			oldSnapshot, _ := config.CompileJavaSampling(0.1)
+			newConfig, err := store.CreateConfigRevision(ctx, workspace, "admin", newSnapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldConfig, err := store.CreateConfigRevision(ctx, workspace, "admin", oldSnapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source, err := store.PublishRollout(ctx, workspace, "admin", newConfig.ConfigRevisionID, uids, 1, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.PublishRollback(ctx, workspace, "admin", source.ReleaseID,
+				oldConfig.ConfigRevisionID, source.RowVersion, 1, ""); err != nil {
+				t.Fatal(err)
+			}
+
+			// 1. 覆盖源首批 Desired 后，源发布暂停并禁止推进后续批次。
+			current, err := store.GetRollout(ctx, workspace, source.ReleaseID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current.Status != "PAUSED" || current.RowVersion != source.RowVersion+1 ||
+				current.Targets[0].Status != "SUPERSEDED" {
+				t.Fatalf("source not blocked after compensating release: %+v", current)
+			}
+			if _, err := store.AdvanceRollout(ctx, workspace, source.ReleaseID, "admin"); !errors.Is(err, ErrRolloutBlocked) {
+				t.Fatalf("source advance after rollback: %v", err)
+			}
+			if _, err := store.ResumeRollout(ctx, workspace, source.ReleaseID, "admin",
+				current.RowVersion); !errors.Is(err, ErrRolloutBlocked) {
+				t.Fatalf("source resume after rollback: %v", err)
+			}
+			if _, err := store.PublishRollback(ctx, workspace, "admin", source.ReleaseID,
+				oldConfig.ConfigRevisionID, source.RowVersion, 1, ""); !errors.Is(err, ErrAssignmentConflict) {
+				t.Fatalf("stale source CAS after rollback: %v", err)
+			}
+		})
+	}
+}
+
+func TestConcurrentRollbackAndAdvancePostgresAndMySQL(t *testing.T) {
+	for _, tt := range []struct{ driver, env string }{
+		{"postgres", "APM_TEST_POSTGRES_DSN"},
+		{"mysql", "APM_TEST_MYSQL_DSN"},
+	} {
+		t.Run(tt.driver, func(t *testing.T) {
+			dsn := os.Getenv(tt.env)
+			if dsn == "" {
+				t.Skip(tt.env + " not configured")
+			}
+			ctx := context.Background()
+			store, err := Open(ctx, appconfig.Database{
+				Driver: tt.driver, DSN: dsn, MaxOpen: 8, MaxIdle: 2, MaxLifetime: time.Minute,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			const workspace = "p33-rollback-advance-race"
+			uids := []string{newUID(t), newUID(t)}
+			for _, uid := range uids {
+				if _, err := store.Observe(ctx, auth.Principal{WorkspaceID: workspace, CredentialID: "agent"}, uid,
+					Observation{
+						SeenAt: time.Now().UTC(), Transport: "http",
+						Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
+						Description: &Description{Kind: config.JavaAgentKind},
+					}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			newSnapshot, _ := config.CompileJavaSampling(0.9)
+			oldSnapshot, _ := config.CompileJavaSampling(0.1)
+			newConfig, err := store.CreateConfigRevision(ctx, workspace, "admin", newSnapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldConfig, err := store.CreateConfigRevision(ctx, workspace, "admin", oldSnapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source, err := store.PublishRollout(ctx, workspace, "admin", newConfig.ConfigRevisionID, uids, 1, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			// 1. 第一批 APPLIED，使 Advance 与 Rollback 都具备合法前置条件。
+			first := source.Targets[0].InstanceUID
+			offered, _, err := store.ReconcileAgentConfig(ctx, workspace, first, nil, true)
+			if err != nil || offered == nil {
+				t.Fatalf("source config not offered: %+v %v", offered, err)
+			}
+			if _, _, err := store.ReconcileAgentConfig(ctx, workspace, first,
+				&ConfigStatus{Hash: offered.ConfigHash, Status: "APPLIED"}, false); err != nil {
+				t.Fatal(err)
+			}
+			source, err = store.GetRollout(ctx, workspace, source.ReleaseID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			type outcome struct {
+				kind string
+				err  error
+			}
+			start := make(chan struct{})
+			outcomes := make(chan outcome, 2)
+			go func() {
+				<-start
+				_, err := store.AdvanceRollout(ctx, workspace, source.ReleaseID, "admin")
+				outcomes <- outcome{"advance", err}
+			}()
+			go func() {
+				<-start
+				_, err := store.PublishRollback(ctx, workspace, "admin", source.ReleaseID,
+					oldConfig.ConfigRevisionID, source.RowVersion, 1, "")
+				outcomes <- outcome{"rollback", err}
+			}()
+			close(start)
+			a, b := <-outcomes, <-outcomes
+			// 2. 两个操作串行化：先 Advance 则回滚 CAS 冲突，先回滚则旧发布不可推进。
+			if a.kind == b.kind {
+				t.Fatalf("missing racing operation: %+v %+v", a, b)
+			}
+			var advanced, rolledBack error
+			for _, result := range []outcome{a, b} {
+				if result.kind == "advance" {
+					advanced = result.err
+				} else {
+					rolledBack = result.err
+				}
+			}
+			if advanced == nil && !errors.Is(rolledBack, ErrAssignmentConflict) ||
+				rolledBack == nil && !errors.Is(advanced, ErrRolloutBlocked) ||
+				advanced != nil && rolledBack != nil {
+				t.Fatalf("advance/rollback was not serialized: %+v %+v", a, b)
+			}
+		})
+	}
+}
+
+func TestConcurrentRollbackIdempotencyPostgresAndMySQL(t *testing.T) {
+	for _, tt := range []struct{ driver, env string }{
+		{"postgres", "APM_TEST_POSTGRES_DSN"},
+		{"mysql", "APM_TEST_MYSQL_DSN"},
+	} {
+		t.Run(tt.driver, func(t *testing.T) {
+			dsn := os.Getenv(tt.env)
+			if dsn == "" {
+				t.Skip(tt.env + " not configured")
+			}
+			ctx := context.Background()
+			store, err := Open(ctx, appconfig.Database{
+				Driver: tt.driver, DSN: dsn, MaxOpen: 8, MaxIdle: 2, MaxLifetime: time.Minute,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			const workspace = "p33-rollback-idempotent-race"
+			uids := []string{newUID(t), newUID(t)}
+			for _, uid := range uids {
+				if _, err := store.Observe(ctx, auth.Principal{WorkspaceID: workspace, CredentialID: "agent"}, uid,
+					Observation{
+						SeenAt: time.Now().UTC(), Transport: "http",
+						Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
+						Description: &Description{Kind: config.JavaAgentKind},
+					}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			newSnapshot, _ := config.CompileJavaSampling(0.9)
+			oldSnapshot, _ := config.CompileJavaSampling(0.1)
+			newConfig, err := store.CreateConfigRevision(ctx, workspace, "admin", newSnapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldConfig, err := store.CreateConfigRevision(ctx, workspace, "admin", oldSnapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source, err := store.PublishRollout(ctx, workspace, "admin", newConfig.ConfigRevisionID, uids, 1, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			type outcome struct {
+				view RolloutView
+				err  error
+			}
+			start := make(chan struct{})
+			results := make(chan outcome, 2)
+			key := "concurrent-" + uids[0]
+			var wg sync.WaitGroup
+			wg.Add(2)
+			for i := 0; i < 2; i++ {
+				go func() {
+					defer wg.Done()
+					<-start
+					view, err := store.PublishRollback(ctx, workspace, "admin", source.ReleaseID,
+						oldConfig.ConfigRevisionID, source.RowVersion, 1, key)
+					results <- outcome{view, err}
+				}()
+			}
+			close(start)
+			wg.Wait()
+			close(results)
+			activated := 0
+			releaseID := ""
+			for r := range results {
+				if r.err != nil {
+					t.Fatalf("concurrent idempotent rollback: %v", r.err)
+				}
+				if releaseID != "" && r.view.ReleaseID != releaseID {
+					t.Fatalf("duplicate releases: %s %s", releaseID, r.view.ReleaseID)
+				}
+				releaseID = r.view.ReleaseID
+				activated += len(r.view.Activated)
+			}
+			if activated != 1 {
+				t.Fatalf("expected exactly one first-batch activation, got %d", activated)
+			}
+			var count int64
+			if err := store.db.Model(&ConfigEventRecord{}).
+				Where("workspace_id = ? AND release_id = ? AND event_type = ?",
+					workspace, releaseID, "ROLLBACK_REQUESTED").Count(&count).Error; err != nil || count != 1 {
+				t.Fatalf("concurrent rollback created duplicate audit events: %d %v", count, err)
 			}
 		})
 	}
