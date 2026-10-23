@@ -186,6 +186,7 @@ db/migrations/
 | **P2.3a/b** 协调闭环 | Reconciler + Gateway + Registry | HTTP 轮询与在线 WS 主动 Push 获取 ConfigMap；匹配 ACK 更新状态；旧 ACK 不污染新 Generation；离线重连从 DB 恢复（见 [P2.3 文档](p2-reconcile-delivery.md)） |
 | **P2.4** 策略解析 | Policy + Storage + Management API | Workspace/Environment/Service/Instance Selector 确定性匹配；最高同级冲突显式拒绝；只读结果不触发 Java 配置发布（见 [实现合同](p24-policy-resolution.md)） |
 | **P2.5** 策略单 Agent 发布 | Policy + Config + Release | 校验预览命中 Revision，编译并持久化完整 ConfigMap；Policy 来源、Release/Target/Assignment/Event 同事务提交；复用 P2.3 下发/ACK（见 [P2.5 合同](p25-policy-release.md)） |
+| **P3.3** 显式补偿回滚 | Release + Storage + Gateway | 原冻结目标集合、显式目标 ConfigRevision、源 Release RowVersion CAS；新 Release 记录 rollback_of_release_id 与 ROLLBACK_REQUESTED 审计，按 P3.1 分批 ACK（见 [P3.3 合同](p33-explicit-rollback.md)） |
 | **P3.2** 策略目标与受控恢复 | Policy + Release + Storage | 有界 Workspace Inventory 中按有效 PolicyRevision 选择并冻结 Agent，暂停后验证 APPLIED/Generation 并通过 Admin RowVersion CAS 显式恢复；不做自动批次推进（见 [P3.2 合同](p32-policy-rollout-recovery.md)） |
 | **P3.1** 有界分批发布 | Release + Storage + Gateway | 显式 2–16 Agent 原子冻结，首批 Desired 激活；按 Hash ACK 人工推进下一批，目标失败或 Generation 冲突暂停，后续策略枚举/回滚待实现（见 [P3.1 合同](p3-frozen-rollout.md)） |
 | **P3 后续** 受控灰度/回滚 | Release（扩展 Rollout） | Selector 动态冻结目标、审批/暂停恢复、失败阻断、显式回滚产生新 Release/审计事件 |

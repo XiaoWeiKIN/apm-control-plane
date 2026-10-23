@@ -108,6 +108,7 @@ Never commit real secrets. Local plain HTTP is not a public production authentic
 | POST | `/api/v1/policy-rollouts` | Freeze 2–16 Java Agent targets selected by current PolicyRevision within a bounded Workspace inventory |
 | POST | `/api/v1/rollouts/{release_id}/resume` | Explicit RowVersion-CAS recovery after all active targets converge; no automatic next batch |
 | POST | `/api/v1/rollouts` | Explicit 2–16 Java Agents; freeze all Targets and activate only the first batch |
+| POST | `/api/v1/rollouts/{release_id}/rollback` | Explicit compensating release with frozen source targets, chosen ConfigRevision and CAS |
 | POST | `/api/v1/rollouts/{release_id}/advance` | Activate the next batch only after prior targets report APPLIED |
 | GET | `/api/v1/rollouts/{release_id}` | Workspace-scoped frozen targets and rollout progress |
 | POST | `/api/v1/agents/{uid}/policy-releases` | Atomically resolve expected Java PolicyRevision, compile ConfigRevision and publish single-Agent Desired |
