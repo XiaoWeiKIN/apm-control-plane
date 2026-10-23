@@ -10,11 +10,11 @@
 {"policy_revision_id":"UUID","environment":"prod","service_name":"checkout","batch_size":1}
 ```
 
-`environment`、`service_name` 可省略，但它们只筛选可信 Workspace 内 Agent *报告* 的 Inventory 属性，不可用于扩权。服务端事务内读取该 Workspace 的 Java Agent 候选集合，按 UID 排序并锁行；**最多 16 个候选，超过即返回 400，不截断**。对每个候选按 P2.4 的 Scope/Selector/Priority 当前 Binding 求解，只冻结最终命中请求指定 PolicyRevision 的 Agent。最终必须命中 2–16 个兼容目标，`batch_size` 不超过命中数量。不属于当前 Revision 的更高优先级覆盖规则不会被下发；有同级内容冲突时拒绝发布。
+`environment`、`service_name` 可省略，但它们只筛选可信 Workspace 内 Agent *报告* 的 Inventory 属性，不可用于扩权。服务端事务内读取该 Workspace 的 Java Agent 候选集合，按 UID 排序并锁行；**最多 16 个候选，超过即返回 400，不截断**。统一读取一次当前有效 Binding 集合，再对每个候选按 P2.4 的 Scope/Selector/Priority 求解，只冻结最终命中请求指定 PolicyRevision 的 Agent。最终必须命中 2–16 个兼容目标，`batch_size` 不超过命中数量。不属于当前 Revision 的更高优先级覆盖规则不会被下发；有同级内容冲突时拒绝发布。
 
 单事务创建一份 Java ConfigRevision（带 `source_policy_revision_id`），复用 P3.1 的完整 Release/Target/Assignment/Event 冻结。Release 记录 `policy_revision_id` 和实际选中的 `instance_uids`，并将初始请求中的过滤条件一起存入 `target_selector_json`。后续 Inventory 新增 Agent 或 Binding 更新不会改变已经冻结的成员；网络唤醒仅发生在事务成功提交后。
 
-`Idempotency-Key` 的请求 Hash 由策略 Revision、过滤条件、BatchSize、Actor 和发布模式确定，重试读取**原发布快照**，不重新扫描可能变化的 Inventory，也不重复创建 ConfigRevision。编译/冻结/审计任一失败时整个外层事务回滚。本实现复用 GORM 的嵌套事务 Savepoint 与 P3.1 代码，不新增数据表、Goose Migration 或独立队列。
+`Idempotency-Key` 的请求 Hash 由策略 Revision、过滤条件、BatchSize、Actor 和发布模式确定，重试读取**原发布快照**，不重新扫描可能变化的 Inventory，也不重复创建 ConfigRevision。并发相同 Key 在唯一键竞争失败后回滚，再读取已提交 Release；相同 Hash 返回原发布，不同 Hash 返回 409。编译/冻结/审计任一失败时整个外层事务回滚。本实现复用 GORM 的嵌套事务 Savepoint 与 P3.1 代码，不新增数据表、Goose Migration 或独立队列。
 
 **一致性边界**：已锁定的候选 Agent 元数据与现有 Binding 在提交前得到相应锁保护；新 Agent 或 PostgreSQL 中在匹配读取后插入的更高优先级 Binding 对下一次发布生效。MySQL InnoDB `FOR SHARE` 的范围/间隙锁可能阻塞新绑定插入。此增量不声称部署了可串行化的全 Workspace 全局选择器，也不支持海量 Target。
 
