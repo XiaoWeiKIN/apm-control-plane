@@ -1,12 +1,6 @@
 package gormrepo
 
-import (
-	"context"
-	"encoding/json"
-	"errors"
-
-	"gorm.io/gorm"
-)
+import "context"
 
 // PublishRollback creates a new, audited compensating rollout. The Admin
 // supplies the desired historical ConfigRevision explicitly; no inference from
@@ -18,23 +12,13 @@ func (s *Store) PublishRollback(ctx context.Context, workspace, actor, sourceRel
 		len(configRevisionID) != 36 || expectedRowVersion < 1 {
 		return RolloutView{}, ErrInvalidRollout
 	}
-	var source ConfigReleaseRecord
-	if err := s.db.WithContext(ctx).
-		Where("workspace_id = ? AND release_id = ?", workspace, sourceReleaseID).
-		Take(&source).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return RolloutView{}, ErrRolloutNotFound
-		}
-		return RolloutView{}, err
-	}
-	var plan rolloutPlan
-	if err := json.Unmarshal([]byte(source.RolloutPlanJSON), &plan); err != nil || plan.BatchSize < 1 {
-		return RolloutView{}, ErrRolloutNotFound
-	}
 	var frozen []ReleaseTargetRecord
 	if err := s.db.WithContext(ctx).Where("workspace_id = ? AND release_id = ?", workspace, sourceReleaseID).
 		Order("instance_uid").Find(&frozen).Error; err != nil {
 		return RolloutView{}, err
+	}
+	if len(frozen) == 0 {
+		return RolloutView{}, ErrRolloutNotFound
 	}
 	if len(frozen) < 2 || len(frozen) > maxRolloutTargets {
 		return RolloutView{}, ErrInvalidRollout
@@ -44,7 +28,7 @@ func (s *Store) PublishRollback(ctx context.Context, workspace, actor, sourceRel
 		uids = append(uids, target.InstanceUID)
 	}
 
-	// 2. 复用同一事务冻结新 Release；来源 CAS、目标一致性在锁内重检。
+	// 2. 复用发布事务，在 Agent 和源 Release 锁下校验来源与 CAS。
 	return s.publishRollout(ctx, workspace, actor, configRevisionID, uids, batchSize, key,
 		&rollbackIntent{SourceReleaseID: sourceReleaseID, ExpectedRowVersion: expectedRowVersion})
 }
