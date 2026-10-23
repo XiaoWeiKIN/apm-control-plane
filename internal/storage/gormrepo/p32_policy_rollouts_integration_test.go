@@ -98,16 +98,19 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 				if tx.Statement != nil && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "config_events" {
 					tx.AddError(auditErr)
 				}
-			}); err != nil { t.Fatal(err) }
+			}); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := store.PublishPolicyRollout(ctx, workspace, "admin", selected.PolicyRevisionID,
 				filter, 1, "audit-"+uids[0][:16]); !errors.Is(err, auditErr) {
 				t.Fatalf("audit failure not propagated: %v", err)
 			}
-			if err := store.db.Callback().Create().Remove(callback); err != nil { t.Fatal(err) }
+			if err := store.db.Callback().Create().Remove(callback); err != nil {
+				t.Fatal(err)
+			}
 			for _, table := range []string{"config_revisions", "config_releases", "release_targets", "agent_assignments"} {
 				var count int64
-				if err := store.db.Table(table).Where("workspace_id = ?", workspace).Count(&count).Error;
-					err != nil || count != 0 {
+				if err := store.db.Table(table).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 0 {
 					t.Fatalf("%s leaked after failed Policy rollout: rows=%d err=%v", table, count, err)
 				}
 			}
@@ -163,7 +166,9 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 				PolicyRevisionID: binding.PolicyRevisionID, ScopeType: binding.ScopeType,
 				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 1,
 				Enabled: false, RowVersion: binding.RowVersion,
-			}); err != nil { t.Fatal(err) }
+			}); err != nil {
+				t.Fatal(err)
+			}
 			replay, err := store.PublishPolicyRollout(ctx, workspace, "admin",
 				selected.PolicyRevisionID, filter, 1, key)
 			if err != nil || replay.ReleaseID != created.ReleaseID || len(replay.Activated) != 0 {
@@ -244,8 +249,10 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 				if _, err := store.Observe(ctx, principal, extra, Observation{
 					SeenAt: time.Now().UTC(), Transport: "http",
 					Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
-					Description: &Description{Kind: config.JavaAgentKind, Service: "unrelated", Environment: "dev"},
-				}); err != nil { t.Fatal(err) }
+					Description:  &Description{Kind: config.JavaAgentKind, Service: "unrelated", Environment: "dev"},
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if _, err := store.PublishPolicyRollout(ctx, workspace, "admin",
 				selected.PolicyRevisionID, PolicyRolloutFilter{}, 1, ""); !errors.Is(err, ErrInvalidRollout) {
