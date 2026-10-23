@@ -300,6 +300,8 @@ P2.4 使用 `db/migrations/postgres/00004_policies.sql` 与 `db/migrations/mysql
 
 `idempotency_key` 相同且 `request_sha256` 相同的重试返回**同一个 Release**；同 Key 但请求不同返回明确 Conflict。**不要通过“再次 INSERT Release”处理已提交后的网络失败。** `status` 可变，但请求正文、目标选择器和计划一旦进入执行不得静默改写。
 
+**P3.1 增量实现**：复用 `config_releases.rollout_plan_json` 中的 `batch_size` 和 `batches`，无需新表或 Migration。管理员显式给出 2–16 个 Java Agent UID，全部 Target 在一个事务里冻结；只给第 0 批写入 Assignment，后续 Target 为 `QUEUED`，在前批全部 APPLIED 且冻结 Generation 未失效时由显式 Advance 激活。Release 汇总使用 `RUNNING` / `PAUSED` / `COMPLETED`，PAUSED 不自行恢复。参见 [P3.1 Frozen Rollout](p3-frozen-rollout.md)。
+
 ### 5.3 `release_targets` — 冻结发布目标与结果
 
 **主键**：`(workspace_id,release_id,instance_uid)`。三个关键 FK：

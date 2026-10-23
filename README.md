@@ -105,6 +105,9 @@ Never commit real secrets. Local plain HTTP is not a public production authentic
 | GET | `/api/v1/agents/{uid}` | Workspace-scoped instance detail |
 | PUT | `/api/v1/agents/{uid}/sampling` | Ephemeral demo sampling rate, [0,1] |
 | POST | `/api/v1/agents/{uid}/releases` | Durable single-Agent Desired; P2.3 delivers and reconciles asynchronously |
+| POST | `/api/v1/rollouts` | Explicit 2–16 Java Agents; freeze all Targets and activate only the first batch |
+| POST | `/api/v1/rollouts/{release_id}/advance` | Activate the next batch only after prior targets report APPLIED |
+| GET | `/api/v1/rollouts/{release_id}` | Workspace-scoped frozen targets and rollout progress |
 | POST | `/api/v1/agents/{uid}/policy-releases` | Atomically resolve expected Java PolicyRevision, compile ConfigRevision and publish single-Agent Desired |
 
 ## Validation
