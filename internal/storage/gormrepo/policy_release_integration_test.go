@@ -65,8 +65,8 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 				t.Fatalf("cross-workspace release accepted: %v", err)
 			}
 			if _, err := store.PublishAgentPolicy(ctx, workspace, uid,
-				"00000000-0000-4000-8000-000000000000", "admin", ""); !errors.Is(err, policy.ErrConflict) {
-				t.Fatalf("mismatched expected policy revision: %v", err)
+				"00000000-0000-4000-8000-000000000000", "admin", ""); !errors.Is(err, policy.ErrNotFound) {
+				t.Fatalf("unknown revision with matching binding should not be found: %v", err)
 			}
 			var count int64
 			if err := store.db.Model(&ConfigRevisionRecord{}).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 0 {
@@ -118,6 +118,10 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			nextRevision, err := store.CreatePolicyRevision(ctx, workspace, "admin", createdPolicy.PolicyID, 0.4)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if _, err := store.PublishAgentPolicy(ctx, workspace, uid, nextRevision.PolicyRevisionID,
+				"admin", ""); !errors.Is(err, policy.ErrConflict) {
+				t.Fatalf("existing unselected revision should conflict: %v", err)
 			}
 			entered, resume := make(chan struct{}), make(chan struct{})
 			var gate sync.Once

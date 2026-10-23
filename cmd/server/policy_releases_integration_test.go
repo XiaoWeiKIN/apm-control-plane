@@ -178,6 +178,7 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
+			post("p25-admin-token-long", []byte(`{"policy_revision_id":"00000000-0000-4000-8000-000000000000"}`), http.StatusNotFound)
 			release := post("p25-admin-token-long", body, http.StatusAccepted)
 			if release.ReleaseID == "" || release.DesiredGeneration != 1 {
 				t.Fatalf("unexpected release: %+v", release)

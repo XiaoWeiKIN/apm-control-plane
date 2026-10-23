@@ -76,23 +76,24 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 
 		// 4. 按当前 Binding 重新解析目标并校验期望 Revision，拒绝静默发布其他版本。
 		resolved, err := (&Store{db: tx}).resolveAgentPolicy(ctx, workspaceID, agent, true)
-		if errors.Is(err, policy.ErrNotFound) {
-			// 期望 Revision 在当前 Workspace 内存在但不再命中，属于预览失效。
+		if err == nil && resolved.PolicyRevisionID != expectedPolicyRevisionID {
+			err = policy.ErrConflict
+		}
+		if errors.Is(err, policy.ErrNotFound) || errors.Is(err, policy.ErrConflict) {
+			// 仅在预览失效时确认期望 Revision 是否存在，区分 404 与 409。
 			var count int64
 			if lookupErr := tx.Model(&PolicyRevisionRecord{}).
 				Where("workspace_id = ? AND policy_revision_id = ?", workspaceID, expectedPolicyRevisionID).
 				Count(&count).Error; lookupErr != nil {
 				return lookupErr
 			}
-			if count != 0 {
-				return policy.ErrConflict
+			if count == 0 {
+				return policy.ErrNotFound
 			}
+			return policy.ErrConflict
 		}
 		if err != nil {
 			return err
-		}
-		if resolved.PolicyRevisionID != expectedPolicyRevisionID {
-			return policy.ErrConflict
 		}
 		var document struct {
 			SchemaVersion int `json:"schema_version"`
