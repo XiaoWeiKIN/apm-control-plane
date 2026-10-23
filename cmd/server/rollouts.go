@@ -58,9 +58,9 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 		case req.Method == http.MethodPost && req.URL.Path == "/api/v1/policy-rollouts":
 			var body struct {
 				PolicyRevisionID string `json:"policy_revision_id"`
-				Environment string `json:"environment"`
-				ServiceName string `json:"service_name"`
-				BatchSize int `json:"batch_size"`
+				Environment      string `json:"environment"`
+				ServiceName      string `json:"service_name"`
+				BatchSize        int    `json:"batch_size"`
 			}
 			decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, 4<<10))
 			decoder.DisallowUnknownFields()

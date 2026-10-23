@@ -590,7 +590,9 @@ func (s *Store) ResumeRollout(ctx context.Context, workspace, releaseID, actor s
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
 			Take(&release).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) { return ErrRolloutNotFound }
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrRolloutNotFound
+			}
 			return err
 		}
 		var plan rolloutPlan
@@ -604,7 +606,9 @@ func (s *Store) ResumeRollout(ctx context.Context, workspace, releaseID, actor s
 			return ErrRolloutBlocked
 		}
 		if err := tx.Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
-			Order("batch_no, instance_uid").Find(&frozen).Error; err != nil { return err }
+			Order("batch_no, instance_uid").Find(&frozen).Error; err != nil {
+			return err
+		}
 
 		// 3. 只有当前 Assignment 确认已应用的目标可计入恢复；队列不得有损坏。
 		queued := 0
@@ -615,17 +619,25 @@ func (s *Store) ResumeRollout(ctx context.Context, workspace, releaseID, actor s
 				var assignment AgentAssignmentRecord
 				err := tx.Where("workspace_id = ? AND instance_uid = ?", workspace, target.InstanceUID).
 					Take(&assignment).Error
-				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { return err }
+				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
 				generation := int64(1)
 				if err == nil {
-					if assignment.DesiredGeneration == math.MaxInt64 { return ErrRolloutBlocked }
+					if assignment.DesiredGeneration == math.MaxInt64 {
+						return ErrRolloutBlocked
+					}
 					generation = assignment.DesiredGeneration + 1
 				}
-				if generation != target.DesiredGeneration { return ErrRolloutBlocked }
+				if generation != target.DesiredGeneration {
+					return ErrRolloutBlocked
+				}
 			case "APPLIED":
 				var assignment AgentAssignmentRecord
 				if err := tx.Where("workspace_id = ? AND instance_uid = ?", workspace, target.InstanceUID).
-					Take(&assignment).Error; err != nil { return err }
+					Take(&assignment).Error; err != nil {
+					return err
+				}
 				if assignment.ReleaseID != releaseID || assignment.DesiredGeneration != target.DesiredGeneration ||
 					assignment.State != "APPLIED" {
 					return ErrRolloutBlocked
@@ -638,13 +650,21 @@ func (s *Store) ResumeRollout(ctx context.Context, workspace, releaseID, actor s
 		// 4. 恢复仅更新 Release 与审计；后续批次仍需显式 Advance。
 		now := time.Now().UTC()
 		status := "RUNNING"
-		if queued == 0 { status = "COMPLETED" }
-		if err := rolloutStateTx(tx, release, status, now); err != nil { return err }
+		if queued == 0 {
+			status = "COMPLETED"
+		}
+		if err := rolloutStateTx(tx, release, status, now); err != nil {
+			return err
+		}
 		if err := rolloutEventTx(tx, workspace, releaseID, frozen[0].InstanceUID, 0,
-			"ROLLOUT_RESUMED", actor, now); err != nil { return err }
+			"ROLLOUT_RESUMED", actor, now); err != nil {
+			return err
+		}
 		var err error
 		result, err = rolloutViewTx(tx, release)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		result.Status = status
 		result.RowVersion++
 		return nil
