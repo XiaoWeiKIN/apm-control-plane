@@ -244,7 +244,7 @@ func TestRollbackBlocksSourceProgressPostgresAndMySQL(t *testing.T) {
 					Observation{
 						SeenAt: time.Now().UTC(), Transport: "http",
 						Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
-						Description: &Description{Kind: config.JavaAgentKind},
+						Description:  &Description{Kind: config.JavaAgentKind},
 					}); err != nil {
 					t.Fatal(err)
 				}
@@ -317,7 +317,7 @@ func TestConcurrentRollbackAndAdvancePostgresAndMySQL(t *testing.T) {
 					Observation{
 						SeenAt: time.Now().UTC(), Transport: "http",
 						Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
-						Description: &Description{Kind: config.JavaAgentKind},
+						Description:  &Description{Kind: config.JavaAgentKind},
 					}); err != nil {
 					t.Fatal(err)
 				}
@@ -415,7 +415,7 @@ func TestConcurrentRollbackIdempotencyPostgresAndMySQL(t *testing.T) {
 					Observation{
 						SeenAt: time.Now().UTC(), Transport: "http",
 						Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
-						Description: &Description{Kind: config.JavaAgentKind},
+						Description:  &Description{Kind: config.JavaAgentKind},
 					}); err != nil {
 					t.Fatal(err)
 				}
