@@ -8,11 +8,14 @@ import (
 	"net/http"
 
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/auth"
+	"github.com/XiaoWeiKIN/apm-control-plane/internal/policy"
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/storage/gormrepo"
 )
 
 type rolloutStore interface {
 	PublishRollout(context.Context, string, string, string, []string, int, string) (gormrepo.RolloutView, error)
+	PublishPolicyRollout(context.Context, string, string, string, gormrepo.PolicyRolloutFilter, int, string) (gormrepo.RolloutView, error)
+	ResumeRollout(context.Context, string, string, string, int64) (gormrepo.RolloutView, error)
 	AdvanceRollout(context.Context, string, string, string) (gormrepo.RolloutView, error)
 	GetRollout(context.Context, string, string) (gormrepo.RolloutView, error)
 }
@@ -52,6 +55,46 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 			result, err = store.PublishRollout(req.Context(), principal.WorkspaceID, principal.CredentialID,
 				body.ConfigRevisionID, body.InstanceUIDs, body.BatchSize, req.Header.Get("Idempotency-Key"))
 			code = http.StatusAccepted
+		case req.Method == http.MethodPost && req.URL.Path == "/api/v1/policy-rollouts":
+			var body struct {
+				PolicyRevisionID string `json:"policy_revision_id"`
+				Environment string `json:"environment"`
+				ServiceName string `json:"service_name"`
+				BatchSize int `json:"batch_size"`
+			}
+			decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, 4<<10))
+			decoder.DisallowUnknownFields()
+			if decodeErr := decoder.Decode(&body); decodeErr != nil {
+				http.Error(w, "invalid policy rollout JSON", http.StatusBadRequest)
+				return
+			}
+			var trailing any
+			if decodeErr := decoder.Decode(&trailing); !errors.Is(decodeErr, io.EOF) {
+				http.Error(w, "unexpected trailing JSON", http.StatusBadRequest)
+				return
+			}
+			result, err = store.PublishPolicyRollout(req.Context(), principal.WorkspaceID, principal.CredentialID,
+				body.PolicyRevisionID, gormrepo.PolicyRolloutFilter{
+					Environment: body.Environment, ServiceName: body.ServiceName,
+				}, body.BatchSize, req.Header.Get("Idempotency-Key"))
+			code = http.StatusAccepted
+		case req.Method == http.MethodPost && req.URL.Path == "/api/v1/rollouts/"+req.PathValue("release_id")+"/resume" && req.PathValue("release_id") != "":
+			var body struct {
+				RowVersion int64 `json:"row_version"`
+			}
+			decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, 4<<10))
+			decoder.DisallowUnknownFields()
+			if decodeErr := decoder.Decode(&body); decodeErr != nil || body.RowVersion < 1 {
+				http.Error(w, "invalid rollout resume JSON", http.StatusBadRequest)
+				return
+			}
+			var trailing any
+			if decodeErr := decoder.Decode(&trailing); !errors.Is(decodeErr, io.EOF) {
+				http.Error(w, "unexpected trailing JSON", http.StatusBadRequest)
+				return
+			}
+			result, err = store.ResumeRollout(req.Context(), principal.WorkspaceID,
+				req.PathValue("release_id"), principal.CredentialID, body.RowVersion)
 		case req.Method == http.MethodPost && req.PathValue("release_id") != "":
 			advance = true
 			result, err = store.AdvanceRollout(req.Context(), principal.WorkspaceID,
@@ -65,15 +108,16 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 
 		// 2. 只在成功提交后通知被激活的在线 Agent。
 		switch {
-		case errors.Is(err, gormrepo.ErrInvalidRollout):
+		case errors.Is(err, gormrepo.ErrInvalidRollout), errors.Is(err, policy.ErrInvalid):
 			http.Error(w, "invalid rollout request", http.StatusBadRequest)
 		case errors.Is(err, gormrepo.ErrNotFound), errors.Is(err, gormrepo.ErrConfigRevisionNotFound),
-			errors.Is(err, gormrepo.ErrRolloutNotFound):
+			errors.Is(err, gormrepo.ErrRolloutNotFound), errors.Is(err, policy.ErrNotFound):
 			http.Error(w, "release, agent or config revision not found", http.StatusNotFound)
 		case errors.Is(err, gormrepo.ErrUnsupportedReleaseTarget):
 			http.Error(w, "one or more targets do not support the config", http.StatusUnprocessableEntity)
 		case errors.Is(err, gormrepo.ErrRolloutBlocked), errors.Is(err, gormrepo.ErrRolloutNotReady),
-			errors.Is(err, gormrepo.ErrReleaseConflict), errors.Is(err, gormrepo.ErrAssignmentConflict):
+			errors.Is(err, gormrepo.ErrReleaseConflict), errors.Is(err, gormrepo.ErrAssignmentConflict),
+			errors.Is(err, policy.ErrConflict):
 			http.Error(w, "rollout conflict or batch not ready", http.StatusConflict)
 		case err != nil:
 			http.Error(w, "storage unavailable", http.StatusServiceUnavailable)
