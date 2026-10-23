@@ -1,0 +1,24 @@
+name: Temporary P3.3 gofmt
+on:
+  push:
+    branches:
+      - feat/p33-explicit-rollback
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/p33-explicit-rollback
+      - name: Format P3.3 Go changes
+        run: |
+          set -euo pipefail
+          gofmt -w internal/storage/gormrepo/rollouts.go internal/storage/gormrepo/rollback.go internal/storage/gormrepo/rollback_integration_test.go cmd/server/rollouts.go cmd/server/rollback_integration_test.go cmd/server/main.go
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add internal/storage/gormrepo/rollouts.go internal/storage/gormrepo/rollback.go internal/storage/gormrepo/rollback_integration_test.go cmd/server/rollouts.go cmd/server/rollback_integration_test.go cmd/server/main.go
+          git commit -m "style: gofmt P3.3 explicit rollback"
+          git push origin HEAD:feat/p33-explicit-rollback
