@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"math"
 	"time"
 	"unicode/utf8"
 
@@ -67,13 +66,15 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 		}
 
 		var revision PolicyRevisionRecord
-		if err := tx.Where("workspace_id = ? AND policy_revision_id = ?", workspace, policyRevisionID).
+		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).
+			Where("workspace_id = ? AND policy_revision_id = ?", workspace, policyRevisionID).
 			Take(&revision).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) { return policy.ErrNotFound }
 			return err
 		}
 		var parent PolicyRecord
-		if err := tx.Where("workspace_id = ? AND policy_id = ?", workspace, revision.PolicyID).
+		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).
+			Where("workspace_id = ? AND policy_id = ?", workspace, revision.PolicyID).
 			Take(&parent).Error; err != nil { return err }
 		if parent.Status != "ACTIVE" || parent.PolicyType != "head_sampling" ||
 			parent.AgentKind != config.JavaAgentKind { return policy.ErrInvalid }
@@ -162,6 +163,3 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 	})
 	return result, err
 }
-
-// Guarantee a signed integer check is not required for the bounded batch size.
-var _ = math.MaxInt
