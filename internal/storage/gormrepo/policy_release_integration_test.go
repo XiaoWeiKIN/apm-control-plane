@@ -65,12 +65,36 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 				t.Fatalf("cross-workspace release accepted: %v", err)
 			}
 			if _, err := store.PublishAgentPolicy(ctx, workspace, uid,
-				"00000000-0000-4000-8000-000000000000", "admin", ""); !errors.Is(err, policy.ErrConflict) {
-				t.Fatalf("mismatched expected policy revision: %v", err)
+				"00000000-0000-4000-8000-000000000000", "admin", ""); !errors.Is(err, policy.ErrNotFound) {
+				t.Fatalf("unknown revision with matching binding should not be found: %v", err)
 			}
 			var count int64
 			if err := store.db.Model(&ConfigRevisionRecord{}).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 0 {
 				t.Fatalf("rejected request created ConfigRevision: %d %v", count, err)
+			}
+
+			// 已知 Revision 不再命中返回冲突；未知 Revision 且无匹配 Binding 返回 NotFound。
+			disabled, err := store.UpdatePolicyBinding(ctx, workspace, "admin", binding.BindingID, BindingInput{
+				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
+				Selector: selector, Priority: 1, Enabled: false, RowVersion: binding.RowVersion,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID,
+				"admin", ""); !errors.Is(err, policy.ErrConflict) {
+				t.Fatalf("disabled expected binding should conflict: %v", err)
+			}
+			if _, err := store.PublishAgentPolicy(ctx, workspace, uid,
+				"00000000-0000-4000-8000-000000000000", "admin", ""); !errors.Is(err, policy.ErrNotFound) {
+				t.Fatalf("unknown policy revision should not be found: %v", err)
+			}
+			binding, err = store.UpdatePolicyBinding(ctx, workspace, "admin", binding.BindingID, BindingInput{
+				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
+				Selector: selector, Priority: 1, Enabled: true, RowVersion: disabled.RowVersion,
+			})
+			if err != nil {
+				t.Fatal(err)
 			}
 
 			// 缺少 RemoteConfig Capability 时提前失败，不插入孤立 ConfigRevision。
@@ -94,6 +118,10 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			nextRevision, err := store.CreatePolicyRevision(ctx, workspace, "admin", createdPolicy.PolicyID, 0.4)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if _, err := store.PublishAgentPolicy(ctx, workspace, uid, nextRevision.PolicyRevisionID,
+				"admin", ""); !errors.Is(err, policy.ErrConflict) {
+				t.Fatalf("existing unselected revision should conflict: %v", err)
 			}
 			entered, resume := make(chan struct{}), make(chan struct{})
 			var gate sync.Once
@@ -251,6 +279,67 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			}
 			if !seen[2] || !seen[3] || len(seen) != 2 {
 				t.Fatalf("nonserialized policy release: %+v", seen)
+			}
+
+			// 6. PostgreSQL：解析读取完成后新增的高优先级 Binding 在下一次发布生效。
+			if tt.driver == "postgres" {
+				newRevision, err := store.CreatePolicyRevision(ctx, workspace, "admin", createdPolicy.PolicyID, 0.8)
+				if err != nil {
+					t.Fatal(err)
+				}
+				entered, resume := make(chan struct{}), make(chan struct{})
+				var gate sync.Once
+				const callback = "test:pause-after-policy-binding-read"
+				if err := store.db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+					_, locking := tx.Statement.Clauses["FOR"]
+					if tx.Statement.Table == "policy_bindings" && locking {
+						gate.Do(func() {
+							close(entered)
+							<-resume
+						})
+					}
+				}); err != nil {
+					t.Fatal(err)
+				}
+				type publishResult struct {
+					release ReleaseResult
+					err     error
+				}
+				published := make(chan publishResult, 1)
+				go func() {
+					release, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID,
+						"admin", "binding-insert-"+uid[:16])
+					published <- publishResult{release, err}
+				}()
+				select {
+				case <-entered:
+				case <-time.After(10 * time.Second):
+					close(resume)
+					t.Fatal("policy resolution query did not complete")
+				}
+				_, insertErr := store.CreatePolicyBinding(ctx, workspace, "admin", BindingInput{
+					PolicyRevisionID: newRevision.PolicyRevisionID, ScopeType: policy.ScopeService,
+					Selector: selector, Priority: 2,
+				})
+				close(resume)
+				if insertErr != nil {
+					t.Fatal(insertErr)
+				}
+				publishedResult := <-published
+				if publishedResult.err != nil || publishedResult.release.DesiredGeneration != 4 {
+					t.Fatalf("in-flight policy release failed: %+v", publishedResult)
+				}
+				if err := store.db.Callback().Query().Remove(callback); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID,
+					"admin", ""); !errors.Is(err, policy.ErrConflict) {
+					t.Fatalf("next publication should see higher-priority binding: %v", err)
+				}
+				if _, err := store.PublishAgentPolicy(ctx, workspace, uid, newRevision.PolicyRevisionID,
+					"admin", ""); err != nil {
+					t.Fatalf("new binding did not become effective: %v", err)
+				}
 			}
 		})
 	}

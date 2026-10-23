@@ -121,10 +121,11 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.CreatePolicyBinding(ctx, workspace, "admin-a", gormrepo.BindingInput{
+			binding, err := store.CreatePolicyBinding(ctx, workspace, "admin-a", gormrepo.BindingInput{
 				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 10,
-			}); err != nil {
+			})
+			if err != nil {
 				t.Fatal(err)
 			}
 			body, err := json.Marshal(map[string]string{"policy_revision_id": revision.PolicyRevisionID})
@@ -160,6 +161,24 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 			post("p25-other-admin-token-long", body, http.StatusNotFound)
 			post("p25-admin-token-long", []byte(`{"policy_revision_id":"invalid"}`), http.StatusBadRequest)
 			post("p25-admin-token-long", []byte(`{"policy_revision_id":"zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz"}`), http.StatusBadRequest)
+			disabled, err := store.UpdatePolicyBinding(ctx, workspace, "admin-a", binding.BindingID, gormrepo.BindingInput{
+				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
+				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 10,
+				Enabled: false, RowVersion: binding.RowVersion,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			post("p25-admin-token-long", body, http.StatusConflict)
+			post("p25-admin-token-long", []byte(`{"policy_revision_id":"00000000-0000-4000-8000-000000000000"}`), http.StatusNotFound)
+			if _, err := store.UpdatePolicyBinding(ctx, workspace, "admin-a", binding.BindingID, gormrepo.BindingInput{
+				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
+				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 10,
+				Enabled: true, RowVersion: disabled.RowVersion,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			post("p25-admin-token-long", []byte(`{"policy_revision_id":"00000000-0000-4000-8000-000000000000"}`), http.StatusNotFound)
 			release := post("p25-admin-token-long", body, http.StatusAccepted)
 			if release.ReleaseID == "" || release.DesiredGeneration != 1 {
 				t.Fatalf("unexpected release: %+v", release)

@@ -15,7 +15,6 @@ import (
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/policy"
 	"github.com/open-telemetry/opamp-go/protobufs"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // PublishAgentPolicy atomically resolves a selected Java policy, compiles a
@@ -44,13 +43,8 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 2. 与普通发布使用相同的 Agent 锁，先处理幂等重试，不重复编译或生成 Revision。
-		var agent AgentRecord
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("workspace_id = ? AND instance_uid = ?", workspaceID, instanceUID).
-			Take(&agent).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrNotFound
-			}
+		agent, err := lockAgentForReleaseTx(tx, workspaceID, instanceUID)
+		if err != nil {
 			return err
 		}
 		if idempotencyKey != "" {
@@ -81,12 +75,25 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 		}
 
 		// 4. 按当前 Binding 重新解析目标并校验期望 Revision，拒绝静默发布其他版本。
-		resolved, err := (&Store{db: tx}).resolveAgentPolicy(ctx, workspaceID, instanceUID, true)
+		resolved, err := (&Store{db: tx}).resolveAgentPolicy(ctx, workspaceID, agent, true)
+		if err == nil && resolved.PolicyRevisionID != expectedPolicyRevisionID {
+			err = policy.ErrConflict
+		}
+		if errors.Is(err, policy.ErrNotFound) || errors.Is(err, policy.ErrConflict) {
+			// 仅在预览失效时确认期望 Revision 是否存在，区分 404 与 409。
+			var count int64
+			if lookupErr := tx.Model(&PolicyRevisionRecord{}).
+				Where("workspace_id = ? AND policy_revision_id = ?", workspaceID, expectedPolicyRevisionID).
+				Count(&count).Error; lookupErr != nil {
+				return lookupErr
+			}
+			if count == 0 {
+				return policy.ErrNotFound
+			}
+			return policy.ErrConflict
+		}
 		if err != nil {
 			return err
-		}
-		if resolved.PolicyRevisionID != expectedPolicyRevisionID {
-			return policy.ErrConflict
 		}
 		var document struct {
 			SchemaVersion int `json:"schema_version"`
@@ -129,7 +136,7 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 		}
 
 		// 6. 复用 P2.2 的 Release/Target/Assignment/Event 原子事务，提交后由 Gateway 唤醒。
-		return publishAgentConfigTx(tx, workspaceID, instanceUID, configID, requestedBy,
+		return publishAgentConfigTx(tx, agent, workspaceID, instanceUID, configID, requestedBy,
 			idempotencyKey, requestHash, &expectedPolicyRevisionID, &result)
 	})
 	if err != nil {
