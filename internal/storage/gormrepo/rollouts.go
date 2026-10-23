@@ -526,6 +526,8 @@ func rolloutStateTx(tx *gorm.DB, release ConfigReleaseRecord, status string, now
 	updates := map[string]any{"status": status, "row_version": release.RowVersion + 1}
 	if status == "PAUSED" || status == "COMPLETED" {
 		updates["finished_at"] = now
+	} else if status == "RUNNING" {
+		updates["finished_at"] = nil
 	}
 	r := tx.Model(&ConfigReleaseRecord{}).
 		Where("workspace_id = ? AND release_id = ? AND row_version = ?",
