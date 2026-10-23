@@ -242,55 +242,41 @@ func (s *Store) UpdatePolicyBinding(ctx context.Context, workspace, actor, bindi
 	return updated, err
 }
 
-// ResolveAgentPolicy is read-only. A matched Policy is never silently published as Desired.
-func (s *Store) ResolveAgentPolicy(ctx context.Context, workspace, uid string) (PolicyResolution, error) {
-	agent, err := s.Get(ctx, workspace, uid)
-	if err != nil {
-		return PolicyResolution{}, err
-	}
-	return s.resolveAgentPolicy(ctx, workspace, agent, false)
+type policyBindingCandidate struct {
+	BindingID        string `gorm:"column:binding_id"`
+	PolicyID         string `gorm:"column:policy_id"`
+	PolicyRevisionID string `gorm:"column:policy_revision_id"`
+	ScopeType        string `gorm:"column:scope_type"`
+	SelectorJSON     string `gorm:"column:selector_json"`
+	Priority         int    `gorm:"column:priority"`
+	BodySHA256       string `gorm:"column:body_sha256"`
 }
 
-// Publishing uses the already locked Agent and locks existing Bindings; preview is read-only.
-func (s *Store) resolveAgentPolicy(ctx context.Context, workspace string, agent AgentRecord, lockBindings bool) (PolicyResolution, error) {
-	// 1. 校验 Java 类型，直接使用已读取的 Agent 属性匹配策略。
-	if agent.AgentKind != config.JavaAgentKind {
-		return PolicyResolution{}, ErrUnsupportedReleaseTarget
-	}
-	uid := agent.InstanceUID
-
-	// 2. 一次读取当前有效 Binding 与不可变正文 Hash，再做确定性匹配。
-	type candidate struct {
-		BindingID        string `gorm:"column:binding_id"`
-		PolicyID         string `gorm:"column:policy_id"`
-		PolicyRevisionID string `gorm:"column:policy_revision_id"`
-		ScopeType        string `gorm:"column:scope_type"`
-		SelectorJSON     string `gorm:"column:selector_json"`
-		Priority         int    `gorm:"column:priority"`
-		BodySHA256       string `gorm:"column:body_sha256"`
-	}
-	var entries []candidate
+// policyBindingSnapshot reads enabled bindings once; publishing locks existing rows.
+func (s *Store) policyBindingSnapshot(ctx context.Context, workspace string, lockBindings bool) ([]policyBindingCandidate, error) {
+	var entries []policyBindingCandidate
 	query := s.db.WithContext(ctx).Table("policy_bindings").
 		Select("policy_bindings.binding_id, policy_revisions.policy_id, policy_bindings.policy_revision_id, policy_bindings.scope_type, policy_bindings.selector_json, policy_bindings.priority, policy_revisions.body_sha256").
 		Joins("JOIN policy_revisions ON policy_revisions.workspace_id = policy_bindings.workspace_id AND policy_revisions.policy_revision_id = policy_bindings.policy_revision_id").
 		Where("policy_bindings.workspace_id = ? AND policy_bindings.agent_kind = ? AND policy_bindings.enabled = ?", workspace, config.JavaAgentKind, true)
 	if lockBindings {
-		// 当前读绕过 MySQL RR 的旧快照，并阻止匹配集合中已有 Binding 并发更新。
+		// 使用当前读并阻止已有 Binding 被并发修改。
 		query = query.Clauses(clause.Locking{Strength: "SHARE"})
 	}
 	err := query.Find(&entries).Error
-	if err != nil {
-		return PolicyResolution{}, err
-	}
+	return entries, err
+}
 
-	target := policy.Agent{InstanceUID: uid, Environment: agent.Environment, ServiceName: agent.ServiceName}
-	var selected *candidate
+// selectPolicyBinding resolves one Agent against a stable Binding snapshot.
+func selectPolicyBinding(agent AgentRecord, entries []policyBindingCandidate) (*policyBindingCandidate, error) {
+	target := policy.Agent{InstanceUID: agent.InstanceUID, Environment: agent.Environment, ServiceName: agent.ServiceName}
+	var selected *policyBindingCandidate
 	conflict := false
 	for i := range entries {
 		item := &entries[i]
 		var selector policy.Selector
 		if err := json.Unmarshal([]byte(item.SelectorJSON), &selector); err != nil {
-			return PolicyResolution{}, fmt.Errorf("invalid stored policy selector: %w", err)
+			return nil, fmt.Errorf("invalid stored policy selector: %w", err)
 		}
 		if !selector.Matches(item.ScopeType, target) {
 			continue
@@ -312,25 +298,50 @@ func (s *Store) resolveAgentPolicy(ctx context.Context, workspace string, agent 
 		}
 	}
 	if selected == nil {
-		return PolicyResolution{}, policy.ErrNotFound
+		return nil, policy.ErrNotFound
 	}
 	if conflict {
-		return PolicyResolution{}, policy.ErrConflict
+		return nil, policy.ErrConflict
 	}
+	return selected, nil
+}
 
+// ResolveAgentPolicy is read-only. A matched Policy is never silently published as Desired.
+func (s *Store) ResolveAgentPolicy(ctx context.Context, workspace, uid string) (PolicyResolution, error) {
+	agent, err := s.Get(ctx, workspace, uid)
+	if err != nil {
+		return PolicyResolution{}, err
+	}
+	return s.resolveAgentPolicy(ctx, workspace, agent, false)
+}
+
+// Publishing uses the already locked Agent and locks existing Bindings; preview is read-only.
+func (s *Store) resolveAgentPolicy(ctx context.Context, workspace string, agent AgentRecord, lockBindings bool) (PolicyResolution, error) {
+	// 1. 校验 Java 类型，不对不支持的 Agent 加载 Binding。
+	if agent.AgentKind != config.JavaAgentKind {
+		return PolicyResolution{}, ErrUnsupportedReleaseTarget
+	}
+	// 2. 读取当前有效 Binding 并按 Scope/Priority 求解。
+	entries, err := s.policyBindingSnapshot(ctx, workspace, lockBindings)
+	if err != nil {
+		return PolicyResolution{}, err
+	}
+	selected, err := selectPolicyBinding(agent, entries)
+	if err != nil {
+		return PolicyResolution{}, err
+	}
 	// 3. 读取命中 Revision 的真实内容，不创建 Release 或修改 Assignment。
 	var rev PolicyRevisionRecord
 	revisionQuery := s.db.WithContext(ctx).
 		Where("workspace_id = ? AND policy_revision_id = ?", workspace, selected.PolicyRevisionID)
 	if lockBindings {
-		// 同样使用当前读，避免新绑定指向的 Revision 在旧快照中不可见。
 		revisionQuery = revisionQuery.Clauses(clause.Locking{Strength: "SHARE"})
 	}
 	err = revisionQuery.Take(&rev).Error
 	if err != nil {
 		return PolicyResolution{}, err
 	}
-	return PolicyResolution{WorkspaceID: workspace, InstanceUID: uid,
+	return PolicyResolution{WorkspaceID: workspace, InstanceUID: agent.InstanceUID,
 		BindingID: selected.BindingID, PolicyID: selected.PolicyID,
 		PolicyRevisionID: rev.PolicyRevisionID, BodySHA256: rev.BodySHA256,
 		Body: json.RawMessage(rev.BodyJSON)}, nil
