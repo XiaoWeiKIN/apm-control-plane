@@ -15,6 +15,7 @@ import (
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/config"
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/policy"
 	"github.com/open-telemetry/opamp-go/protobufs"
+	"gorm.io/gorm"
 )
 
 func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
@@ -59,10 +60,11 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.CreatePolicyBinding(ctx, workspace, "admin", BindingInput{
+			binding, err := store.CreatePolicyBinding(ctx, workspace, "admin", BindingInput{
 				PolicyRevisionID: selected.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 1,
-			}); err != nil {
+			})
+			if err != nil {
 				t.Fatal(err)
 			}
 			_, override, err := store.CreatePolicy(ctx, workspace, "admin", "instance-override", 0.8)
@@ -88,6 +90,26 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 			if _, err := store.PublishPolicyRollout(ctx, workspace, "admin",
 				selected.PolicyRevisionID, filter, 3, ""); !errors.Is(err, ErrInvalidRollout) {
 				t.Fatalf("batch_size exceeding matched agents accepted: %v", err)
+			}
+			// 审计失败必须连同外层 ConfigRevision 和冻结的 Release/Targets 一并回滚。
+			const callback = "p32:reject-rollout-audit"
+			auditErr := errors.New("injected P3.2 audit failure")
+			if err := store.db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+				if tx.Statement != nil && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "config_events" {
+					tx.AddError(auditErr)
+				}
+			}); err != nil { t.Fatal(err) }
+			if _, err := store.PublishPolicyRollout(ctx, workspace, "admin", selected.PolicyRevisionID,
+				filter, 1, "audit-"+uids[0][:16]); !errors.Is(err, auditErr) {
+				t.Fatalf("audit failure not propagated: %v", err)
+			}
+			if err := store.db.Callback().Create().Remove(callback); err != nil { t.Fatal(err) }
+			for _, table := range []string{"config_revisions", "config_releases", "release_targets", "agent_assignments"} {
+				var count int64
+				if err := store.db.Table(table).Where("workspace_id = ?", workspace).Count(&count).Error;
+					err != nil || count != 0 {
+					t.Fatalf("%s leaked after failed Policy rollout: rows=%d err=%v", table, count, err)
+				}
 			}
 			key := "p32-" + uids[0][:16]
 			created, err := store.PublishPolicyRollout(ctx, workspace, "admin",
@@ -135,6 +157,17 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 			if _, err := store.PublishPolicyRollout(ctx, workspace, "admin",
 				selected.PolicyRevisionID, filter, 2, key); !errors.Is(err, ErrReleaseConflict) {
 				t.Fatalf("same key with different batch size accepted: %v", err)
+			}
+			// Binding 更新不更改已冻结目标，也不能使相同 Key 重试产生新 Release。
+			if _, err := store.UpdatePolicyBinding(ctx, workspace, "admin", binding.BindingID, BindingInput{
+				PolicyRevisionID: binding.PolicyRevisionID, ScopeType: binding.ScopeType,
+				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 1,
+				Enabled: false, RowVersion: binding.RowVersion,
+			}); err != nil { t.Fatal(err) }
+			replay, err := store.PublishPolicyRollout(ctx, workspace, "admin",
+				selected.PolicyRevisionID, filter, 1, key)
+			if err != nil || replay.ReleaseID != created.ReleaseID || len(replay.Activated) != 0 {
+				t.Fatalf("Binding change invalidated idempotent snapshot: %+v %v", replay, err)
 			}
 
 			// 1. 目标失败暂停；在匹配的新 APPLIED 回执前显式恢复必须失败。
@@ -204,6 +237,19 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 			}
 			if _, err := store.ResumeRollout(ctx, workspace, created.ReleaseID, "admin", done.RowVersion); !errors.Is(err, ErrRolloutBlocked) {
 				t.Fatalf("completed release resumed: %v", err)
+			}
+			// 候选 Agent 超出上限不得静默截断后发布。
+			for i := 0; i < 12; i++ {
+				extra := newUID(t)
+				if _, err := store.Observe(ctx, principal, extra, Observation{
+					SeenAt: time.Now().UTC(), Transport: "http",
+					Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
+					Description: &Description{Kind: config.JavaAgentKind, Service: "unrelated", Environment: "dev"},
+				}); err != nil { t.Fatal(err) }
+			}
+			if _, err := store.PublishPolicyRollout(ctx, workspace, "admin",
+				selected.PolicyRevisionID, PolicyRolloutFilter{}, 1, ""); !errors.Is(err, ErrInvalidRollout) {
+				t.Fatalf("unbounded candidate scan silently truncated: %v", err)
 			}
 		})
 	}
