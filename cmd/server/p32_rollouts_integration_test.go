@@ -117,9 +117,9 @@ func TestPolicyRolloutAndResumeAPIPostgresAndMySQL(t *testing.T) {
 			paused := call("GET", path, "p32-admin-policy-long", "", http.StatusOK)
 			if paused.Status != "PAUSED" { t.Fatalf("FAILED did not pause: %+v", paused) }
 			call("POST", path+"/resume", "p32-other-admin-long",
-				`{"row_version":`+itoa(pauseNumber(paused.RowVersion))+`}`, http.StatusNotFound)
+				`{"row_version":`+strconv.FormatInt(paused.RowVersion, 10)+`}`, http.StatusNotFound)
 			call("POST", path+"/resume", "p32-admin-policy-long",
-				`{"row_version":`+itoa(pauseNumber(paused.RowVersion))+`}`, http.StatusConflict)
+				`{"row_version":`+strconv.FormatInt(paused.RowVersion, 10)+`}`, http.StatusConflict)
 
 			if _, _, err := store.ReconcileAgentConfig(ctx, workspace, first,
 				&gormrepo.ConfigStatus{Hash: offered.ConfigHash, Status: "APPLIED"}, false); err != nil { t.Fatal(err) }
@@ -127,7 +127,7 @@ func TestPolicyRolloutAndResumeAPIPostgresAndMySQL(t *testing.T) {
 			still := call("GET", path, "p32-admin-policy-long", "", http.StatusOK)
 			if still.Status != "PAUSED" { t.Fatalf("automatic resume after ACK: %+v", still) }
 			resumed := call("POST", path+"/resume", "p32-admin-policy-long",
-				`{"row_version":`+itoa(pauseNumber(still.RowVersion))+`}`, http.StatusOK)
+				`{"row_version":`+strconv.FormatInt(still.RowVersion, 10)+`}`, http.StatusOK)
 			if resumed.Status != "RUNNING" || len(resumed.Activated) != 0 || len(wakes) != 1 {
 				t.Fatalf("resume sent config before Advance: %+v wakes=%v", resumed, wakes)
 			}
