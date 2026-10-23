@@ -23,11 +23,15 @@ func TestExplicitRollbackPostgresAndMySQL(t *testing.T) {
 	} {
 		t.Run(tt.driver, func(t *testing.T) {
 			dsn := os.Getenv(tt.env)
-			if dsn == "" { t.Skip(tt.env + " not configured") }
+			if dsn == "" {
+				t.Skip(tt.env + " not configured")
+			}
 			ctx := context.Background()
 			store, err := Open(ctx, appconfig.Database{Driver: tt.driver, DSN: dsn,
 				MaxOpen: 8, MaxIdle: 2, MaxLifetime: time.Minute})
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer store.Close()
 			const workspace = "p33-rollback-contract"
 			p := auth.Principal{WorkspaceID: workspace, CredentialID: "agent"}
@@ -36,17 +40,25 @@ func TestExplicitRollbackPostgresAndMySQL(t *testing.T) {
 				if _, err := store.Observe(ctx, p, uid, Observation{
 					SeenAt: time.Now().UTC(), Transport: "http",
 					Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
-					Description: &Description{Kind: config.JavaAgentKind},
-				}); err != nil { t.Fatal(err) }
+					Description:  &Description{Kind: config.JavaAgentKind},
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			oldSnapshot, _ := config.CompileJavaSampling(0.1)
 			newSnapshot, _ := config.CompileJavaSampling(0.9)
 			oldConfig, err := store.CreateConfigRevision(ctx, workspace, "admin", oldSnapshot)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			newConfig, err := store.CreateConfigRevision(ctx, workspace, "admin", newSnapshot)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			source, err := store.PublishRollout(ctx, workspace, "admin", newConfig.ConfigRevisionID, uids, 1, "")
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			if _, err := store.PublishRollback(ctx, "other-workspace", "admin", source.ReleaseID,
 				oldConfig.ConfigRevisionID, source.RowVersion, 1, ""); !errors.Is(err, ErrRolloutNotFound) {
 				t.Fatalf("cross-workspace rollback: %v", err)
@@ -64,7 +76,9 @@ func TestExplicitRollbackPostgresAndMySQL(t *testing.T) {
 			key := "p33-" + uids[0][:16]
 			rollback, err := store.PublishRollback(ctx, workspace, "admin", source.ReleaseID,
 				oldConfig.ConfigRevisionID, source.RowVersion, 1, key)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			if rollback.ReleaseID == source.ReleaseID || rollback.RollbackOfReleaseID == nil ||
 				*rollback.RollbackOfReleaseID != source.ReleaseID || len(rollback.Targets) != 3 ||
 				len(rollback.Activated) != 1 {
@@ -77,7 +91,9 @@ func TestExplicitRollbackPostgresAndMySQL(t *testing.T) {
 			}
 			var original ConfigReleaseRecord
 			if err := store.db.Where("workspace_id = ? AND release_id = ?", workspace, source.ReleaseID).
-				Take(&original).Error; err != nil { t.Fatal(err) }
+				Take(&original).Error; err != nil {
+				t.Fatal(err)
+			}
 			if original.RollbackOfReleaseID != nil || original.RequestSHA256 == "" {
 				t.Fatalf("historical source modified: %+v", original)
 			}
@@ -101,21 +117,29 @@ func TestExplicitRollbackPostgresAndMySQL(t *testing.T) {
 			// 2. 回滚按普通批次收敛，未激活目标不提前获得旧配置。
 			for i := range rollback.Targets {
 				current, err := store.GetRollout(ctx, workspace, rollback.ReleaseID)
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 				target := current.Targets[i]
 				offered, _, err := store.ReconcileAgentConfig(ctx, workspace, target.InstanceUID, nil, true)
 				if err != nil || offered == nil || offered.ConfigHash != oldConfig.ConfigHash {
 					t.Fatalf("rollback ConfigMap missing: %+v %v", offered, err)
 				}
 				if _, _, err := store.ReconcileAgentConfig(ctx, workspace, target.InstanceUID,
-					&ConfigStatus{Hash: offered.ConfigHash, Status: "APPLIED"}, false); err != nil { t.Fatal(err) }
+					&ConfigStatus{Hash: offered.ConfigHash, Status: "APPLIED"}, false); err != nil {
+					t.Fatal(err)
+				}
 				if i+1 < len(rollback.Targets) {
 					next, err := store.AdvanceRollout(ctx, workspace, rollback.ReleaseID, "admin")
-					if err != nil || len(next.Activated) != 1 { t.Fatalf("rollback advance: %+v %v", next, err) }
+					if err != nil || len(next.Activated) != 1 {
+						t.Fatalf("rollback advance: %+v %v", next, err)
+					}
 				}
 			}
 			final, err := store.GetRollout(ctx, workspace, rollback.ReleaseID)
-			if err != nil || final.Status != "COMPLETED" { t.Fatalf("rollback not converged: %+v %v", final, err) }
+			if err != nil || final.Status != "COMPLETED" {
+				t.Fatalf("rollback not converged: %+v %v", final, err)
+			}
 		})
 	}
 }
@@ -126,11 +150,15 @@ func TestRollbackAuditFailureIsAtomicPostgresAndMySQL(t *testing.T) {
 	} {
 		t.Run(tt.driver, func(t *testing.T) {
 			dsn := os.Getenv(tt.env)
-			if dsn == "" { t.Skip(tt.env + " not configured") }
+			if dsn == "" {
+				t.Skip(tt.env + " not configured")
+			}
 			ctx := context.Background()
 			store, err := Open(ctx, appconfig.Database{Driver: tt.driver, DSN: dsn,
 				MaxOpen: 8, MaxIdle: 2, MaxLifetime: time.Minute})
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer store.Close()
 			const workspace = "p33-rollback-audit"
 			p := auth.Principal{WorkspaceID: workspace, CredentialID: "agent"}
@@ -139,28 +167,42 @@ func TestRollbackAuditFailureIsAtomicPostgresAndMySQL(t *testing.T) {
 				if _, err := store.Observe(ctx, p, uid, Observation{
 					SeenAt: time.Now().UTC(), Transport: "http",
 					Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
-					Description: &Description{Kind: config.JavaAgentKind},
-				}); err != nil { t.Fatal(err) }
+					Description:  &Description{Kind: config.JavaAgentKind},
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			original, _ := config.CompileJavaSampling(0.8)
 			recovery, _ := config.CompileJavaSampling(0.2)
 			a, err := store.CreateConfigRevision(ctx, workspace, "admin", original)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			b, err := store.CreateConfigRevision(ctx, workspace, "admin", recovery)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			source, err := store.PublishRollout(ctx, workspace, "admin", a.ConfigRevisionID, uids, 1, "")
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			const callback = "p33:reject-rollback-audit"
 			auditErr := errors.New("injected rollback audit failure")
 			if err := store.db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
 				if tx.Statement != nil && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "config_events" {
 					tx.AddError(auditErr)
 				}
-			}); err != nil { t.Fatal(err) }
+			}); err != nil {
+				t.Fatal(err)
+			}
 			_, err = store.PublishRollback(ctx, workspace, "admin", source.ReleaseID,
 				b.ConfigRevisionID, source.RowVersion, 1, "")
-			if !errors.Is(err, auditErr) { t.Fatalf("audit failure not propagated: %v", err) }
-			if err := store.db.Callback().Create().Remove(callback); err != nil { t.Fatal(err) }
+			if !errors.Is(err, auditErr) {
+				t.Fatalf("audit failure not propagated: %v", err)
+			}
+			if err := store.db.Callback().Create().Remove(callback); err != nil {
+				t.Fatal(err)
+			}
 			var releases int64
 			if err := store.db.Model(&ConfigReleaseRecord{}).Where("workspace_id = ?", workspace).
 				Count(&releases).Error; err != nil || releases != 1 {

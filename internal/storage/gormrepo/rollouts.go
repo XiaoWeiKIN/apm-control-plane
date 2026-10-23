@@ -35,13 +35,13 @@ type RolloutTarget struct {
 }
 
 type RolloutView struct {
-	WorkspaceID string          `json:"workspace_id"`
-	ReleaseID   string          `json:"release_id"`
-	Status      string          `json:"status"`
-	RowVersion  int64           `json:"row_version"`
-	Targets     []RolloutTarget `json:"targets"`
-	Activated   []string        `json:"activated,omitempty"`
-	RollbackOfReleaseID *string `json:"rollback_of_release_id,omitempty"`
+	WorkspaceID         string          `json:"workspace_id"`
+	ReleaseID           string          `json:"release_id"`
+	Status              string          `json:"status"`
+	RowVersion          int64           `json:"row_version"`
+	Targets             []RolloutTarget `json:"targets"`
+	Activated           []string        `json:"activated,omitempty"`
+	RollbackOfReleaseID *string         `json:"rollback_of_release_id,omitempty"`
 }
 
 type rolloutPlan struct {
@@ -58,7 +58,7 @@ func validRolloutUID(uid string) bool {
 }
 
 type rollbackIntent struct {
-	SourceReleaseID string
+	SourceReleaseID    string
 	ExpectedRowVersion int64
 }
 
@@ -99,8 +99,8 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 		InstanceUIDs     []string `json:"instance_uids"`
 		BatchSize        int      `json:"batch_size"`
 		Actor            string   `json:"actor"`
-		SourceReleaseID string `json:"source_release_id,omitempty"`
-		SourceRowVersion int64 `json:"source_row_version,omitempty"`
+		SourceReleaseID  string   `json:"source_release_id,omitempty"`
+		SourceRowVersion int64    `json:"source_row_version,omitempty"`
 	}{kind, configID, targets, batchSize, actor, sourceID, sourceVersion})
 	if err != nil {
 		return RolloutView{}, err
@@ -144,14 +144,22 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 				Where("workspace_id = ? AND release_id = ?", workspace, rollback.SourceReleaseID).
 				Take(&source).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) { return ErrRolloutNotFound }
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrRolloutNotFound
+				}
 				return err
 			}
-			if source.RowVersion != rollback.ExpectedRowVersion { return ErrAssignmentConflict }
+			if source.RowVersion != rollback.ExpectedRowVersion {
+				return ErrAssignmentConflict
+			}
 			var sourceTargets []ReleaseTargetRecord
 			if err := tx.Where("workspace_id = ? AND release_id = ?", workspace, source.ReleaseID).
-				Order("instance_uid").Find(&sourceTargets).Error; err != nil { return err }
-			if len(sourceTargets) != len(targets) { return ErrInvalidRollout }
+				Order("instance_uid").Find(&sourceTargets).Error; err != nil {
+				return err
+			}
+			if len(sourceTargets) != len(targets) {
+				return ErrInvalidRollout
+			}
 			for i, target := range sourceTargets {
 				if target.InstanceUID != targets[i] || target.ConfigRevisionID == configID {
 					return ErrInvalidRollout
@@ -216,7 +224,12 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 			TargetSelectorJSON: string(selector), RequestSHA256: requestHash,
 			IdempotencyKey: idem, RolloutPlanJSON: string(rolloutJSON),
 			Status: "RUNNING", RowVersion: 1, RequestedBy: actor,
-			RollbackOfReleaseID: func() *string { if rollback != nil { return &rollback.SourceReleaseID }; return nil }(),
+			RollbackOfReleaseID: func() *string {
+				if rollback != nil {
+					return &rollback.SourceReleaseID
+				}
+				return nil
+			}(),
 			CreatedAt: now, StartedAt: &now,
 		}
 		if err := tx.Create(&release).Error; err != nil {
@@ -227,17 +240,23 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 		}
 		if rollback != nil {
 			id, err := newReleaseUUID()
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			details, err := json.Marshal(struct {
-				SourceReleaseID string `json:"source_release_id"`
+				SourceReleaseID  string `json:"source_release_id"`
 				ConfigRevisionID string `json:"config_revision_id"`
-		}{rollback.SourceReleaseID, configID})
-			if err != nil { return err }
+			}{rollback.SourceReleaseID, configID})
+			if err != nil {
+				return err
+			}
 			if err := tx.Create(&ConfigEventRecord{
 				WorkspaceID: workspace, EventID: id, EventType: "ROLLBACK_REQUESTED",
 				ReleaseID: &release.ReleaseID, ActorType: "ADMIN", ActorID: actor,
 				DetailsJSON: string(details), OccurredAt: now,
-			}).Error; err != nil { return err }
+			}).Error; err != nil {
+				return err
+			}
 		}
 		for i, uid := range targets {
 			generation := int64(1)

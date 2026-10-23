@@ -60,8 +60,8 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 			req.URL.Path == "/api/v1/rollouts/"+req.PathValue("release_id")+"/rollback":
 			var body struct {
 				ConfigRevisionID string `json:"config_revision_id"`
-				RowVersion int64 `json:"row_version"`
-				BatchSize int `json:"batch_size"`
+				RowVersion       int64  `json:"row_version"`
+				BatchSize        int    `json:"batch_size"`
 			}
 			decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, 4<<10))
 			decoder.DisallowUnknownFields()
