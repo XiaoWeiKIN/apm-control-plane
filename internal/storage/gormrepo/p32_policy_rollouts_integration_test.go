@@ -320,7 +320,7 @@ func TestConcurrentPolicyRolloutIdempotencyPostgresAndMySQL(t *testing.T) {
 			}
 			type outcome struct {
 				view RolloutView
-				err error
+				err  error
 			}
 			race := func(key string, firstSize, secondSize int) [2]outcome {
 				start := make(chan struct{})
