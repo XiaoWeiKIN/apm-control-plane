@@ -139,7 +139,7 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 			}
 		}
 		if rollback != nil {
-			// 幂等回放后再校验原 Release CAS；历史快照不被更改。
+			// 幂等回放后锁定源 Release，验证其类型、CAS 和可补偿状态。
 			var source ConfigReleaseRecord
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 				Where("workspace_id = ? AND release_id = ?", workspace, rollback.SourceReleaseID).
@@ -149,8 +149,17 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 				}
 				return err
 			}
+			var sourcePlan rolloutPlan
+			if err := json.Unmarshal([]byte(source.RolloutPlanJSON), &sourcePlan); err != nil || sourcePlan.BatchSize < 1 {
+				return ErrRolloutNotFound
+			}
 			if source.RowVersion != rollback.ExpectedRowVersion {
 				return ErrAssignmentConflict
+			}
+			switch source.Status {
+			case "RUNNING", "PAUSED", "COMPLETED":
+			default:
+				return ErrRolloutBlocked
 			}
 			var sourceTargets []ReleaseTargetRecord
 			if err := tx.Where("workspace_id = ? AND release_id = ?", workspace, source.ReleaseID).
