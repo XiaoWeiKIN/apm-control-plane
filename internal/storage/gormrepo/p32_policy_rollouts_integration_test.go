@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -115,8 +116,23 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 				}
 			}
 			key := "p32-" + uids[0][:16]
+			var bindingReads atomic.Int32
+			const queryCallback = "p32:count-policy-bindings"
+			if err := store.db.Callback().Query().Before("gorm:query").Register(queryCallback, func(tx *gorm.DB) {
+				if tx.Statement != nil && tx.Statement.Table == "policy_bindings" {
+					bindingReads.Add(1)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
 			created, err := store.PublishPolicyRollout(ctx, workspace, "admin",
 				selected.PolicyRevisionID, filter, 1, key)
+			if removeErr := store.db.Callback().Query().Remove(queryCallback); removeErr != nil {
+				t.Fatal(removeErr)
+			}
+			if bindingReads.Load() != 1 {
+				t.Fatalf("expected one Binding snapshot for all Agents, got %d", bindingReads.Load())
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -257,6 +273,96 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 			if _, err := store.PublishPolicyRollout(ctx, workspace, "admin",
 				selected.PolicyRevisionID, PolicyRolloutFilter{}, 1, ""); !errors.Is(err, ErrInvalidRollout) {
 				t.Fatalf("unbounded candidate scan silently truncated: %v", err)
+			}
+		})
+	}
+}
+
+func TestConcurrentPolicyRolloutIdempotencyPostgresAndMySQL(t *testing.T) {
+	for _, tt := range []struct{ driver, env string }{
+		{"postgres", "APM_TEST_POSTGRES_DSN"},
+		{"mysql", "APM_TEST_MYSQL_DSN"},
+	} {
+		t.Run(tt.driver, func(t *testing.T) {
+			dsn := os.Getenv(tt.env)
+			if dsn == "" {
+				t.Skip(tt.env + " not configured")
+			}
+			ctx := context.Background()
+			store, err := Open(ctx, appconfig.Database{
+				Driver: tt.driver, DSN: dsn, MaxOpen: 10, MaxIdle: 2, MaxLifetime: time.Minute,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			uids := []string{newUID(t), newUID(t)}
+			workspace := "p32-idempotency-" + uids[0][:12]
+			principal := auth.Principal{WorkspaceID: workspace, CredentialID: "java-owner"}
+			for _, uid := range uids {
+				if _, err := store.Observe(ctx, principal, uid, Observation{
+					SeenAt: time.Now().UTC(), Transport: "http",
+					Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
+					Description: &Description{Kind: config.JavaAgentKind, Service: "checkout", Environment: "prod"},
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, revision, err := store.CreatePolicy(ctx, workspace, "admin", "shared-rollout", 0.2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.CreatePolicyBinding(ctx, workspace, "admin", BindingInput{
+				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
+				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 1,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			type outcome struct {
+				view RolloutView
+				err error
+			}
+			race := func(key string, firstSize, secondSize int) [2]outcome {
+				start := make(chan struct{})
+				results := make(chan outcome, 2)
+				for _, size := range []int{firstSize, secondSize} {
+					go func(batchSize int) {
+						<-start
+						view, err := store.PublishPolicyRollout(ctx, workspace, "admin",
+							revision.PolicyRevisionID, PolicyRolloutFilter{ServiceName: "checkout"}, batchSize, key)
+						results <- outcome{view, err}
+					}(size)
+				}
+				close(start)
+				return [2]outcome{<-results, <-results}
+			}
+			same := race("same-key-"+uids[0][:12], 1, 1)
+			if same[0].err != nil || same[1].err != nil || same[0].view.ReleaseID != same[1].view.ReleaseID {
+				t.Fatalf("same-key race did not replay original release: %+v", same)
+			}
+			if len(same[0].view.Activated)+len(same[1].view.Activated) != 1 {
+				t.Fatalf("same-key race activated agents more than once: %+v", same)
+			}
+			different := race("different-body-"+uids[0][:12], 1, 2)
+			success, conflicts := 0, 0
+			for _, result := range different {
+				switch {
+				case result.err == nil && result.view.ReleaseID != "":
+					success++
+				case errors.Is(result.err, ErrReleaseConflict):
+					conflicts++
+				default:
+					t.Fatalf("unexpected different-body race result: %+v", different)
+				}
+			}
+			if success != 1 || conflicts != 1 {
+				t.Fatalf("different-body race must create one release and return one conflict: %+v", different)
+			}
+			for _, table := range []string{"config_revisions", "config_releases"} {
+				var count int64
+				if err := store.db.Table(table).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 2 {
+					t.Fatalf("%s should contain only the two successful publications, count=%d err=%v", table, count, err)
+				}
 			}
 		})
 	}
