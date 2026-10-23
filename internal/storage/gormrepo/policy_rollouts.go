@@ -48,29 +48,29 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 	sum := sha256.Sum256(request)
 	requestHash := hex.EncodeToString(sum[:])
 
-	var result RolloutView
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 2. 幂等回放优先读取原发布，不受后续 Agent 上下线或 Binding 变更影响。
-		if key != "" {
-			var previous ConfigReleaseRecord
-			err := tx.Clauses(clause.Locking{Strength: "SHARE"}).
-				Where("workspace_id = ? AND idempotency_key = ?", workspace, key).Take(&previous).Error
-			if err == nil {
-				if previous.RequestSHA256 != requestHash {
-					return ErrReleaseConflict
-				}
-				var plan rolloutPlan
-				if err := json.Unmarshal([]byte(previous.RolloutPlanJSON), &plan); err != nil || plan.BatchSize < 1 {
-					return ErrReleaseConflict
-				}
-				result, err = rolloutViewTx(tx, previous)
-				return err
-			}
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return err
-			}
-		}
 
+	// 2. 事务外无锁读取幂等 Key，避免 MySQL RR 缺失 Key 的间隙锁竞争。
+	if key != "" {
+		var previous ConfigReleaseRecord
+		err := s.db.WithContext(ctx).
+			Where("workspace_id = ? AND idempotency_key = ?", workspace, key).Take(&previous).Error
+		if err == nil {
+			if previous.RequestSHA256 != requestHash {
+				return RolloutView{}, ErrReleaseConflict
+			}
+			var plan rolloutPlan
+			if err := json.Unmarshal([]byte(previous.RolloutPlanJSON), &plan); err != nil || plan.BatchSize < 1 {
+				return RolloutView{}, ErrReleaseConflict
+			}
+			return s.GetRollout(ctx, workspace, previous.ReleaseID)
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return RolloutView{}, err
+		}
+	}
+	var result RolloutView
+	keyCollision := false
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var revision PolicyRevisionRecord
 		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).
 			Where("workspace_id = ? AND policy_revision_id = ?", workspace, policyRevisionID).
@@ -91,7 +91,7 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 			return policy.ErrInvalid
 		}
 
-		// 3. 在事务内锁住同 Workspace 有界候选 Agent，按当前 Binding 解析实际选中 Revision。
+		// 3. 锁住有界候选 Agent，再统一读取一次 Binding 快照用于全部目标。
 		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("workspace_id = ? AND agent_kind = ?", workspace, config.JavaAgentKind)
 		if filter.Environment != "" {
@@ -108,9 +108,13 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 		if len(candidates) > maxRolloutTargets || len(candidates) < 2 {
 			return ErrInvalidRollout
 		}
+		entries, err := (&Store{db: tx}).policyBindingSnapshot(ctx, workspace, true)
+		if err != nil {
+			return err
+		}
 		uids := make([]string, 0, len(candidates))
 		for _, agent := range candidates {
-			resolved, err := (&Store{db: tx}).resolveAgentPolicy(ctx, workspace, agent, true)
+			resolved, err := selectPolicyBinding(agent, entries)
 			if errors.Is(err, policy.ErrNotFound) {
 				continue
 			}
@@ -196,7 +200,7 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 			})
 		if r.Error != nil {
 			if key != "" && errors.Is(r.Error, gorm.ErrDuplicatedKey) {
-				return ErrReleaseConflict
+				keyCollision = true
 			}
 			return r.Error
 		}
@@ -205,5 +209,17 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 		}
 		return nil
 	})
+	if keyCollision {
+		// 唯一键竞争事务已回滚；读取胜出者并判断 Request Hash。
+		var previous ConfigReleaseRecord
+		if readErr := s.db.WithContext(ctx).
+			Where("workspace_id = ? AND idempotency_key = ?", workspace, key).Take(&previous).Error; readErr != nil {
+			return RolloutView{}, readErr
+		}
+		if previous.RequestSHA256 != requestHash {
+			return RolloutView{}, ErrReleaseConflict
+		}
+		return s.GetRollout(ctx, workspace, previous.ReleaseID)
+	}
 	return result, err
 }
