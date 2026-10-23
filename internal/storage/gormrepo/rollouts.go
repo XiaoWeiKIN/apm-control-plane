@@ -557,6 +557,99 @@ func rolloutViewTx(tx *gorm.DB, release ConfigReleaseRecord) (RolloutView, error
 	return result, nil
 }
 
+// ResumeRollout only clears PAUSED after a matching explicit Admin CAS.
+// No failed or superseded Target is silently retried or replaced.
+func (s *Store) ResumeRollout(ctx context.Context, workspace, releaseID, actor string, expectedVersion int64) (RolloutView, error) {
+	if !policyIdentityOK(workspace, actor) || len(releaseID) != 36 || expectedVersion < 1 {
+		return RolloutView{}, ErrInvalidRollout
+	}
+
+	// 1. 在事务外读取不可变目标 UID，保证后续锁顺序与发布/Advance 一致。
+	var frozen []ReleaseTargetRecord
+	if err := s.db.WithContext(ctx).Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
+		Order("instance_uid").Find(&frozen).Error; err != nil {
+		return RolloutView{}, err
+	}
+	if len(frozen) == 0 {
+		return RolloutView{}, ErrRolloutNotFound
+	}
+	var result RolloutView
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 2. 依 UID 锁 Agent，再锁 Release 和读取其冻结目标最新状态。
+		for _, target := range frozen {
+			var agent AgentRecord
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("workspace_id = ? AND instance_uid = ?", workspace, target.InstanceUID).
+				Take(&agent).Error; err != nil {
+				return err
+			}
+		}
+		var release ConfigReleaseRecord
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
+			Take(&release).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) { return ErrRolloutNotFound }
+			return err
+		}
+		var plan rolloutPlan
+		if err := json.Unmarshal([]byte(release.RolloutPlanJSON), &plan); err != nil || plan.BatchSize < 1 {
+			return ErrRolloutNotFound
+		}
+		if release.RowVersion != expectedVersion {
+			return ErrAssignmentConflict
+		}
+		if release.Status != "PAUSED" {
+			return ErrRolloutBlocked
+		}
+		if err := tx.Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
+			Order("batch_no, instance_uid").Find(&frozen).Error; err != nil { return err }
+
+		// 3. 只有当前 Assignment 确认已应用的目标可计入恢复；队列不得有损坏。
+		queued := 0
+		for _, target := range frozen {
+			switch target.Status {
+			case "QUEUED":
+				queued++
+				var assignment AgentAssignmentRecord
+				err := tx.Where("workspace_id = ? AND instance_uid = ?", workspace, target.InstanceUID).
+					Take(&assignment).Error
+				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { return err }
+				generation := int64(1)
+				if err == nil {
+					if assignment.DesiredGeneration == math.MaxInt64 { return ErrRolloutBlocked }
+					generation = assignment.DesiredGeneration + 1
+				}
+				if generation != target.DesiredGeneration { return ErrRolloutBlocked }
+			case "APPLIED":
+				var assignment AgentAssignmentRecord
+				if err := tx.Where("workspace_id = ? AND instance_uid = ?", workspace, target.InstanceUID).
+					Take(&assignment).Error; err != nil { return err }
+				if assignment.ReleaseID != releaseID || assignment.DesiredGeneration != target.DesiredGeneration ||
+					assignment.State != "APPLIED" {
+					return ErrRolloutBlocked
+				}
+			default:
+				return ErrRolloutBlocked
+			}
+		}
+
+		// 4. 恢复仅更新 Release 与审计；后续批次仍需显式 Advance。
+		now := time.Now().UTC()
+		status := "RUNNING"
+		if queued == 0 { status = "COMPLETED" }
+		if err := rolloutStateTx(tx, release, status, now); err != nil { return err }
+		if err := rolloutEventTx(tx, workspace, releaseID, frozen[0].InstanceUID, 0,
+			"ROLLOUT_RESUMED", actor, now); err != nil { return err }
+		var err error
+		result, err = rolloutViewTx(tx, release)
+		if err != nil { return err }
+		result.Status = status
+		result.RowVersion++
+		return nil
+	})
+	return result, err
+}
+
 func (s *Store) GetRollout(ctx context.Context, workspace, releaseID string) (RolloutView, error) {
 	var release ConfigReleaseRecord
 	err := s.db.WithContext(ctx).Where("workspace_id = ? AND release_id = ?", workspace, releaseID).Take(&release).Error
