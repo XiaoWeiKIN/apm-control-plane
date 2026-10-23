@@ -653,6 +653,7 @@ func run(ctx context.Context, log *slog.Logger) (runErr error) {
 	mux.Handle("POST /api/v1/rollouts", rolloutAPI)
 	mux.Handle("POST /api/v1/policy-rollouts", rolloutAPI)
 	mux.Handle("POST /api/v1/rollouts/{release_id}/resume", rolloutAPI)
+	mux.Handle("POST /api/v1/rollouts/{release_id}/rollback", rolloutAPI)
 	mux.Handle("POST /api/v1/rollouts/{release_id}/advance", rolloutAPI)
 	mux.Handle("GET /api/v1/rollouts/{release_id}", rolloutAPI)
 	policyHandler := policyAPI(store, adminAuth)
