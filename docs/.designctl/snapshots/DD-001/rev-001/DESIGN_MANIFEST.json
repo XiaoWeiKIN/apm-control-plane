@@ -1,0 +1,29 @@
+{
+  "approval_ref": "github:commit:1038ffebd1ea694c0612af460c7f0643190fecd0",
+  "approved_at": "2026-10-25T09:10:59.516Z",
+  "approved_by": "XiaoWeiKIN",
+  "artifact_type": "design-revision-manifest",
+  "author": "AI assistant",
+  "created": "2026-10-19",
+  "design_id": "DD-001",
+  "documents": [
+    {
+      "bytes": 18841,
+      "id": "DD-001",
+      "path": "DESIGN.md",
+      "role": "entrypoint",
+      "sha256": "836dd838d0ef17dc31fa76c9d33409c0a9963e6d09dc997febde5dfcc5b40f5d",
+      "title": "OpAMP APM Agent Control Plane"
+    }
+  ],
+  "entrypoint": "DESIGN.md",
+  "id": "DD-001-REV-001",
+  "layout": "single",
+  "metadata_schema": "1",
+  "owner": "Unassigned",
+  "revision": 1,
+  "schema_version": "1",
+  "status": "current",
+  "title": "OpAMP APM Agent Control Plane — approved revision 1",
+  "updated": "2026-10-25"
+}

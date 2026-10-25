@@ -6,24 +6,24 @@ id: DD-001
 doc_type: design
 layout: single
 title: "OpAMP APM Agent Control Plane"
-status: draft
+status: current
 working_revision: "1"
-published_revision: "0"
+published_revision: "1"
 research_refs: []
 research_not_required_reason: "The user selected a custom Java Agent, Go OpAMP control plane and phased delivery; existing P0 code and upstream server API establish this baseline without an unresolved factual choice for the first design draft."
 adr_refs: []
 design_dependencies: []
-decision_not_required_reason: ""
-approved_by: ""
-approved_at: ""
-approval_ref: ""
+decision_not_required_reason: "This Design documents the user-selected Go OpAMP control-plane and Java-first implementation scope without accepting a new ADR. Production IAM, UID rebinding, credential lifecycle, mTLS and HA remain separately governed decisions."
+approved_by: "XiaoWeiKIN"
+approved_at: "2026-10-25T09:10:59.516Z"
+approval_ref: "github:commit:1038ffebd1ea694c0612af460c7f0643190fecd0"
 superseded_by: ""
 terminal_reason: ""
 revision_reason: ""
 author: "AI assistant"
 owner: "Unassigned"
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-25
 ---
 
 # OpAMP APM Agent Control Plane
@@ -37,7 +37,7 @@ managed package members share one review and approval boundary.
 
 Java APM Agent 的 Traces 仍通过 OTLP → Collector → Backend 发送；控制平面不转发任何 Span。Collector 将来作为 **被管理 Agent** 接入时，仍以其独立 OTLP 数据链路发送遥测数据，不能将 Collector 的控制连接与数据接收混为一谈。
 
-目前 P0 已有基于 opamp-go v0.25.0 的 HTTP/WebSocket 接入、内存 Registry、Agent 专属采样 JSON 和测试 Agent；CI 验证 Go 单测及 Vet。目标演进为支持 PostgreSQL、MySQL 等关系型 Driver 的持久 Desired State + Agent Observed State + 可恢复 Reconciler。数据库选型可由部署配置切换，但不表示数据库 SQL 方言、DDL 或历史数据可以自动跨引擎迁移。设计状态是 **待评审草案**，不等于现有实现，也未获得 Design Owner 批准。
+目前 P0 已有基于 opamp-go v0.25.0 的 HTTP/WebSocket 接入、内存 Registry、Agent 专属采样 JSON 和测试 Agent；CI 验证 Go 单测及 Vet。目标演进为支持 PostgreSQL、MySQL 等关系型 Driver 的持久 Desired State + Agent Observed State + 可恢复 Reconciler。数据库选型可由部署配置切换，但不表示数据库 SQL 方言、DDL 或历史数据可以自动跨引擎迁移。本设计 Revision 1 已获得 Design Owner 的明确授权；批准不代表生产身份/IAM、安全契约或 HA 已完成或获单独批准。此处 P0 描述为历史基线，当前实现状态以代码与 CI 证据为准。
 
 主要代价：必须处理身份绑定、顺序与幂等、Agent 离线、WebSocket 单连接写序列化以及 HTTP 拉取场景。第一版采用模块化单体；存储通过 Repository/UnitOfWork Port 隔离数据库实现，**首批目标数据库为 PostgreSQL 和 MySQL**。两者均需运行真实引擎的 Repository 合同测试；数据库方言 SQL 与 Migration 允许分别维护。HA 与发布性能目标需要测量后另行决定。
 
