@@ -13,7 +13,7 @@ adr_refs: []
 adr_constraint_refs: []
 adr_evidence: []
 design_refs: ["docs/design-docs/dd-001_opamp-control-plane.md"]
-design_evidence: []
+design_evidence: ["DD-001@rev:1@sha256:b379e90d2d7c98dc81b5f50e548c8e2c978533539d4dcd04a4e15028deea24b2"]
 architecture_entrypoint: "docs/design-docs/index.md"
 architecture_decision_gate: not_required
 architecture_decision_gate_reason: "This active plan executes the user-selected Go OpAMP control-plane scope, not a new accepted durable architecture choice; security and schema alternatives remain unapproved and must be governed before irreversible implementation."
@@ -40,13 +40,13 @@ This ExecPlan is a bounded living document. Keep current truth synchronized. Pre
 ## Current Snapshot
 
 - Latest checkpoint: none（本执行计划首次创建）。
-- Current milestone: **P1.1 已完成首个 Durable Agent Inventory 增量（PR #3 已合并）**；当前 Workspace-scoped 清理为待合并的独立代码变更，未完成 P1 整体身份方案的正式 Design 批准。
+- Current milestone: **P1–P3.3 已有合并实现（截至 38524c6，PR #19）**；具体业务验收仍须逐项核实，不以合并代替完整验收。DD-001 Revision 1 已正式发布并通过 RepoFoundry Validation，生产身份与授权方案继续受 BLK-002 阻塞。
 - Verified baseline: PR #3 在 Go CI、Race Detector、PostgreSQL/MySQL Goose/Agent API 合同测试及 RF 中通过；当前 Workspace-scoped 清理以其独立 CI 为准；测试 Agent 的人工双进程烟测未执行。
 - Next action: 以平台 Workspace 为统一隔离键完成 P1.1 的初始化 Migration、Credential JSON、`auth.Principal.WorkspaceID`、GORM/API 和双数据库测试；随后评审平台 Workspace/IAM 认证、Agent Principal 与 UID 所有权模型。
 - Confirmed product scope (2026-10-19): 多语言 APM Agent + 后续 Collector；P1–P3 只交付通用抽象和 Java 适配链路，不把其他语言或 Collector 执行能力算入验收。
 - Storage requirement (2026-10-19): 多数据库 Driver（至少 PostgreSQL 和 MySQL）是新增范围；技术候选与风险记录在 docs/architecture/technology-selection.md，必须有两数据库实际合同测试。
 - P1 evidence (2026-10-19): PR #3 的 GORM/Goose/Koanf 与 Inventory 持久化已合并，通过 Go/DB/RF CI；本次 Workspace 作用域调整尚需各自最新 CI 和平台授权集成评审。
-- Open: DD-001 尚未批准；没有 accepted ADR；生产 TLS/身份策略尚待明确。不能把这些条件标记为完成。
+- Open: DD-001 Revision 1 已批准（证据见本 EP design_evidence）；没有 accepted ADR；生产 TLS、IAM、Agent 身份与 UID 所有权方案尚待正式批准并实现，BLK-002 保持 open。不能把这些条件标记为完成。
 
 ## Context and Orientation
 
@@ -61,7 +61,7 @@ P1 首先拆模块并持久化；P2 在此基础上引入策略版本和协调�
 | Source | Required constraint | Check |
 | --- | --- | --- |
 | docs/requirements/APM_CONTROL_PLANE.md | FR-001…FR-013 与 P1–P3 范围 | 按 FR 做验收映射 |
-| docs/design-docs/dd-001_opamp-control-plane.md | Proposed Design; NOT approved, no immutable evidence pin | 实施前逐项 review 并按结论更新 |
+| docs/design-docs/dd-001_opamp-control-plane.md | Approved Design Revision 1; immutable evidence pin `DD-001@rev:1@sha256:b379e90d2d7c98dc81b5f50e548c8e2c978533539d4dcd04a4e15028deea24b2` | 设计批准已验证；生产 IAM/安全方案及 EP 实现验收仍独立受控 |
 | docs/.engineering/specs.lock.json | EngineeringSpecifications v1.9.0 lock | RF spec validate + 精确 Requirement 激活 |
 | cmd/server/main.go | 现有 opamp-go 回调、P0 Token、内存模型 | Go tests/race and protocol tests |
 | docs/SECURITY.md | 未知项不虚构；严禁未认证范围下发 | 负向权限测试 |
@@ -73,8 +73,8 @@ P1 首先拆模块并持久化；P2 在此基础上引入策略版本和协调�
 
 - Research gate: not_required。已经由明确用户路线、现有 P0 实现及 opamp-go 公开接口建立实施初始事实，不虚构 concluded Research。
 - Architecture decision gate: not_required for plan creation。Go + opamp-go + 首期自定义 Java Agent 和先交付 Control Plane 已由用户选择；2026-10-19 用户进一步确认未来多语言 APM Agent 及 Collector 的产品范围；本计划不接受未批准 ADR。若 mTLS/Token、重复 UID 或 HA 的长期方案需要正式选择，先创建 proposed ADR 并经 Owner 接受再实施该部分。
-- Architecture compliance: applicable。精确 Design 输入路径为 docs/design-docs/dd-001_opamp-control-plane.md，architecture entrypoint 为 docs/design-docs/index.md。DD-001 为 draft，并不构成 approved revision；未批准时本 EP 不能归档 completed。
-- ADR references: []；ADR constraint evidence: []；approved Design evidence: []。不存在不得虚构。
+- Architecture compliance: applicable。精确 Design 输入路径为 docs/design-docs/dd-001_opamp-control-plane.md，architecture entrypoint 为 docs/design-docs/index.md。DD-001 Revision 1 已发布为 current，证据为 `DD-001@rev:1@sha256:b379e90d2d7c98dc81b5f50e548c8e2c978533539d4dcd04a4e15028deea24b2`；设计发布不等于 EP 验收完成，BLK-002 继续阻塞归档。
+- ADR references: []；ADR constraint evidence: []；approved Design evidence: [`DD-001@rev:1@sha256:b379e90d2d7c98dc81b5f50e548c8e2c978533539d4dcd04a4e15028deea24b2`]（授权记录 commit 1038ffeb；发布 commit 2101af6d；RepoFoundry Validation [run 40179601964](https://github.com/XiaoWeiKIN/apm-control-plane/actions/runs/40179601964) success）。不存在的 accepted ADR 不得虚构。
 - Source-backed evidence: PR #1 的 P0 代码及 GitHub Actions 绿色 Go / RF 校验，只能证明当前范围的测试通过。
 - 负面边界：没有证明 JVM 热更采样、生产流量 SLA、跨实例同步或批量发布可靠性；这些均保留为单独的后续验收。
 
@@ -82,7 +82,7 @@ P1 首先拆模块并持久化；P2 在此基础上引入策略版本和协调�
 
 | ADR constraint or architecture input | Implementation or preservation | Verification |
 | --- | --- | --- |
-| docs/design-docs/dd-001_opamp-control-plane.md | Preserve Control/Data separation, credential-bound Agent identity, immutable policy versions, Desired vs Observed state, driver-neutral Repository/UnitOfWork with PostgreSQL/MySQL storage adapters, capability checks, AgentKind/Distribution-aware configuration adapters, and HTTP/WS delivery semantics; Java remains the only first-delivery config dialect, all proposals provisional until Design approval | Protocol integration tests, PostgreSQL/MySQL shared Repository contract suite, restart and role-boundary negative tests, stale ACK/concurrency tests |
+| docs/design-docs/dd-001_opamp-control-plane.md | Preserve Control/Data separation, credential-bound Agent identity, immutable policy versions, Desired vs Observed state, driver-neutral Repository/UnitOfWork with PostgreSQL/MySQL storage adapters, capability checks, AgentKind/Distribution-aware configuration adapters, and HTTP/WS delivery semantics; Java remains the only first-delivery config dialect; DD-001 rev1 is approved, while unresolved production identity/IAM and HA choices remain separately gated | Protocol integration tests, PostgreSQL/MySQL shared Repository contract suite, restart and role-boundary negative tests, stale ACK/concurrency tests |
 
 There are no accepted ADR constraints to map. docs/design-docs/index.md is the navigation entrypoint, not an extra normative constraint row.
 
@@ -152,13 +152,15 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 ## Progress
 
+- [x] (2026-10-25) DD-001 Revision 1 已按 Design Snapshot/Manifest 契约发布；设计证据 `DD-001@rev:1@sha256:b379e90d2d7c98dc81b5f50e548c8e2c978533539d4dcd04a4e15028deea24b2` 通过同 SHA 的 RepoFoundry Validation；BLK-001 resolved，BLK-002 仍 open。
+
 - [x] (2026-10-19) 既有 P0 代码和 RepoFoundryAI Harness/Specs 已存在于 PR #1；Go 和 RF 的既有 CI 校验通过（针对当时提交）。
 - [x] (2026-10-19) 建立 DD-001 工作草案和本次 EP-001 计划；当前尚未获得 Design Owner 批准。
 - [x] (2026-10-19) P1.1 代码草案：完成 Koanf 配置、GORM 双 Driver、Goose Schema、基本凭证到 Workspace/UID 绑定与持久化 Inventory；PR #3，非已批准生产实施。
 - [ ] M1：身份边界、PostgreSQL/MySQL Registry 及双数据库合同测试、断线恢复和验收。
 - [ ] M2：版本化策略、配置协调和 ACK 追踪。
 - [ ] M3：灰度批次、审计、失败隔离和回滚。
-- [ ] 完整验收、Design 决策批准、证据归档。
+- [ ] 完整验收、BLK-002 生产身份与授权门禁、证据归档。
 
 ## Surprises & Discoveries
 
@@ -180,7 +182,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 | ID | Status | Opened | Resolved | Missing capability | Impact | Unblock or resolution |
 | --- | --- | --- | --- | --- | --- | --- |
-| BLK-001 | open | 2026-10-19 | | Design Owner 对 DD-001 的正式评审/批准 | 不能作为已批准设计完成 EP 归档 | 审核 DD-001，按 RF designctl 明确审批；实施中的可逆 P1 实验可先进行 |
+| BLK-001 | resolved | 2026-10-19 | 2026-10-25 | DD-001 Revision 1 正式 Design 审批与不可变快照证据 | 设计门禁已满足；不解除独立生产安全阻塞 | Owner 授权 [commit 1038ffeb](https://github.com/XiaoWeiKIN/apm-control-plane/commit/1038ffebd1ea694c0612af460c7f0643190fecd0)；发布 [commit 2101af6d](https://github.com/XiaoWeiKIN/apm-control-plane/commit/2101af6d59693843b283540e9615d8366bc02e2c)；RepoFoundry Validation [run 40179601964](https://github.com/XiaoWeiKIN/apm-control-plane/actions/runs/40179601964) success；Evidence Pin `DD-001@rev:1@sha256:b379e90d2d7c98dc81b5f50e548c8e2c978533539d4dcd04a4e15028deea24b2` |
 | BLK-002 | open | 2026-10-19 | | Agent 身份绑定机制和重复 UID 冲突规则的批准契约 | 禁止把当前全局 P0 Token 当生产多工作空间授权 | 提出选项、风险和测试证据，必要时创建 ADR 并获 Owner 接受 |
 
 ## Outcomes & Retrospective
@@ -208,6 +210,8 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 - 未来测试的完整日志、数据库状态和 OpAMP 消息录制应保存至计划 artifacts/，索引仅记录可核验证据路径；当前未产生这些数据。
 
 ## Revision Notes
+
+- 2026-10-25 — 记录 DD-001 Revision 1 的 Owner 授权、不可变 Design Snapshot 和 Evidence Pin；截至发布 commit 2101af6d 的 RepoFoundry Validation 通过。BLK-001 已解除；BLK-002 和 EP-001 blocked 状态保留。旧进度条目属于 2026-10-19 历史快照，未勾选新验收。
 
 - 2026-10-20 — P1.1 Workspace-scoped 命名/初始化数据模型整理作为独立实现增量推进。保留 EP-001 blocked 状态与身份安全审批门禁。
 
