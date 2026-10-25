@@ -35,12 +35,13 @@ type RolloutTarget struct {
 }
 
 type RolloutView struct {
-	WorkspaceID string          `json:"workspace_id"`
-	ReleaseID   string          `json:"release_id"`
-	Status      string          `json:"status"`
-	RowVersion  int64           `json:"row_version"`
-	Targets     []RolloutTarget `json:"targets"`
-	Activated   []string        `json:"activated,omitempty"`
+	WorkspaceID         string          `json:"workspace_id"`
+	ReleaseID           string          `json:"release_id"`
+	Status              string          `json:"status"`
+	RowVersion          int64           `json:"row_version"`
+	Targets             []RolloutTarget `json:"targets"`
+	Activated           []string        `json:"activated,omitempty"`
+	RollbackOfReleaseID *string         `json:"rollback_of_release_id,omitempty"`
 }
 
 type rolloutPlan struct {
@@ -56,9 +57,19 @@ func validRolloutUID(uid string) bool {
 	return err == nil && len(raw) == 16 && hex.EncodeToString(raw) == uid
 }
 
+type rollbackIntent struct {
+	SourceReleaseID    string
+	ExpectedRowVersion int64
+}
+
 // PublishRollout freezes an explicitly bounded target set and activates batch 0
 // in one transaction. Later batches remain QUEUED without changing Desired.
 func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID string, uids []string, batchSize int, key string) (RolloutView, error) {
+	return s.publishRollout(ctx, workspace, actor, configID, uids, batchSize, key, nil)
+}
+
+// publishRollout reuses the P3.1 transaction for a compensating Release.
+func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID string, uids []string, batchSize int, key string, rollback *rollbackIntent) (RolloutView, error) {
 	// 1. 在开事务前规范化目标，拒绝重复 UID、无界批量和无效作用域。
 	if workspace == "" || utf8.RuneCountInString(workspace) > 96 ||
 		actor == "" || utf8.RuneCountInString(actor) > 128 ||
@@ -74,13 +85,23 @@ func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID s
 		}
 	}
 	plan := rolloutPlan{BatchSize: batchSize, Batches: (len(targets) + batchSize - 1) / batchSize}
+	kind := "batch-rollout"
+	sourceID := ""
+	var sourceVersion int64
+	if rollback != nil {
+		kind = "compensating-rollback"
+		sourceID = rollback.SourceReleaseID
+		sourceVersion = rollback.ExpectedRowVersion
+	}
 	request, err := json.Marshal(struct {
 		Kind             string   `json:"kind"`
 		ConfigRevisionID string   `json:"config_revision_id"`
 		InstanceUIDs     []string `json:"instance_uids"`
 		BatchSize        int      `json:"batch_size"`
 		Actor            string   `json:"actor"`
-	}{"batch-rollout", configID, targets, batchSize, actor})
+		SourceReleaseID  string   `json:"source_release_id,omitempty"`
+		SourceRowVersion int64    `json:"source_row_version,omitempty"`
+	}{kind, configID, targets, batchSize, actor, sourceID, sourceVersion})
 	if err != nil {
 		return RolloutView{}, err
 	}
@@ -115,6 +136,43 @@ func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID s
 			}
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
+			}
+		}
+		if rollback != nil {
+			// 幂等回放后锁定源 Release，验证其类型、CAS 和可补偿状态。
+			var source ConfigReleaseRecord
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("workspace_id = ? AND release_id = ?", workspace, rollback.SourceReleaseID).
+				Take(&source).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrRolloutNotFound
+				}
+				return err
+			}
+			var sourcePlan rolloutPlan
+			if err := json.Unmarshal([]byte(source.RolloutPlanJSON), &sourcePlan); err != nil || sourcePlan.BatchSize < 1 {
+				return ErrRolloutNotFound
+			}
+			if source.RowVersion != rollback.ExpectedRowVersion {
+				return ErrAssignmentConflict
+			}
+			switch source.Status {
+			case "RUNNING", "PAUSED", "COMPLETED":
+			default:
+				return ErrRolloutBlocked
+			}
+			var sourceTargets []ReleaseTargetRecord
+			if err := tx.Where("workspace_id = ? AND release_id = ?", workspace, source.ReleaseID).
+				Order("instance_uid").Find(&sourceTargets).Error; err != nil {
+				return err
+			}
+			if len(sourceTargets) != len(targets) {
+				return ErrInvalidRollout
+			}
+			for i, target := range sourceTargets {
+				if target.InstanceUID != targets[i] || target.ConfigRevisionID == configID {
+					return ErrInvalidRollout
+				}
 			}
 		}
 		var revision ConfigRevisionRecord
@@ -175,6 +233,12 @@ func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID s
 			TargetSelectorJSON: string(selector), RequestSHA256: requestHash,
 			IdempotencyKey: idem, RolloutPlanJSON: string(rolloutJSON),
 			Status: "RUNNING", RowVersion: 1, RequestedBy: actor,
+			RollbackOfReleaseID: func() *string {
+				if rollback != nil {
+					return &rollback.SourceReleaseID
+				}
+				return nil
+			}(),
 			CreatedAt: now, StartedAt: &now,
 		}
 		if err := tx.Create(&release).Error; err != nil {
@@ -182,6 +246,26 @@ func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID s
 				return ErrReleaseConflict
 			}
 			return err
+		}
+		if rollback != nil {
+			id, err := newReleaseUUID()
+			if err != nil {
+				return err
+			}
+			details, err := json.Marshal(struct {
+				SourceReleaseID  string `json:"source_release_id"`
+				ConfigRevisionID string `json:"config_revision_id"`
+			}{rollback.SourceReleaseID, configID})
+			if err != nil {
+				return err
+			}
+			if err := tx.Create(&ConfigEventRecord{
+				WorkspaceID: workspace, EventID: id, EventType: "ROLLBACK_REQUESTED",
+				ReleaseID: &release.ReleaseID, ActorType: "ADMIN", ActorID: actor,
+				DetailsJSON: string(details), OccurredAt: now,
+			}).Error; err != nil {
+				return err
+			}
 		}
 		for i, uid := range targets {
 			generation := int64(1)
@@ -549,7 +633,7 @@ func rolloutViewTx(tx *gorm.DB, release ConfigReleaseRecord) (RolloutView, error
 		return RolloutView{}, err
 	}
 	result := RolloutView{WorkspaceID: release.WorkspaceID, ReleaseID: release.ReleaseID,
-		Status: release.Status, RowVersion: release.RowVersion, Targets: make([]RolloutTarget, 0, len(frozen))}
+		Status: release.Status, RowVersion: release.RowVersion, RollbackOfReleaseID: release.RollbackOfReleaseID, Targets: make([]RolloutTarget, 0, len(frozen))}
 	for _, target := range frozen {
 		result.Targets = append(result.Targets, RolloutTarget{
 			InstanceUID: target.InstanceUID, ConfigRevisionID: target.ConfigRevisionID,
