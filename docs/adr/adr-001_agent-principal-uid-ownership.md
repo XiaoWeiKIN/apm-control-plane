@@ -37,12 +37,14 @@ owner: "Unassigned"
 
 本 ADR 只回答：**OpAMP Agent 的 `(workspace_id, instance_uid)` 应绑定 Credential ID，还是由受信任身份来源证明的稳定 Agent Principal？**
 
+**必须明确的权限粒度**：现有 [Workspace Schema](../architecture/storage-schema.md) 将一个 `agent_principal_id` 设计为可拥有多个 `instance_uid`。这意味着 Agent Principal 是**所有权主体**，不自动等于唯一的运行中实例。若多个实例共用能够证明相同 Principal 的 Credential，该 Credential 的持有者可能报告该 Principal 名下其他 UID；仅替换 `credential_id` 为 `agent_principal_id` 并不能解决这种同 Principal 范围内的冒用。被盗用的同 Principal Credential 也会带来相同风险。是否允许共享凭证、是否需要更细的实例授权或可信首次绑定流程，必须由 Owner 在实施前明确，不能把该 ADR 当作实例级强身份的证明。
+
 它不决定最终凭证协议（Token、JWT、mTLS）、身份颁发服务、WS 会话撤销期限或跨 Gateway HA。那些能力仍受 [EP-001 BLK-002](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) 独立约束；[DD-001 Revision 1](../design-docs/dd-001_opamp-control-plane.md) 已批准，不能因此推断本提案也已批准。
 
 ## Decision Drivers
 
 - **权限边界**：从受信任认证路径取得 Workspace 和 Agent 身份；AgentDescription、`service.name`、`agent.kind`、`instance_uid` 的自报属性不授予身份或跨 Workspace 权限。
-- **轮换安全**：同一合法 Agent Principal 换用新的 Credential，不能被当成另一个 Agent；失窃或错误 Credential 也不能通过 UID 猜测接管历史 Desired。
+- **轮换与冒领边界**：同一合法 Agent Principal 换用新的 Credential，不能被当成另一个 Principal；**不同 Principal** 的凭证不能通过自报 UID 接管历史 Desired。同 Principal 共享或失窃 Credential 的 UID 冒用风险，必须另有明确授权粒度及处理规则。
 - **写入一致性**：首次绑定、Owner 冲突和换绑之间不允许竞态；原有 `agent_assignments` 的 Desired Generation/ACK CAS 语义保持不变。
 - **变更代价**：使用现有 `(workspace_id, instance_uid)` 主键，避免为了轮换而给每个 Credential 创建重复 Agent 记录。
 - **审计与迁移**：初次绑定和经审批的所有权变化可归因；未知历史 Credential 不能自动映射为新 Principal。
@@ -64,7 +66,7 @@ owner: "Unassigned"
 | 选项 | 行为 | 收益 | 风险与代价 |
 | --- | --- | --- | --- |
 | A. 保持 Credential ID 直接拥有 UID | 首次注册 `credential_id`；后续只有同 Credential 能更新 | 变更最小；与已实现 P1 行为兼容 | Credential 轮换改变身份，缺乏可审计的同 Principal 连续性；需要额外人工迁移流程 |
-| **B. 用可信稳定 Agent Principal 拥有 UID（推荐，待批准）** | 认证层从平台权威身份来源解析出 `workspace_id` 和稳定 `agent_principal_id`；Credential 仅证明该 Principal | 合法轮换不改变 UID 归属；清晰隔离身份与认证材料，适合现有 Workspace-scoped Desired 模型 | 需要批准 Principal 颁发、已有绑定数据的安全迁移及撤销语义；可能涉及 Schema 变更 |
+| **B. 用可信稳定 Agent Principal 拥有 UID（推荐，待批准）** | 认证层从平台权威身份来源解析出 `workspace_id` 和稳定 `agent_principal_id`；Credential 仅证明该 Principal | 合法轮换不改变 UID 归属；清晰隔离身份与认证材料，适合现有 Workspace-scoped Desired 模型 | 需要批准 Principal 颁发、共享 Principal 的 UID 授权范围、已有绑定数据的安全迁移及撤销语义；它**不保证同 Principal 内不同实例互不冒用**，也可能涉及 Schema 变更 |
 | C. 直接以客户端证书/Token 实例标识拥有 UID | 每个证书或 Token fingerprint 作为 Owner | 绑定到强认证材料可降低某些冒领风险 | 证书或 Token 更新仍改变 Owner；若使用稳定 subject 标识，本质上转化为 B；传输选型会不必要地绑死数据模型 |
 
 **建议 B**：它把“是谁”与“用什么证明身份”分开，同时不规定最终使用哪一种认证协议。A 可继续作为开发/测试历史实现，但不能默认取得生产授权。C 的证书验证可作为 B 的认证方式之一，不应把可轮换的证书指纹当稳定身份。
@@ -73,7 +75,7 @@ owner: "Unassigned"
 
 **状态：proposed，待 Design/Security Owner 明确接受或拒绝。** 提议采用 B。没有真实 Owner 的审批决定，`decision_maker`、`decided` 和 `decision_outcome` 继续为空；此处的推荐不形成现行约束。
 
-选择理由是：`workspace_id`、`agent_principal_id` 与 `instance_uid` 的含义独立，可以在不改变现有 Assignment 主键的前提下支持凭证轮换并拒绝越权接管。只有通过受信任身份源与安全迁移证明该模型可实施后，才能开展生产改造。
+选择理由是：`workspace_id`、`agent_principal_id` 与 `instance_uid` 的含义独立，可以在不改变现有 Assignment 主键的前提下支持凭证轮换，并拒绝**其他 Principal** 对已绑定 UID 的越权接管。它不能单凭 Principal ID 阻止同一 Principal 范围内的实例冒用。只有通过受信任身份源、明确的 Principal/UID 授权粒度与安全迁移证明该模型可实施后，才能开展生产改造。
 
 ## Decision Statement
 
@@ -91,6 +93,7 @@ owner: "Unassigned"
 | C-004 | must_not | Agent 所有权变化 | 不得用“重新登录”“静默覆盖 Credential ID”或 Agent 自报 UID 绕过所有权校验；需要转移时必须经过另行批准的授权/审计流程，否则明确拒绝 | 无权限重新绑定、旧凭证重放与跨 Principal 转移拒绝测试 |
 | C-005 | must | 历史身份迁移 | 如果已有数据，只有在来源受信任且可追溯的 Credential→Principal 映射确认后才能迁移；未知/冲突映射明确阻断，不做猜测或自动认领 | PG/MySQL 迁移前检查、冲突回滚、恢复演练和审计验证 |
 | C-006 | must | Desired/Observed 保持 | 身份升级不得允许未经授权的 Principal 操作现有 Assignment/Release，也不得削弱 ACK Hash/Generation/RowVersion 的校验 | 复用 P2/P3 跨 Workspace、并发 Release/ACK 及重启恢复测试 |
+| C-007 | must | Principal/UID 授权粒度 | 正式实现必须明确一个 Principal 是否可拥有多个 UID、共享 Credential 是否可自主注册新 UID、以及同 Principal 不同实例能否互相操作。若业务要求实例级隔离，必须通过可信身份或注册授权机制限定允许访问的具体 UID；不得以 Agent 自报 UID 或单纯相同 Principal ID 充当实例身份的额外证明 | 共享 Credential 的同 Principal UID 冒用/首次绑定用例、跨 Principal 接管负向用例与授权范围审计 |
 
 ## Consequences
 
@@ -98,7 +101,7 @@ owner: "Unassigned"
 - **代价**：需要可信 Principal 映射（例如由平台身份服务或受信任网关提供）。具体来源、网络信任边界、Token/mTLS、缓存、角色权限和撤销期限尚未决定，不能提前实现一套自创 IAM。
 - **数据库**：正式批准后才评估是否增加 `agent_principal_id` 与约束；不得假定历史数据为空，也不得把 MySQL DDL 的隐式提交当成 PostgreSQL 等价回滚。
 - **兼容性**：现有环境变量静态 Credential 与 `credential_id` 所有权属于开发基线；是否保留测试模式或提供迁移期配置须经实施评审。不能悄然把不同 Credential 当同一 Principal。
-- **安全**：稳定 Principal 是所有权边界的必要条件之一，不等于实现了撤销/吊销、WS 长连接重新认证、TLS/mTLS、跨节点 Session Fencing 或平台 IAM。
+- **安全**：稳定 Principal 仅解决 Credential 与授权主体生命周期分离，以及不同 Principal 的所有权边界；一个 Principal 仍可能管理多 UID。若 Credential 在该 Principal 范围内共享，持有者可以发出相同 Principal 下的请求，不能因此声称提供了每实例冒用保护。该决定也不等于实现了撤销/吊销、WS 长连接重新认证、TLS/mTLS、跨节点 Session Fencing 或平台 IAM。
 - **实施**：不预设新的转移 API、通用认证框架、额外数据库或跨节点缓存。缺少可信映射时拒绝，不引入静默 fallback。
 
 ## Confirmation
@@ -109,9 +112,22 @@ owner: "Unassigned"
 2. 真实 OpAMP HTTP/WS 验证不同 Credential 解析到**同一个**稳定 Principal 时，重连和 Desired/Observed ACK 连续，且不增加重复 Agent 记录；跨 Workspace 和不同 Principal 不可接管。
 3. 验证历史记录迁移的冲突处理、失败回滚和审计留存，使用与真实部署一致的数据样本；对无法证实所有权的旧记录 fail closed。
 4. 在生产身份来源已批准且实际集成后，验证过期/撤销行为和部署 TLS 边界；这些需要另外的安全决策及验收证据，不能用本 ADR 的格式校验替代。
-5. 复用 [PR #21](https://github.com/XiaoWeiKIN/apm-control-plane/pull/21) 进程重启和 [PR #22](https://github.com/XiaoWeiKIN/apm-control-plane/pull/22) 静态凭证隔离用例作为回归起点；它们并非新 Principal 模型的验证证明。
+5. 对实际选择的 Principal 授权粒度执行专门测试：若共享 Credential 是支持用法，要验证同 Principal 内多个 UID 的可操作范围；若要求每实例互不冒用，则必须用可信的逐 UID 授权或实例身份证据证明拒绝。不能将不同 Principal 的拒绝测试充当同 Principal 内的实例隔离证明。
+6. 复用 [PR #21](https://github.com/XiaoWeiKIN/apm-control-plane/pull/21) 进程重启和 [PR #22](https://github.com/XiaoWeiKIN/apm-control-plane/pull/22) 静态凭证隔离用例作为回归起点；它们并非新 Principal 模型或共享凭证下 UID 安全的验证证明。
 
 所有报告须固定实际受测 SHA、Go/PG/MySQL 版本及 GitHub Actions/原始日志；由 EP-001 引用正式验收证据，再由 Owner 判断 BLK-002 是否解除。
+
+## Implementation prerequisites requiring Owner decisions
+
+本 ADR 的推荐方向不代替以下实施输入；若 Owner 无法明确其中的 Principal 授权粒度，则应暂缓接受本提案，不要推断“稳定 Principal”已满足实例级安全目标。
+
+| Owner 需要确认 | 当前已知情况 | 对实现与验收的影响 |
+| --- | --- | --- |
+| Principal 粒度 | [Workspace Schema](../architecture/storage-schema.md) 明确一 Principal 可拥有多个 Agent Instance；现有静态 Credential 没有独立的每实例身份声明 | 确定 Principal 是每实例、每工作负载、每安装还是其他授权主体；列明该主体可绑定哪些 UID |
+| Credential 是否共享 | 现有 `APM_AGENT_CREDENTIALS_JSON` 只提供 `id/workspace_id/token`，没有“Credential 唯一对应运行实例”的技术保证 | 如允许共享，明确同 Principal 内的 UID 可操作范围，并决定是否需要额外受信任 UID 注册授权 |
+| 首次 UID 注册权限 | `Store.Observe` 在 `(workspace_id, instance_uid)` 尚不存在时创建记录，再检查当前 Credential 所有权 | 明确可由谁注册新 UID、是否需要先经过受信任注册、克隆实例复用 UID 如何拒绝或恢复 |
+| Credential 泄露/撤销时效 | 当前静态 Token 与 WS 会话不支持即时撤销 | 由独立 IAM/会话安全合同规定撤销、重新认证和长连接失效期限；不能由本 ADR 兜底 |
+| 历史 UID 归属迁移 | 目前数据库以 `credential_id` 记录首次绑定；实际历史数据规模未经此 PR 检查 | 未找到可信 Credential→Principal 映射时停止迁移，不允许因同一 Workspace 而全部合并 |
 
 ## Revisit Triggers
 
@@ -134,3 +150,4 @@ owner: "Unassigned"
 ## Revision Notes
 
 - 2026-10-26T07:23:59Z — Proposed ADR created.
+- 2026-10-26 — Clarified that a stable Principal may own multiple Instance UIDs and does not itself prevent impersonation by another holder of the same Principal's Credential; added C-007 and explicit Owner decisions. Status remains proposed.
