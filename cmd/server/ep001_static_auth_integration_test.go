@@ -82,7 +82,7 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 			}
 			binding, err := store.CreatePolicyBinding(ctx, workspace, "admin-owner", gormrepo.BindingInput{
 				PolicyRevisionID: policyRevision.PolicyRevisionID,
-				ScopeType: policy.ScopeService, Selector: policy.Selector{ServiceName: "checkout"},
+				ScopeType:        policy.ScopeService, Selector: policy.Selector{ServiceName: "checkout"},
 				Priority: 10,
 			})
 			if err != nil {
@@ -176,7 +176,7 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 			policyJSON := fmt.Sprintf(`{"policy_revision_id":%q}`, policyRevision.PolicyRevisionID)
 			type endpoint struct {
 				name, method, path, body string
-				foreignStatus int
+				foreignStatus            int
 			}
 			paths := []endpoint{
 				{"list-agents", "GET", "/api/v1/agents", "", http.StatusOK},
