@@ -25,9 +25,9 @@
 | 门禁 | 已核对事实 | 剩余行动 |
 | --- | --- | --- |
 | DD-001 / BLK-001 | `status: current`、`published_revision: 1`；批准记录 [1038ffeb](https://github.com/XiaoWeiKIN/apm-control-plane/commit/1038ffebd1ea694c0612af460c7f0643190fecd0)；Design Evidence Pin `DD-001@rev:1@sha256:b379e90d2d7c98dc81b5f50e548c8e2c978533539d4dcd04a4e15028deea24b2`；[RepoFoundry run 40179601964](https://github.com/XiaoWeiKIN/apm-control-plane/actions/runs/40179601964) | 保留已批准设计证据；不得重新标记 Draft |
-| BLK-002 | EP 中仍为 `open`，没有已批准生产身份安全方案的证据 | Design/Security Owner 决定可信 Agent Principal、首次注册与 UID 归属、重复 UID 处理、凭证轮换/撤销、TLS/mTLS、HTTP/WS 授权及跨 Workspace 防护；形成可验证批准记录和负向测试 |
+| BLK-002 | EP 中仍为 `open`；现有身份采用静态 Workspace-scoped Credential，未发现正式生产身份安全方案的批准证据；`docs/SECURITY.md` 仍是 bootstrap scaffold | 根据 [BLK-002 决策与验收材料](ep-001-blk002-security-decision-packet.md)，由 Security/Design Owner 明确可信 Principal、UID 归属、轮换/撤销和 HTTP/WS/TLS 边界；落实批准后的负向测试 |
 | EP-001 | `status: blocked`，`verified_revision` 与 `verification_evidence` 为空；M1–M3 未完成正式验收 | 在最新 main 上执行独立合同与恢复验证，通过规范 CLI 更新进度、Checkpoint 和验收 |
-| Benchmark | EP 要求先预声明规模/延迟场景，但 `required_benchmark_scenarios: []`，无已归档 Run | 先审批预声明参数与门槛，再按规范工具创建 BS/BR、运行并封存原始数据 |
+| Benchmark | EP 说明规模/延迟测量应预声明，但 `required_benchmark_scenarios: []`：尚未登记强制 BS 验收门禁，亦无已封存 Run | Owner 先决定本 EP 是否需要正式 Benchmark 场景并明确门槛；如决定纳入验收，再用规范工具先创建 BS、后运行和封存 BR。不得自动将候选数值当作 EP 完成门槛 |
 
 ## 3. 待 Design/Security Owner 决定
 
@@ -43,7 +43,7 @@
 1. 审计人员以最新 main SHA 检查 P1–P3.3 的具体接口/事务/回滚/ACK/双库测试证据，标记 Verified / Partially Verified / Unverified。
 2. 使用 RepoFoundry `epctl` 的规范流程修正过期的 `Current Snapshot`、`Next action` 和 M1–M3 验收矩阵，保留历史记录和 blocked 状态；不手改受治理元数据。
 3. 由 Owner 对 BLK-002 作出明确安全设计决定；实现与测试独立 PR，不以批准 DD-001 自动解除 BLK-002。
-4. 在测量前预声明 Benchmark Scenario、固定环境/负载/阈值，运行真实 PG/MySQL，保留原始样本与无效 Run。
+4. Owner 先决定 Benchmark 是否成为 EP 完成门禁；需要正式测量时，在测量前预声明 Scenario、固定环境/负载/阈值，并保存真实 PG/MySQL 样本、失败和无效 Run。
 5. 只有全部验收及安全门禁均具备证据后，才通过 RepoFoundry 正式完成并归档 EP-001。
 
 ## 5. 本轮不作的声明
