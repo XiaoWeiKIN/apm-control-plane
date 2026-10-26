@@ -76,7 +76,7 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, policyRevision, err := store.CreatePolicy(ctx, workspace, "admin-owner", "role-boundary", 0.4)
+			createdPolicy, policyRevision, err := store.CreatePolicy(ctx, workspace, "admin-owner", "role-boundary", 0.4)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -186,7 +186,7 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 					fmt.Sprintf(`{"config_revision_id":%q}`, revision.ConfigRevisionID), http.StatusNotFound},
 				{"policy-release", "POST", "/api/v1/agents/" + uids[0] + "/policy-releases", policyJSON, http.StatusNotFound},
 				{"create-policy", "POST", "/api/v1/policies", `{"name":"unauthorized","sampling_rate":0.2}`, 0},
-				{"policy-revision", "POST", "/api/v1/policies/" + binding.PolicyRevisionID + "/revisions",
+				{"policy-revision", "POST", "/api/v1/policies/" + createdPolicy.PolicyID + "/revisions",
 					`{"sampling_rate":0.2}`, http.StatusNotFound},
 				{"create-binding", "POST", "/api/v1/policy-bindings", bindingJSON, http.StatusNotFound},
 				{"update-binding", "PUT", "/api/v1/policy-bindings/" + binding.BindingID, updateJSON, http.StatusNotFound},
