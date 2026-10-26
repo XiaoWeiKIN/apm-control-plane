@@ -1,0 +1,42 @@
+name: Temporary BLK-002 ADR proposal creation
+
+on:
+  push:
+    branches:
+      - docs/blk002-agent-principal-adr-proposal
+
+permissions:
+  contents: write
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, 'chore(adr): canonical generated proposal')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: docs/blk002-agent-principal-adr-proposal
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Allocate proposed ADR via pinned RepoFoundry epctl
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            https://raw.githubusercontent.com/XiaoWeiKIN/RepoFoundryAI/v0.15.1/install.py \
+            --output "$RUNNER_TEMP/repofoundry-install.py"
+          python3 "$RUNNER_TEMP/repofoundry-install.py" --version 0.15.1 --host none
+          RF_ROOT="$HOME/.local/share/repofoundry-ai"
+          EPCTL="$(find "$RF_ROOT" -type f -path '*/engineering-execution-plan/scripts/epctl.py' -print -quit)"
+          test -n "$EPCTL"
+          python3 "$EPCTL" --repo . new-adr \
+            --slug agent-principal-uid-ownership \
+            --title "Bind OpAMP Agent UIDs to stable principals, not credentials" \
+            --author "AI assistant" --owner "Unassigned" \
+            --design docs/design-docs/dd-001_opamp-control-plane.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/adr docs/.epctl/state.json docs/DECISIONS.md
+          git commit -m "chore(adr): canonical generated proposal"
+          git push origin HEAD:docs/blk002-agent-principal-adr-proposal
