@@ -26,7 +26,6 @@ paths remain stable across every lifecycle state so history stays auditable.
 | ID | Title | Decision | Effect | Related ADRs | Updated | Research | Path |
 |---|---|---|---|---|---|---|---|
 | ADR-001 | Bind OpAMP Agent UIDs to stable principals, not credentials | pending | proposed | — | 2026-10-26 | [] | [ADR](adr/adr-001_agent-principal-uid-ownership.md) |
-| ADR-002 | Bind OpAMP Agent UIDs to stable principals, not credentials | pending | proposed | — | 2026-10-26 | [] | [ADR](adr/adr-002_agent-principal-uid-ownership.md) |
 <!-- ADRCTL:ACTIVE:END -->
 
 ## Effective
