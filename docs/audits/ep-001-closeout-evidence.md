@@ -38,7 +38,23 @@
 
 以上均是待审批问题，不在本 PR 里代替 Owner 作出决定。
 
-## 4. 正式 EP 收尾建议顺序
+## 4. EP-001 验收矩阵（实现证据与正式验收分离）
+
+以下按 `EXECPLAN.md` 的 `Validation and Acceptance` 条目逐一定位测试。历史 PR 的真实双数据库 CI 提供**当时提交**的测试结果；本 PR 没有执行最新 main 的重启/身份/容量全量验收，故本表不勾选原 EP 清单。
+
+| EP 验收 | 已存在的代码/测试与历史证据 | 现阶段结论 | 仍需核对 |
+| --- | --- | --- | --- |
+| P1 Identity | `TestRepositoryContractPostgresAndMySQL`（`internal/storage/gormrepo/store_integration_test.go`）；`TestAgentRegistrationThroughOpAMPToDatabaseAndAPI`（`cmd/server/http_integration_test.go`） | **Partially Verified**：Repository/API 合同存在，PR #3 已合并 | 真实 Agent 双进程注册、服务重启后对外查询/回连及 BLK-002 的稳定 Principal/轮换尚未完成正式验收 |
+| P1 Compatibility | `TestWorkspaceScopeAndOwnerBinding`、`TestTransportFreshnessAndIdentityFields`、`TestAdminUnauthorized`（`cmd/server/main_test.go`） | **Partially Verified**：基础 Workspace/UID 和 HTTP 负向测试存在 | Java/Go/Python/Collector 身份样本覆盖与所有管理路由的最新合同确认；静态 Token 不代表生产 IAM |
+| P2 Policy | `TestPolicyReleaseOpAMPHTTPPostgresAndMySQL`、`TestPolicyReleaseAtomicPostgresAndMySQL`、`TestDurableRemoteConfigHTTPAckPostgresAndMySQL` | **CI Verified（历史提交）**：完整 Java 配置编译、HTTP/ACK 与 Policy 原子发布有真实数据库合同 | 对照本 EP 精确的 `rate=0.1` 等业务条件复核运行日志；最新 main 端到端证据待汇总 |
+| P2 Reconciliation | `TestWebSocketPushAndReconnectPostgresAndMySQL`、`TestConcurrentReleaseAndACKPreservesLatestDesiredPostgresAndMySQL` | **CI Verified（历史提交）**：WS Push、重连和旧 ACK 的真实数据库集成测试存在；PR #12 的 [DB CI](https://github.com/XiaoWeiKIN/apm-control-plane/actions/runs/39429412756) 已通过 | 真实控制面进程重启/Agent 重新接入路径需逐条对照 EP 验收，不把连接对象重建等同所有部署拓扑 |
+| P2 Capabilities/Concurrency | `TestWSFailedSendDisconnectsAndStopsWriter`、`TestStopClosesBlockedWSSend`（`cmd/server/ws_reliability_test.go`）；`TestFailedACKPersistsReleaseDiagnosticsPostgresAndMySQL` | **Partially Verified**：错误发送与 ACK 保护测试存在，历史 Go/DB CI 已通过 | 精确能力位/非 Java Agent/不兼容 Dialect 全矩阵、实连接并发和动态凭证撤销仍需按正式合同验收 |
+| P3 Release | `TestFrozenBatchRolloutPostgresAndMySQL`、`TestRolloutStopAndRollbackPostgresAndMySQL`、`TestPolicySelectedRolloutAndResumePostgresAndMySQL`、`TestExplicitRollbackPostgresAndMySQL`、`TestRollbackAuditFailureIsAtomicPostgresAndMySQL` | **CI Verified（历史提交）**：P3.1–P3.3 合并，PR #19 的 [DB CI](https://github.com/XiaoWeiKIN/apm-control-plane/actions/runs/39905652388) 已通过 | EP 提及的失败阈值、进度统计及超时策略的产品验收边界未全部明确；生产权限仍依赖 BLK-002 |
+| RF Contract | DD-001 rev1 `current` 且批准 Pin 已核对；历史 RepoFoundry CI 见上表 | **Partially Verified**：设计门禁通过、历史 RF CI 成功 | 通过仓库 canonical CLI 在最终验证 SHA 执行 Harness/Spec/designctl/epctl 校验，维护验收证据与 Checkpoint；`EP-001` 仍 `blocked` |
+
+**特别说明**：PR #20 为文档审计。仓库 `.github/workflows/p1-database-contracts.yml` 仅对代码、Migration 和 Go module 等路径触发；文档提交的 Go/RF CI 通过不表示该文档 Head 自动重跑了 PG/MySQL 合同。本表是实现与测试入口的**证据导航**，不是新的通过认定。
+
+## 5. 正式 EP 收尾建议顺序
 
 1. 审计人员以最新 main SHA 检查 P1–P3.3 的具体接口/事务/回滚/ACK/双库测试证据，标记 Verified / Partially Verified / Unverified。
 2. 使用 RepoFoundry `epctl` 的规范流程修正过期的 `Current Snapshot`、`Next action` 和 M1–M3 验收矩阵，保留历史记录和 blocked 状态；不手改受治理元数据。
@@ -46,6 +62,6 @@
 4. Owner 先决定 Benchmark 是否成为 EP 完成门禁；需要正式测量时，在测量前预声明 Scenario、固定环境/负载/阈值，并保存真实 PG/MySQL 样本、失败和无效 Run。
 5. 只有全部验收及安全门禁均具备证据后，才通过 RepoFoundry 正式完成并归档 EP-001。
 
-## 5. 本轮不作的声明
+## 6. 本轮不作的声明
 
 未在本 PR 运行 Benchmark；未对最新 main 执行全部业务合同；未完成生产 IAM/Agent Principal/UID 安全验收；未创建或批准 ADR；未修改 EP-001 状态；未宣称 EP 已完成。
