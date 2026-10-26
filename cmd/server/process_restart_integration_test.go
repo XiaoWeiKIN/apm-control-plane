@@ -271,7 +271,7 @@ func TestControlPlaneProcessRestartPostgresAndMySQL(t *testing.T) {
 				t.Fatal("restarted process returned incomplete ConfigMap")
 			}
 			if got := send(2, &protobufs.RemoteConfigStatus{
-				Status: protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
+				Status:               protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
 				LastRemoteConfigHash: offered.RemoteConfig.ConfigHash,
 			}); got.RemoteConfig != nil {
 				t.Fatal("matching APPLIED ACK caused duplicate config offer")
