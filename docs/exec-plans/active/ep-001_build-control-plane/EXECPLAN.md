@@ -40,13 +40,13 @@ This ExecPlan is a bounded living document. Keep current truth synchronized. Pre
 ## Current Snapshot
 
 - Latest checkpoint: none（本执行计划首次创建）。
-- Current milestone: **P1–P3.3 已有合并实现（截至 38524c6，PR #19）**；具体业务验收仍须逐项核实，不以合并代替完整验收。DD-001 Revision 1 已正式发布并通过 RepoFoundry Validation，生产身份与授权方案继续受 BLK-002 阻塞。
-- Verified baseline: PR #3 在 Go CI、Race Detector、PostgreSQL/MySQL Goose/Agent API 合同测试及 RF 中通过；当前 Workspace-scoped 清理以其独立 CI 为准；测试 Agent 的人工双进程烟测未执行。
-- Next action: 以平台 Workspace 为统一隔离键完成 P1.1 的初始化 Migration、Credential JSON、`auth.Principal.WorkspaceID`、GORM/API 和双数据库测试；随后评审平台 Workspace/IAM 认证、Agent Principal 与 UID 所有权模型。
+- Current milestone: **P1–P3.3 主要代码已合并，EP-001 处于收尾验收与生产身份安全治理阶段**。截至 `main@853b393f812b077a9c9e3c55cb11d85c1ee81005`，PR #20（证据/决策材料）、#21（真实进程重启）、#22（管理 API 角色/Workspace 隔离）均已合并；随后 PR #23（ADR-001 `proposed` 提案）及 #24（共享 Credential 多 UID 双数据库回归）已于 2026-10-27 合并至 `main`。实现和回归测试通过不等于 M1–M3 全部正式验收。DD-001 rev1 已发布；BLK-002 仍 open。
+- Verified baseline: `main@853b393f812b077a9c9e3c55cb11d85c1ee81005` 的 [Go CI](https://github.com/XiaoWeiKIN/apm-control-plane/actions/runs/40285174686)、[PostgreSQL 17/MySQL 8.4 Contracts](https://github.com/XiaoWeiKIN/apm-control-plane/actions/runs/40285174444)、[RepoFoundry Validation](https://github.com/XiaoWeiKIN/apm-control-plane/actions/runs/40285174396) 均成功。PR #21 的 `TestControlPlaneProcessRestartPostgresAndMySQL` 在两库实际启动、退出并重启服务进程后验证 Inventory/Desired/ACK；PR #22 的 `TestEP001StaticCredentialBoundariesPostgresAndMySQL` 验证静态凭证下的角色/Workspace 拒绝。两者的证据限于测试合同，不能冒充生产 IAM、TLS 或全部 EP 验收。
+- Next action: [PR #23](https://github.com/XiaoWeiKIN/apm-control-plane/pull/23)（ADR-001 `proposed`）与 [PR #24](https://github.com/XiaoWeiKIN/apm-control-plane/pull/24)（静态共享 Credential 多 UID 双库回归）已合并；下一步由 Security/Design Owner 正式决定 ADR-001，并批准可信 Workspace/Workload Principal 来源、UID 归属、凭证轮换/撤销、HTTP/WS 和 TLS 边界。只在正式批准后实现生产身份方案、运行必要负向验收，再依据正式证据更新本计划。
 - Confirmed product scope (2026-10-19): 多语言 APM Agent + 后续 Collector；P1–P3 只交付通用抽象和 Java 适配链路，不把其他语言或 Collector 执行能力算入验收。
 - Storage requirement (2026-10-19): 多数据库 Driver（至少 PostgreSQL 和 MySQL）是新增范围；技术候选与风险记录在 docs/architecture/technology-selection.md，必须有两数据库实际合同测试。
-- P1 evidence (2026-10-19): PR #3 的 GORM/Goose/Koanf 与 Inventory 持久化已合并，通过 Go/DB/RF CI；本次 Workspace 作用域调整尚需各自最新 CI 和平台授权集成评审。
-- Open: DD-001 Revision 1 已批准（证据见本 EP design_evidence）；没有 accepted ADR；生产 TLS、IAM、Agent 身份与 UID 所有权方案尚待正式批准并实现，BLK-002 保持 open。不能把这些条件标记为完成。
+- P1 evidence (2026-10-26 核对): PR #3 的 GORM/Goose/Koanf 与 Inventory 持久化已经合并；后续 Workspace-scoped、PR #21 真实进程重启及 PR #22 静态权限负向合同已进入 main，最新 Go/PG/MySQL/RF CI 见 Verified baseline。平台 Workspace IAM 的权威校验、Principal 与撤销契约仍未验收。
+- Open: DD-001 rev1 已批准（见 `design_evidence`）。目前没有 accepted ADR；ADR-001 已由 PR #23 合并到 `main`，但状态仍为 `proposed`，**不能将产品确认的工作负载级粒度视为对具体安全实现的批准**。生产 TLS、IAM 可信主体、Agent UID 归属和凭证轮换/撤销尚未通过门禁，BLK-002 保持 open，`status: blocked` 不变。
 
 ## Context and Orientation
 
@@ -152,6 +152,9 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 ## Progress
 
+- [x] (2026-10-26) 代码与审计证据同步：PR [#20](https://github.com/XiaoWeiKIN/apm-control-plane/pull/20)（审计矩阵/安全决策输入/Benchmark 提案）、[#21](https://github.com/XiaoWeiKIN/apm-control-plane/pull/21)（真实服务进程重启/Desired 恢复）、[#22](https://github.com/XiaoWeiKIN/apm-control-plane/pull/22)（P1–P3 API 静态凭证角色/Workspace 隔离）已合并；`main@853b393f812b077a9c9e3c55cb11d85c1ee81005` 的 Go CI、真实双数据库合同与 RepoFoundry Validation 成功。仅记录已合并实现及已运行的测试证据，不勾选 M1–M3 正式验收或解除 BLK-002。
+- [ ] (2026-10-26，2026-10-27 更新) 生产身份门禁：PR #23 的 ADR-001 已合并但仍为 `proposed`，待 Security/Design Owner 正式决定；PR #24 的现有共享 Credential 多 UID 回归已合并且真实 PG/MySQL 双数据库 CI 通过。工作负载级 Principal 一对多 UID 的产品方向已明确，但平台身份颁发、UID 授权粒度以外的安全生命周期、TLS 和撤销仍未验证。
+
 - [x] (2026-10-25) DD-001 Revision 1 已按 Design Snapshot/Manifest 契约发布；设计证据 `DD-001@rev:1@sha256:b379e90d2d7c98dc81b5f50e548c8e2c978533539d4dcd04a4e15028deea24b2` 通过同 SHA 的 RepoFoundry Validation；BLK-001 resolved，BLK-002 仍 open。
 
 - [x] (2026-10-19) 既有 P0 代码和 RepoFoundryAI Harness/Specs 已存在于 PR #1；Go 和 RF 的既有 CI 校验通过（针对当时提交）。
@@ -187,7 +190,7 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 
 ## Outcomes & Retrospective
 
-当前计划 active，尚无 M1–M3 实现结果。待实际完成后记录相对目标的行为变化、CI/基准证据、剩余缺口和迁移经验；不得依据计划创建日期填入完成证明。
+当前计划仍为 active / blocked。M1–M3 对应的 P1–P3.3 主要实现已经合并，静态凭证权限与真实进程重启的双数据库回归也已完成；但 **M1–M3 尚未按本 EP 的逐项业务验收要求正式签收**。BLK-002 生产身份安全未解决，Benchmark 只有候选提案（`required_benchmark_scenarios: []`，没有正式必需 BS 门禁或封存结果），因此没有 completed outcome、verified_revision 或 archive seal。待实际验收后再记录不可变完成证据。
 
 ### Knowledge promotion candidates
 
@@ -210,6 +213,10 @@ P2 将通用 Configuration/Revision/Assignment 与 Java SamplingPolicy 解耦；
 - 未来测试的完整日志、数据库状态和 OpAMP 消息录制应保存至计划 artifacts/，索引仅记录可核验证据路径；当前未产生这些数据。
 
 ## Revision Notes
+
+- 2026-10-27 — PR #23（ADR-001 `proposed`）已 Squash Merge 至 `main@f2895a4d977aed0fce4166288df3a15e57d4a41b`；PR #24（静态共享 Credential 多 UID 回归）已 Squash Merge 至 `main@27c7efbde232b88fb25ea57e501844674e7a3d74`，其最新 Head `abf10890340036390e6b90e192785e9f48e644b9` 的 [Go CI](https://github.com/XiaoWeiKIN/apm-control-plane/actions/runs/40440852725)、[PostgreSQL/MySQL 合同](https://github.com/XiaoWeiKIN/apm-control-plane/actions/runs/40440852675) 与 [RepoFoundry Validation](https://github.com/XiaoWeiKIN/apm-control-plane/actions/runs/40440852629) 通过。同步下一步安全决策入口；BLK-002、EP-001 blocked 及 M1–M3 未签收状态不变。
+
+- 2026-10-26 — 依据 `main@853b393f812b077a9c9e3c55cb11d85c1ee81005` 的真实 Go/PG/MySQL/RF CI、已合并 PR #20–#22 和开放 PR #23/#24，修正 Current Snapshot、Next action、Progress 与 Outcomes 的过期描述。保留原有历史、DD-001 rev1 Evidence Pin、`status: blocked`、BLK-002 open、全部未签收验收项及空的完成证据字段。
 
 - 2026-10-25 — 记录 DD-001 Revision 1 的 Owner 授权、不可变 Design Snapshot 和 Evidence Pin；截至发布 commit 2101af6d 的 RepoFoundry Validation 通过。BLK-001 已解除；BLK-002 和 EP-001 blocked 状态保留。旧进度条目属于 2026-10-19 历史快照，未勾选新验收。
 
