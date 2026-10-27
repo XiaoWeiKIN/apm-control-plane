@@ -33,7 +33,7 @@ owner: "Unassigned"
 
 当前 Agent 注册路径使用静态 Workspace-scoped Bearer Credential：`internal/auth/auth.go` 将 Token 映射为 `auth.Principal{WorkspaceID, CredentialID}`，`internal/storage/gormrepo/store.go` 的 `agent_instances` 以 `(workspace_id, instance_uid)` 标识记录，同时用 `credential_id` 限制后续写入。这个机制能够拒绝其他 Credential 对既有 UID 的直接覆盖；其静态边界已由 [PR #22](https://github.com/XiaoWeiKIN/apm-control-plane/pull/22) 的双数据库集成测试进一步覆盖。
 
-但 **Credential 是可轮换、可撤销的认证材料；Agent Principal 是应当跨 Credential 生命周期保持稳定的身份**。当前把两者作为 UID 所有权的同一属性，会造成正常轮换后被拒绝、需要人工修改数据库映射，或诱导采用不受审计的重新绑定。以上是设计风险，不代表已证明生产安全故障。
+但 **Token 是可轮换、可撤销的认证材料；Agent Principal 是应当跨不同 Credential 生命周期保持稳定的身份**。当前模型的 UID 所有权绑定 `credential_id`：若仅替换同一个 Credential ID 对应的 Token，并重启服务加载静态配置，UID 所有权不变；若改用新的 Credential ID，现有 UID 的后续写入会被拒绝。配置还要求 Credential ID 和 Token 分别唯一，无法让新旧两枚 Token 同时以同一 Credential ID 生效。因此，**不同 Credential 的重叠轮换、分别撤销及可信身份连续性**仍缺少明确模型。以上是设计风险，不代表已证明生产安全故障。
 
 本 ADR 只回答：**OpAMP Agent 的 `(workspace_id, instance_uid)` 应绑定 Credential ID，还是由受信任身份来源证明的稳定 Agent Principal？**
 
@@ -65,7 +65,7 @@ owner: "Unassigned"
 
 | 选项 | 行为 | 收益 | 风险与代价 |
 | --- | --- | --- | --- |
-| A. 保持 Credential ID 直接拥有 UID | 首次注册 `credential_id`；后续只有同 Credential 能更新 | 变更最小；与已实现 P1 行为兼容 | Credential 轮换改变身份，缺乏可审计的同 Principal 连续性；需要额外人工迁移流程 |
+| A. 保持 Credential ID 直接拥有 UID | 首次注册 `credential_id`；后续只有同 Credential 能更新 | 变更最小；同 ID 替换 Token 可保持 UID 所有权 | 改用新 Credential ID 时无法继续更新原 UID；不支持新旧 Credential 重叠证明同一 Principal，缺乏独立撤销和可审计的跨 Credential 身份连续性 |
 | **B. 用可信稳定 Agent Principal 拥有 UID（推荐，待批准）** | 认证层从平台权威身份来源解析出 `workspace_id` 和稳定 `agent_principal_id`；Credential 仅证明该 Principal | 合法轮换不改变 UID 归属；清晰隔离身份与认证材料，适合现有 Workspace-scoped Desired 模型 | 需要批准 Principal 颁发、共享 Principal 的 UID 授权范围、已有绑定数据的安全迁移及撤销语义；它**不保证同 Principal 内不同实例互不冒用**，也可能涉及 Schema 变更 |
 | C. 直接以客户端证书/Token 实例标识拥有 UID | 每个证书或 Token fingerprint 作为 Owner | 绑定到强认证材料可降低某些冒领风险 | 证书或 Token 更新仍改变 Owner；若使用稳定 subject 标识，本质上转化为 B；传输选型会不必要地绑死数据模型 |
 
@@ -133,7 +133,7 @@ owner: "Unassigned"
 
 - 平台 IAM 无法提供稳定、不可伪造且可审计的 Agent Principal。
 - 已有部署的 Credential/UID 数据无法建立安全的 Principal 映射。
-- Agent 实际采用共享工作负载 Credential，无法独立区分实例 Owner。
+- 安全需求变更为同 Principal 内逐实例 UID 隔离，或共享 Credential 的风险超出 Security Owner 正式批准的威胁模型。
 - 未来 mTLS、代理终止、跨节点会话或 UID 转移合同要求改变 Principal 语义。
 - 经批准的性能、可靠性或安全验收揭示此模型引入不可接受的代价。
 
