@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -65,11 +66,9 @@ func TestSharedWorkloadCredentialPostgresAndMySQL(t *testing.T) {
 			if !errors.Is(err, ErrOwnership) {
 				t.Fatalf("different credential acquired workload UID: %v", err)
 			}
-			for _, uid := range uids {
-				record, err := store.Get(ctx, workspace, uid)
-				if err != nil || record.CredentialID != owner.CredentialID || record.ServiceName != "checkout" {
-					t.Fatalf("workload inventory changed after rejected takeover %s: %+v %v", uid, record, err)
-				}
+			after, err := store.List(ctx, workspace)
+			if err != nil || !reflect.DeepEqual(agents, after) {
+				t.Fatalf("workload inventory changed after rejected takeover: before=%+v after=%+v err=%v", agents, after, err)
 			}
 
 			// 3. 相同 UID 在另一 Workspace 独立，不能覆盖原 Workspace 的归属。
