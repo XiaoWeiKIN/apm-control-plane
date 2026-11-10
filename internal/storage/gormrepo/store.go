@@ -4,14 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"math"
 	"time"
 	"unicode/utf8"
 
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/appconfig"
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/auth"
-	"gorm.io/driver/mysql"
-	"gorm.io/driver/postgres"
+	"github.com/datafoxlabs/storekit/sqlstore"
+	storemysql "github.com/datafoxlabs/storekit/sqlstore/mysql"
+	storepostgres "github.com/datafoxlabs/storekit/sqlstore/postgres"
+	"go.opentelemetry.io/otel/trace/noop"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
@@ -68,25 +72,33 @@ type Store struct{ db *gorm.DB }
 // Open does not create tables. Production schema changes are managed by Goose.
 func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 	// 1. 根据驱动配置选择 SQL Dialector，未知类型提前失败。
-	var dialector gorm.Dialector
+	var driver sqlstore.Driver
 	switch cfg.Driver {
 	case "postgres":
-		dialector = postgres.Open(cfg.DSN)
+		driver = storepostgres.Open
 	case "mysql":
-		dialector = mysql.Open(cfg.DSN)
+		driver = storemysql.Open
 	default:
 		return nil, fmt.Errorf("unsupported database driver %q", cfg.Driver)
 	}
-	db, err := gorm.Open(dialector, &gorm.Config{
-		Logger:                 logger.Default.LogMode(logger.Silent),
-		SkipDefaultTransaction: true,
-		TranslateError:         true,
-	})
+	dbConfig, err := sqlstore.NewDatabaseConfig(
+		sqlstore.WithDBType(cfg.Driver),
+		sqlstore.WithConnectionString(cfg.DSN),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("database configuration: %w", err)
+	}
+	dbConfig.LogLevel = logger.Silent
+	managed, err := sqlstore.Open(
+		dbConfig, driver, slog.New(slog.NewTextHandler(io.Discard, nil)), noop.NewTracerProvider(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	db := managed.GetDB()
 	sqlDB, err := db.DB()
 	if err != nil {
+		_ = managed.Close()
 		return nil, err
 	}
 	// 2. 配置连接池，并确认数据库能在启动期限内响应。
