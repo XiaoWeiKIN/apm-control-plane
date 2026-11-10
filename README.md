@@ -5,7 +5,7 @@ A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Ag
 ## Developer documentation
 
 - [核心模块与职责边界：六个功能模块 + 三个支撑模块](docs/architecture/modules.md) — Gateway、Registry、Policy、Config、Release、Reconciler 的状态归属、依赖关系、Go Package 和 P2 实施顺序。
-- [完整数据库设计：Workspace Scope / P1–P3](docs/architecture/storage-schema.md) — 11 张逻辑表、外键、CAS、审计与 Goose Schema。
+- [完整数据库设计：Workspace Scope / P1–P3](docs/architecture/storage-schema.md) — 11 张逻辑表、外键、CAS、审计与数据库 Schema。
 - [P1.1 Agent Inventory 运行说明](docs/architecture/p1-durable-inventory.md) — Workspace 凭证、双数据库启动、重连与当前限制。
 - [总体架构](docs/architecture/README.md)、[技术选型](docs/architecture/technology-selection.md)、[受治理 DD-001（Draft）](docs/design-docs/dd-001_opamp-control-plane.md)。
 - [开源架构研究 R-001](docs/research/active/r-001_opamp-oss-architecture/RESEARCH.md)。
@@ -54,7 +54,7 @@ See [P2.3 delivery contract](docs/architecture/p2-reconcile-delivery.md) for pre
 
 Requires Go 1.25+, PostgreSQL or MySQL and a fresh development database. The schema uses the existing `workspace_id` model. **No migration from a previous `tenant_id` schema is provided.**
 
-First initialize or adopt the Control Plane schema using the
+Initialize the Control Plane schema on a fresh database using the
 [DataFox Schema CLI](https://github.com/datafoxlabs/datafox-schema).
 Use a **single-executor Migration Job**, separate from the server.
 The private repository must be accessible to the deployment environment,
@@ -75,11 +75,9 @@ For MySQL, use a `mysql://user:password@host:3306/database` URL for
 `DATAFOX_SCHEMA_DSN`. The runtime `APM_DATABASE_DSN` remains a Go MySQL
 driver DSN containing `parseTime=true&loc=UTC`.
 
-Existing Goose 00001–00004 installations must first be fully migrated to
-Goose version 4. The new schema CLI then adopts their existing tables and
-records `controlplane_init_schema` without altering business rows or deleting
-Goose history. Back up the database before this transition. The CLI refuses
-partial or unmanaged schemas instead of guessing a repair.
+Only fresh databases are supported. The Schema CLI refuses any existing
+Control Plane business table without a successful migration record; it does
+not adopt previous databases or attempt to repair partial initialization.
 
 In local development, use two distinct high-entropy replacement tokens. The names below are example shell variables; only the credential JSON variables are read by the **server**:
 

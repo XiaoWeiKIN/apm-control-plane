@@ -1,12 +1,13 @@
 # Control Plane database schema
 
-The Control Plane PostgreSQL/MySQL schema is maintained by
+The PostgreSQL/MySQL Control Plane schema is defined by the Go DSL in
 [datafox-schema/controlplane/migrations](https://github.com/datafoxlabs/datafox-schema/tree/main/controlplane/migrations).
 
-No local Goose migrations are maintained. Initialize a new database or adopt a
-completed legacy Goose v4 database with a single-executor
-`datafox-schema migrate up --domain=controlplane` before starting this service.
-The runtime validates the `controlplane_init_schema` success marker.
+This repository does not maintain its own schema migrations. Initialize a fresh
+database with a single-executor `datafox-schema migrate up --domain=controlplane`
+job **before** starting the service. The runtime checks the
+`controlplane_init_schema` success marker.
 
-Existing Goose migration history and business rows are preserved during adoption.
-Do not remove or manually rewrite a production migration history table.
+If any Control Plane business table already exists without a successful
+migration record, initialization fails. There is no database takeover,
+automatic repair or data deletion.
