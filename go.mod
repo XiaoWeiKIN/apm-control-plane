@@ -1,16 +1,16 @@
 module github.com/XiaoWeiKIN/apm-control-plane
 
-go 1.25.0
+go 1.25.8
 
 require (
+	github.com/datafoxlabs/storekit/sqlstore v0.1.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/knadh/koanf/parsers/yaml v1.1.1
 	github.com/knadh/koanf/providers/file v1.2.1
 	github.com/knadh/koanf/v2 v2.4.1
 	github.com/open-telemetry/opamp-go v0.25.0
+	go.opentelemetry.io/otel/trace v1.44.0
 	google.golang.org/protobuf v1.36.11
-	gorm.io/driver/mysql v1.6.0
-	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.2
 )
 
@@ -33,5 +33,7 @@ require (
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/text v0.21.0
+	gorm.io/driver/mysql v1.6.0 // indirect
+	gorm.io/driver/postgres v1.6.0 // indirect // indirect
 )
