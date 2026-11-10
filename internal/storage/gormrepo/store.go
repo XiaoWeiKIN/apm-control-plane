@@ -69,7 +69,7 @@ type Observation struct {
 
 type Store struct{ db *gorm.DB }
 
-// Open does not create tables. Production schema changes are managed by Goose.
+// Open does not create tables. Schema changes are owned by datafox-schema.
 func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 	// 1. 根据驱动配置选择 SQL Dialector，未知类型提前失败。
 	var driver sqlstore.Driver
@@ -109,22 +109,23 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
-	// 3. 要求 Goose 至少完成 00004；表检查不能替代迁移版本检查。
-	var schemaVersion int64
+	// 3. 验证统一 Schema 迁移历史，不能把现存表推断为已完成迁移。
+	var applied int64
 	if err := db.WithContext(ctx).Raw(
-		"SELECT version_id FROM goose_db_version WHERE is_applied = ? ORDER BY id DESC LIMIT 1", true,
-	).Scan(&schemaVersion).Error; err != nil {
+		"SELECT COUNT(*) FROM migration_log WHERE migration_id = ? AND success = ?",
+		"controlplane_init_schema", true,
+	).Scan(&applied).Error; err != nil {
 		_ = sqlDB.Close()
-		return nil, fmt.Errorf("inspect Goose schema version: %w", err)
+		return nil, fmt.Errorf("inspect DataFox controlplane schema: %w", err)
 	}
-	if schemaVersion < 4 {
+	if applied != 1 {
 		_ = sqlDB.Close()
-		return nil, fmt.Errorf("Goose schema version %d: run migrations through 00004", schemaVersion)
+		return nil, fmt.Errorf("DataFox controlplane schema is not initialized: run datafox-schema migrate up --domain=controlplane")
 	}
 	// 校验必需的表与 Agent Inventory 字段；缺失时明确启动失败。
 	if !db.Migrator().HasTable(&AgentRecord{}) {
 		_ = sqlDB.Close()
-		return nil, fmt.Errorf("agent_instances schema missing: run Goose migrations for %s", cfg.Driver)
+		return nil, fmt.Errorf("agent_instances schema missing: run DataFox controlplane schema migration for %s", cfg.Driver)
 	}
 	columns, err := db.Migrator().ColumnTypes(&AgentRecord{})
 	if err != nil {
@@ -144,7 +145,7 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 	} {
 		if !present[name] {
 			_ = sqlDB.Close()
-			return nil, fmt.Errorf("agent_instances column %q missing: initialize the current Goose schema", name)
+			return nil, fmt.Errorf("agent_instances column %q missing: initialize the current DataFox controlplane schema", name)
 		}
 	}
 	// P2.2 需要完整事务表，缺少 Migration 00003 时不得启动可接受发布的 API。
@@ -163,7 +164,7 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 	} {
 		if !db.Migrator().HasTable(table.model) {
 			_ = sqlDB.Close()
-			return nil, fmt.Errorf("%s schema missing: run Goose migrations for %s", table.name, cfg.Driver)
+			return nil, fmt.Errorf("%s schema missing: run DataFox controlplane schema migration for %s", table.name, cfg.Driver)
 		}
 	}
 	return &Store{db: db}, nil
