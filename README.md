@@ -13,7 +13,7 @@ A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Ag
 ## Implemented P1.1
 
 - OpAMP HTTP/WebSocket server at `/v1/opamp`, with credential-based Agent authentication.
-- Agent Inventory in PostgreSQL or MySQL via GORM; schema installed separately through Goose.
+- Agent Inventory in PostgreSQL or MySQL via GORM; schema installed separately through datafox-schema.
 - A **trusted deployment-configured `workspace_id`** on each Agent/Admin credential. Admin inventory queries and Agent ownership are scoped to the same platform Workspace.
 - Instance identity `(workspace_id, instance_uid)`; the credential that first registers the UID retains ownership within that Workspace.
 - Service metadata, Agent Kind/Distribution/Version, capabilities, latest health and RemoteConfigStatus snapshots.
@@ -26,7 +26,7 @@ A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Ag
 
 The P2.1 code increment includes `internal/config.CompileJavaSampling` and `gormrepo.Store.CreateConfigRevision/GetConfigRevision`. It compiles a single Java `apm/sampling.json` to a **complete serialized OpAMP ConfigMap**, stores its immutable bytes and SHA-256 hash under a new Workspace-scoped UUID Revision, and can read the same bytes after reopening PostgreSQL or MySQL.
 
-Before using these internal operations, run Goose migration `00002_config_revisions.sql` for your configured driver. This new compiled snapshot hashes deterministic protobuf ConfigMap bytes. P2.1 alone does not publish to any Agent.
+Before using these internal operations, initialize the matching Control Plane schema with `datafox-schema migrate up --domain=controlplane`. This new compiled snapshot hashes deterministic protobuf ConfigMap bytes. P2.1 alone does not publish to any Agent.
 
 ## P2.2: Persist one Agent's Pending Release
 
@@ -38,7 +38,7 @@ The endpoint checks the Agent's Workspace, type and advertised remote-config cap
 
 **HTTP 202 only confirms a committed Desired state.** P2.3 subsequently delivers the Revision through OpAMP and records Hash-matched ACK, but 202 does not establish delivery or JVM application. The P0 `PUT /sampling` remains in-memory. There is no management endpoint yet for creating ConfigRevisions: P2.1 creates these from internal Go code; P2.2 references an existing Revision ID. JVM runtime sampling remains unverified.
 
-Run Goose `up` for the selected database before startup: **00001, 00002 and 00003 are all required**. Startup fails explicitly if a release table is missing; the service does not alter schemas automatically.
+Run `datafox-schema migrate up --domain=controlplane` before startup. Startup rejects a missing `controlplane_init_schema` success record or required tables; the service does not alter schemas automatically.
 
 ## P2.3: OpAMP RemoteConfig delivery and reconciliation
 
@@ -52,19 +52,34 @@ See [P2.3 delivery contract](docs/architecture/p2-reconcile-delivery.md) for pre
 
 ## Local startup
 
-Requires Go 1.25+, PostgreSQL or MySQL and a fresh development database. Because this project has not yet been deployed with persistent production data, the initial `00001_agent_instances.sql` definition uses `workspace_id` directly. **No migration from a previous `tenant_id` schema is provided.**
+Requires Go 1.25+, PostgreSQL or MySQL and a fresh development database. The schema uses the existing `workspace_id` model. **No migration from a previous `tenant_id` schema is provided.**
 
-First run the correct Goose migration:
+First initialize or adopt the Control Plane schema using the
+[DataFox Schema CLI](https://github.com/datafoxlabs/datafox-schema).
+Use a **single-executor Migration Job**, separate from the server.
+The private repository must be accessible to the deployment environment,
+and the CLI should be built from a reviewed, pinned release.
 
 ```bash
-go install github.com/pressly/goose/v3/cmd/goose@v3.27.0
-
+# Build the pinned DataFox Schema CLI separately, then run:
 export APM_DB_DRIVER=postgres
 export APM_DATABASE_DSN='postgres://app:replace@127.0.0.1:5432/controlplane?sslmode=disable'
-goose -dir db/migrations/postgres postgres "$APM_DATABASE_DSN" up
+export DATAFOX_SCHEMA_DSN="$APM_DATABASE_DSN"
+
+datafox-schema migrate status --domain=controlplane
+datafox-schema migrate up --domain=controlplane
+datafox-schema migrate history --domain=controlplane --limit=20
 ```
 
-For MySQL, use `APM_DB_DRIVER=mysql`, a DSN containing `parseTime=true&loc=UTC`, and `goose -dir db/migrations/mysql mysql "$APM_DATABASE_DSN" up`.
+For MySQL, use a `mysql://user:password@host:3306/database` URL for
+`DATAFOX_SCHEMA_DSN`. The runtime `APM_DATABASE_DSN` remains a Go MySQL
+driver DSN containing `parseTime=true&loc=UTC`.
+
+Existing Goose 00001–00004 installations must first be fully migrated to
+Goose version 4. The new schema CLI then adopts their existing tables and
+records `controlplane_init_schema` without altering business rows or deleting
+Goose history. Back up the database before this transition. The CLI refuses
+partial or unmanaged schemas instead of guessing a repair.
 
 In local development, use two distinct high-entropy replacement tokens. The names below are example shell variables; only the credential JSON variables are read by the **server**:
 
@@ -120,7 +135,7 @@ go test -race ./...
 go vet ./...
 ```
 
-The [P1 Database Contracts workflow](.github/workflows/p1-database-contracts.yml) runs Goose and the same Repository and OpAMP HTTP/API integration tests on **PostgreSQL 17 and MySQL 8.4**. This proves those test contracts, not production readiness or actual Java SDK sampling.
+The [P1 Database Contracts workflow](.github/workflows/p1-database-contracts.yml) runs DataFox Schema and the same Repository and OpAMP HTTP/API integration tests on **PostgreSQL 17 and MySQL 8.4**. This proves those test contracts, not production readiness or actual Java SDK sampling.
 
 ## Engineering governance
 
