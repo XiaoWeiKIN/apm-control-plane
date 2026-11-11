@@ -92,6 +92,14 @@ func TestRequireExplicitOrgCredentials(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("old tenant_id field must be rejected: %v", err)
 	}
+	_, err = LoadWithEnv(testEnv(map[string]string{
+		"APM_DATABASE_DSN":           "test",
+		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","workspace_id":"old-workspace","token":"agent-example-long-token"}]`,
+		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","org_id":"org-a","token":"admin-example-long-token"}]`,
+	}))
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("legacy workspace_id field must be rejected: %v", err)
+	}
 	config, err := LoadWithEnv(testEnv(map[string]string{
 		"APM_DATABASE_DSN":           "test",
 		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","org_id":"org-a","token":"agent-example-long-token"}]`,
