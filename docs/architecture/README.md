@@ -10,7 +10,7 @@
 
 第一次接触本项目，建议依次阅读「系统概览 → 三条主要流程 → 核心概念 → 模块与契约」。准备开发新功能时，再阅读「并发与一致性 → 安全与故障 → 扩展一个 Agent 类型 → 源码地图」。
 
-核心模块职责、状态归属、Go Package 边界与 P2 开发顺序以 [核心模块与职责边界](modules.md) 为阅读入口；数据库字段、关系与 CAS 约束以 [Org Schema](storage-schema.md) 为准。已经采用的 Koanf/GORM/Goose 见 [P1–P3 技术选型](technology-selection.md)。这些开发者文档不替代 DD-001 的正式审批。
+核心模块职责、状态归属、Go Package 边界与 P2 开发顺序以 [核心模块与职责边界](modules.md) 为阅读入口；数据库字段、关系与 CAS 约束以 [Org Schema](storage-schema.md) 为准。历史选型与已迁移至 storekit/DataFox Schema 的差异见 [P1–P3 技术选型](technology-selection.md)。这些开发者文档不替代 DD-001 的正式审批。
 
 本项目的业务需求以 [FR-001～FR-013](../requirements/APM_CONTROL_PLANE.md) 为准；架构审批与版本身份由 [DD-001](../design-docs/dd-001_opamp-control-plane.md) 管理；里程碑和验证由 [EP-001](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) 管理。
 
@@ -65,7 +65,7 @@ flowchart TB
     Collector --> Backend["APM Backend / ClickHouse"]
 ~~~
 
-上图描述**P1–P3 目标拓扑**，不是所有模块都已部署。P1.1 已通过 GORM/Goose 在 PostgreSQL 和 MySQL 上实现持久化 Agent Registry；Policy Release 与 Reconciler 仍未实现。Org 是可观测平台统一的组织边界，当前 P1.1 的作用域来自受信的部署凭证配置，平台 Org/IAM 联通还未完成。所谓“未来 Collector”是**被管理对象**，不能与图中的 OTLP Receiver 自动视为同一个实例。
+上图描述**P1–P3 目标拓扑**，不是所有模块都已部署。P1.1 Agent Registry 已通过 GORM 在 PostgreSQL 和 MySQL 上实现持久化，当前数据库初始化由 DataFox Schema DSL 负责；Policy Release 与 Reconciler 仍未实现。Org 是可观测平台统一的组织边界，当前 P1.1 的作用域来自受信的部署凭证配置，平台 Org/IAM 联通还未完成。所谓“未来 Collector”是**被管理对象**，不能与图中的 OTLP Receiver 自动视为同一个实例。
 
 ## 2. 从一次采样策略发布理解系统
 
@@ -386,7 +386,7 @@ Rollout Controller 将发布目标分成可审计批次。每批使用匹配 Has
 
 **数据库字段、复合 Org 外键、事务/CAS、双方言和迁移路径的详细合同**见 [Org Schema 设计](storage-schema.md)：目标共 11 张核心逻辑表与三张按需扩展表，其中目前仅 `agent_instances` 已由 P1.1 持久化。**模块职责与状态归属**见 [核心模块设计](modules.md)。
 
-一个 Control Plane 部署只选择 PostgreSQL 或 MySQL 中的一种主数据库；GORM 使用统一 Repository，Goose Migration 按数据库方言分别维护。当前只有 `agent_instances(org_id, instance_uid)` 已落地。未来的 Policy、ConfigRevision、Release、Target、Assignment 和 Event 都需要以数据库为可靠事实源，活动网络 Connection 则只存在于进程内存。
+一个 Control Plane 部署只选择 PostgreSQL 或 MySQL 中的一种主数据库；GORM 使用统一 Repository，建库由 DataFox Schema DSL 负责。当前 Inventory、Policy、Config Revision、Release、Target、Assignment 和 Event 表均已定义。未来的 Policy、ConfigRevision、Release、Target、Assignment 和 Event 都需要以数据库为可靠事实源，活动网络 Connection 则只存在于进程内存。
 
 逻辑关键约束：
 
@@ -551,12 +551,12 @@ db/migrations/
 
 ### 13.1 复现 Org-scoped P1.1
 
-Go 1.25+、本地 PostgreSQL 或 MySQL。先按 [P1.1 运行手册](p1-durable-inventory.md) 执行对应的 Goose 初始化 Migration，再使用受信的 Org Credential JSON 配置启动 Server。下面只展示认证变量部分：
+Go 1.25+、本地 PostgreSQL 或 MySQL。先按 [P1.1 运行手册](p1-durable-inventory.md) 通过 DataFox Schema CLI 初始化新数据库，再使用受信的 Org Credential JSON 配置启动 Server。下面只展示认证变量部分：
 
 ```bash
 export APM_AGENT_CREDENTIALS_JSON='[{"id":"dev-agent","org_id":"dev-org","token":"replace-with-a-long-random-agent-token"}]'
 export APM_ADMIN_CREDENTIALS_JSON='[{"id":"dev-admin","org_id":"dev-org","token":"replace-with-a-different-long-admin-token"}]'
-# 另需配置 APM_DB_DRIVER 和 APM_DATABASE_DSN，并执行对应 Goose migration
+# 另需配置 APM_DB_DRIVER 和 APM_DATABASE_DSN，并执行 DataFox Schema 初始化
 go run ./cmd/server
 ```
 
