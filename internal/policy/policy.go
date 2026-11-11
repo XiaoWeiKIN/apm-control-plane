@@ -17,7 +17,7 @@ var (
 )
 
 const (
-	ScopeWorkspace   = "WORKSPACE"
+	ScopeOrg   = "ORG"
 	ScopeEnvironment = "ENVIRONMENT"
 	ScopeService     = "SERVICE"
 	ScopeInstance    = "INSTANCE"
@@ -32,7 +32,7 @@ type Selector struct {
 
 func (s Selector) Canonical(scope string) (string, string, error) {
 	switch scope {
-	case ScopeWorkspace:
+	case ScopeOrg:
 		if s.Environment != "" || s.ServiceName != "" || s.InstanceUID != "" {
 			return "", "", ErrInvalid
 		}
@@ -71,7 +71,7 @@ type Agent struct {
 
 func (s Selector) Matches(scope string, a Agent) bool {
 	switch scope {
-	case ScopeWorkspace:
+	case ScopeOrg:
 		return true
 	case ScopeEnvironment:
 		return s.Environment == a.Environment
@@ -92,7 +92,7 @@ func ScopeRank(scope string) int {
 		return 3
 	case ScopeEnvironment:
 		return 2
-	case ScopeWorkspace:
+	case ScopeOrg:
 		return 1
 	}
 	return 0

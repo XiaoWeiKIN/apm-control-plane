@@ -12,7 +12,7 @@ func TestSelectorScopesAndCanonicalHash(t *testing.T) {
 		selector Selector
 		matches  bool
 	}{
-		{ScopeWorkspace, Selector{}, true},
+		{ScopeOrg, Selector{}, true},
 		{ScopeEnvironment, Selector{Environment: "prod"}, true},
 		{ScopeEnvironment, Selector{Environment: "dev"}, false},
 		{ScopeService, Selector{Environment: "prod", ServiceName: "checkout"}, true},
@@ -38,7 +38,7 @@ func TestSelectorScopesAndCanonicalHash(t *testing.T) {
 		scope    string
 		selector Selector
 	}{
-		{ScopeWorkspace, Selector{Environment: "prod"}},
+		{ScopeOrg, Selector{Environment: "prod"}},
 		{ScopeEnvironment, Selector{}},
 		{ScopeEnvironment, Selector{Environment: "prod", ServiceName: "checkout"}},
 		{ScopeService, Selector{}},

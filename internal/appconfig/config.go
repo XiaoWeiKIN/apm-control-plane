@@ -19,7 +19,7 @@ import (
 // Credential is loaded from secret environment variables, never from public YAML.
 type Credential struct {
 	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
+	OrgID string `json:"org_id"`
 	Token       string `json:"token"`
 }
 
@@ -126,7 +126,7 @@ func LoadWithEnv(env func(string) string) (Config, error) {
 		}
 		cfg.HTTPPollingTTL = d
 	}
-	// 3. 只接受显式 Workspace 凭证，再统一验证启动约束。
+	// 3. 只接受显式 Org 凭证，再统一验证启动约束。
 	if val := env("APM_AGENT_CREDENTIALS_JSON"); val != "" {
 		if err := parseCredentials(val, &cfg.AgentCredentials); err != nil {
 			return cfg, fmt.Errorf("APM_AGENT_CREDENTIALS_JSON: %w", err)
@@ -140,7 +140,7 @@ func LoadWithEnv(env func(string) string) (Config, error) {
 	return cfg, cfg.Validate()
 }
 
-// parseCredentials rejects obsolete workspace aliases and malformed JSON
+// parseCredentials rejects obsolete org aliases and malformed JSON
 // instead of silently dropping unknown fields during credential loading.
 func parseCredentials(raw string, dst *[]Credential) error {
 	decoder := json.NewDecoder(strings.NewReader(raw))
@@ -172,16 +172,16 @@ func (c Config) Validate() error {
 		return fmt.Errorf("invalid database pool configuration")
 	}
 	if len(c.AgentCredentials) == 0 || len(c.AdminCredentials) == 0 {
-		return fmt.Errorf("workspace-scoped agent and admin credentials are required (APM_AGENT_CREDENTIALS_JSON and APM_ADMIN_CREDENTIALS_JSON)")
+		return fmt.Errorf("org-scoped agent and admin credentials are required (APM_AGENT_CREDENTIALS_JSON and APM_ADMIN_CREDENTIALS_JSON)")
 	}
 	seenID, seenToken := map[string]bool{}, map[string]bool{}
 	for _, credentials := range [][]Credential{c.AgentCredentials, c.AdminCredentials} {
 		for _, cred := range credentials {
-			if cred.ID == "" || cred.WorkspaceID == "" || len(cred.Token) < 16 {
-				return fmt.Errorf("credentials require nonempty id/workspace and token length >= 16")
+			if cred.ID == "" || cred.OrgID == "" || len(cred.Token) < 16 {
+				return fmt.Errorf("credentials require nonempty id/org and token length >= 16")
 			}
-			if utf8.RuneCountInString(cred.WorkspaceID) > 96 {
-				return fmt.Errorf("credential workspace_id must not exceed 96 characters")
+			if utf8.RuneCountInString(cred.OrgID) > 96 {
+				return fmt.Errorf("credential org_id must not exceed 96 characters")
 			}
 			if utf8.RuneCountInString(cred.ID) > 128 {
 				return fmt.Errorf("credential id must not exceed 128 characters")
