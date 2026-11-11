@@ -28,7 +28,7 @@ var (
 )
 
 type AgentRecord struct {
-	WorkspaceID         string    `gorm:"column:workspace_id;primaryKey"`
+	OrgID         string    `gorm:"column:org_id;primaryKey"`
 	InstanceUID         string    `gorm:"column:instance_uid;primaryKey"`
 	CredentialID        string    `gorm:"column:credential_id"`
 	AgentKind           string    `gorm:"column:agent_kind"`
@@ -137,7 +137,7 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 		present[column.Name()] = true
 	}
 	for _, name := range []string{
-		"workspace_id", "instance_uid", "credential_id", "agent_kind",
+		"org_id", "instance_uid", "credential_id", "agent_kind",
 		"distribution", "distribution_version", "service_name",
 		"service_namespace", "environment", "service_version",
 		"last_seen", "last_transport", "healthy", "capabilities",
@@ -180,7 +180,7 @@ func (s *Store) Close() error {
 
 func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs Observation) (AgentRecord, error) {
 	// 1. 验证可信身份与 Observation 字段范围，拒绝无效状态写入。
-	if p.WorkspaceID == "" || p.CredentialID == "" || len(uid) != 32 || obs.SeenAt.IsZero() {
+	if p.OrgID == "" || p.CredentialID == "" || len(uid) != 32 || obs.SeenAt.IsZero() {
 		return AgentRecord{}, fmt.Errorf("%w: invalid agent identity or observation", ErrInvalidObservation)
 	}
 	if obs.Capabilities > math.MaxInt64 {
@@ -216,7 +216,7 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 	// 2. 构造首次注册记录，仅复制本次 Agent 实际上报的元数据。
 	seenAt := obs.SeenAt.UTC()
 	seed := AgentRecord{
-		WorkspaceID: p.WorkspaceID, InstanceUID: uid, CredentialID: p.CredentialID,
+		OrgID: p.OrgID, InstanceUID: uid, CredentialID: p.CredentialID,
 		AgentKind: "unknown", LastSeen: seenAt, LastTransport: obs.Transport,
 	}
 	if obs.Description != nil {
@@ -244,7 +244,7 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&seed).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("workspace_id = ? AND instance_uid = ?", p.WorkspaceID, uid).Take(&result).Error; err != nil {
+		if err := tx.Where("org_id = ? AND instance_uid = ?", p.OrgID, uid).Take(&result).Error; err != nil {
 			return err
 		}
 		if result.CredentialID != p.CredentialID {
@@ -273,27 +273,27 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 			fields["config_error"] = obs.Config.Error
 		}
 		if err := tx.Model(&AgentRecord{}).
-			Where("workspace_id = ? AND instance_uid = ? AND credential_id = ?", p.WorkspaceID, uid, p.CredentialID).
+			Where("org_id = ? AND instance_uid = ? AND credential_id = ?", p.OrgID, uid, p.CredentialID).
 			Updates(fields).Error; err != nil {
 			return err
 		}
-		return tx.Where("workspace_id = ? AND instance_uid = ?", p.WorkspaceID, uid).Take(&result).Error
+		return tx.Where("org_id = ? AND instance_uid = ?", p.OrgID, uid).Take(&result).Error
 	})
 	return result, err
 }
 
-func (s *Store) Get(ctx context.Context, workspace, uid string) (AgentRecord, error) {
+func (s *Store) Get(ctx context.Context, org, uid string) (AgentRecord, error) {
 	var a AgentRecord
-	err := s.db.WithContext(ctx).Where("workspace_id = ? AND instance_uid = ?", workspace, uid).Take(&a).Error
+	err := s.db.WithContext(ctx).Where("org_id = ? AND instance_uid = ?", org, uid).Take(&a).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return a, ErrNotFound
 	}
 	return a, err
 }
 
-func (s *Store) List(ctx context.Context, workspace string) ([]AgentRecord, error) {
+func (s *Store) List(ctx context.Context, org string) ([]AgentRecord, error) {
 	var records []AgentRecord
-	err := s.db.WithContext(ctx).Where("workspace_id = ?", workspace).
+	err := s.db.WithContext(ctx).Where("org_id = ?", org).
 		Order("instance_uid ASC").Find(&records).Error
 	if records == nil {
 		records = []AgentRecord{}

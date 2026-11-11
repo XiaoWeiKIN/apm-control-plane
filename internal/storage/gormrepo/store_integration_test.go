@@ -43,7 +43,7 @@ func TestRepositoryContractPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			uid := newUID(t)
-			p := auth.Principal{WorkspaceID: "team-alpha", CredentialID: "cred-a"}
+			p := auth.Principal{OrgID: "team-alpha", CredentialID: "cred-a"}
 			obs := Observation{
 				SeenAt: time.Now().UTC(), Transport: "http", Capabilities: 3,
 				Description: &Description{Kind: "java-apm", Distribution: "example-java", DistributionVersion: "1.2.3", Service: "checkout", ServiceVersion: "9.4.1"},
@@ -65,17 +65,17 @@ func TestRepositoryContractPostgresAndMySQL(t *testing.T) {
 				t.Fatalf("lost compressed state: %+v", updated)
 			}
 			// UID ownership stays bound to the credential that registered it.
-			_, err = store.Observe(ctx, auth.Principal{WorkspaceID: "team-alpha", CredentialID: "cred-b"}, uid, obs)
+			_, err = store.Observe(ctx, auth.Principal{OrgID: "team-alpha", CredentialID: "cred-b"}, uid, obs)
 			if !errors.Is(err, ErrOwnership) {
 				t.Fatalf("wrong identity collision: %v", err)
 			}
-			// A different workspace must never see or overwrite this agent.
+			// A different org must never see or overwrite this agent.
 			if _, err := store.Get(ctx, "team-beta", uid); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("cross-workspace read: %v", err)
+				t.Fatalf("cross-org read: %v", err)
 			}
 			list, err := store.List(ctx, "team-beta")
 			if err != nil || len(list) != 0 {
-				t.Fatalf("cross-workspace listing: %+v %v", list, err)
+				t.Fatalf("cross-org listing: %+v %v", list, err)
 			}
 			status := &ConfigStatus{Hash: "aabbcc", Status: "APPLIED"}
 			_, err = store.Observe(ctx, p, uid, Observation{SeenAt: time.Now().UTC(), Transport: "http", Capabilities: 3, Config: status})
@@ -90,7 +90,7 @@ func TestRepositoryContractPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			restored, err := store.Get(ctx, p.WorkspaceID, uid)
+			restored, err := store.Get(ctx, p.OrgID, uid)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -117,7 +117,7 @@ func TestInvalidObservationNeverPersists(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			p := auth.Principal{WorkspaceID: "test-workspace", CredentialID: "test-credential"}
+			p := auth.Principal{OrgID: "test-org", CredentialID: "test-credential"}
 			for _, tc := range []struct {
 				name string
 				obs  Observation
@@ -130,7 +130,7 @@ func TestInvalidObservationNeverPersists(t *testing.T) {
 					if _, err := store.Observe(ctx, p, id, tc.obs); !errors.Is(err, ErrInvalidObservation) {
 						t.Fatalf("invalid observation accepted: %v", err)
 					}
-					if _, err := store.Get(ctx, p.WorkspaceID, id); !errors.Is(err, ErrNotFound) {
+					if _, err := store.Get(ctx, p.OrgID, id); !errors.Is(err, ErrNotFound) {
 						t.Fatalf("invalid observation changed Inventory: %v", err)
 					}
 				})
