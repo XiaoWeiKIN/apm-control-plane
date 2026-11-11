@@ -78,7 +78,7 @@ func TestRollbackAdminAPIPostgresAndMySQL(t *testing.T) {
 			wakes := make([]string, 0, 1)
 			h := adminRolloutHandler(store, creds, func(ws int64, uid string) {
 				if ws != org {
-					t.Errorf("wrong Org wake: %s", ws)
+					t.Errorf("wrong Org wake: %d", ws)
 				}
 				wakes = append(wakes, uid)
 			})
