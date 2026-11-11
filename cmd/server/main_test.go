@@ -449,3 +449,9 @@ func TestInvalidObservationIsOpAMPBadRequest(t *testing.T) {
 		t.Fatalf("invalid Agent metadata should yield only error_response: %+v", reply)
 	}
 }
+
+func TestOrganizationSessionKeysAreIsolated(t *testing.T) {
+	if key(1, "same-instance") == key(2, "same-instance") {
+		t.Fatal("session keys must not collide across organizations")
+	}
+}
