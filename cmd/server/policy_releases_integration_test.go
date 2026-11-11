@@ -43,7 +43,8 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			org := fixtureOrgID("p25-api-org")rawUID := make([]byte, 16)
+			org := fixtureOrgID("p25-api-org")
+			rawUID := make([]byte, 16)
 			if _, err := rand.Read(rawUID); err != nil {
 				t.Fatal(err)
 			}

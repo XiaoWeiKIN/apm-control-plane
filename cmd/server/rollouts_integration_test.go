@@ -39,7 +39,8 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			org := fixtureOrgID("p3-rollout-http")owner := auth.Principal{OrgID: org, CredentialID: "java-owner"}
+			org := fixtureOrgID("p3-rollout-http")
+			owner := auth.Principal{OrgID: org, CredentialID: "java-owner"}
 			uids := make([]string, 3)
 			for i := range uids {
 				raw := make([]byte, 16)

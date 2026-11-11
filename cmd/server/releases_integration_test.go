@@ -39,7 +39,8 @@ func TestAdminReleaseHTTPPersistencePostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			uid := hex.EncodeToString(uidBytes)
-			org := fixtureOrgID("api-release-org")p := auth.Principal{OrgID: org, CredentialID: "java-owner"}
+			org := fixtureOrgID("api-release-org")
+			p := auth.Principal{OrgID: org, CredentialID: "java-owner"}
 			if _, err := store.Observe(ctx, p, uid, gormrepo.Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",
 				Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus |

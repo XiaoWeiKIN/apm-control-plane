@@ -257,7 +257,8 @@ func TestReleaseIdempotencyKeyAcrossConcurrentTargets(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			org := fixtureOrgID("concurrent-idempotency-org")uidA, uidB := newUID(t), newUID(t)
+			org := fixtureOrgID("concurrent-idempotency-org")
+			uidA, uidB := newUID(t), newUID(t)
 			for _, id := range []string{uidA, uidB} {
 				if _, err := store.Observe(ctx, auth.Principal{OrgID: org, CredentialID: "owner"},
 					id, Observation{
