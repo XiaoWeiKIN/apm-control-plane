@@ -4,7 +4,7 @@
 
 ## 1. 功能边界
 
-本增量使用 Goose 00004 增加 `policies`、`policy_revisions`、`policy_bindings`，并为既有 `config_revisions.source_policy_revision_id` 添加同 Org 外键。PostgreSQL/MySQL 保持同一业务语义、独立 SQL Migration、统一 GORM Repository。
+当前统一 DataFox Schema DSL 创建 `policies`、`policy_revisions`、`policy_bindings`，并为既有 `config_revisions.source_policy_revision_id` 添加同 Org 外键。PostgreSQL/MySQL 保持同一业务语义，由 DSL 方言生成 DDL，应用层使用统一 GORM Repository。
 
 首期只创建 Java `head_sampling` Policy；策略正文规范化为 `{"schema_version":1,"sampling":{"type":"parent_based_trace_id_ratio","rate":0.15}}`，以正文 SHA-256 标识内容。Policy Revision 永不 Update/Delete；创建下一版本时锁住父 Policy，保障并发版本号递增。Binding 使用 `row_version` CAS 更新，可禁用或切换到新的 Revision。
 
@@ -45,6 +45,6 @@ Selector 约束：`ORG` 使用空对象；`ENVIRONMENT` 只接受 `environment`�
 
 ## 4. 验证与后续边界
 
-验证要求：严格 gofmt、Go Race/Vet、RepoFoundry、PostgreSQL 17/MySQL 8.4 Goose 00004 与真实 API/Repository 合同。合同覆盖 Org 越权、Scope 优先级、同级冲突、重复内容、Binding CAS、不可变 Revision 并发编号及只读 Resolver 不产生 Assignment。
+验证要求：严格 gofmt、Go Race/Vet、RepoFoundry、PostgreSQL 17/MySQL 8.4 DataFox Schema DSL 与真实 API/Repository 合同。合同覆盖 Org 越权、Scope 优先级、同级冲突、重复内容、Binding CAS、不可变 Revision 并发编号及只读 Resolver 不产生 Assignment。
 
 本增量不改变现有 OpAMP Gateway、WS Writer、ACK 状态机、旧 Release API、Policy 批量发布；不增加多 Adapter Factory、Tenant 层、分布式缓存或消息队列。后续如需按策略自动发布，必须在 Release 事务边界明确冻结目标、幂等键与审计，不使用 Resolver 的查询结果直接改写 Desired。

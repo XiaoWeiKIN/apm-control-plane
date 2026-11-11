@@ -2,9 +2,9 @@
 
 > **文档类型**：面向开发者的详细数据模型 / 实现合同（Proposed）。
 >
-> **日期**：2026-10-19；**数据库**：PostgreSQL / MySQL；**运行架构**：单个部署选择一种主数据库，GORM v2 + Goose。
+> **日期**：2026-10-19；**数据库**：PostgreSQL / MySQL；**运行架构**：单个部署选择一种主数据库，storekit/sqlstore + datafox-schema Go DSL。
 >
-> **实现状态**：P1.1 Inventory 与 P2.1 Java Sampling ConfigRevision 已实现。**P2.2 增量**实现单 Agent Release、冻结 Target、当前 Desired Assignment 和审计事件（PostgreSQL/MySQL Goose 00003、Admin HTTP 202、双数据库事务测试）。**Policy/Selector、OpAMP 实际投递和 ACK Reconciler、P3 多 Agent 灰度与回滚仍未实现。** Org/IAM 权限真源集成仍待评审；本文不代替 DD-001 批准。
+> **实现状态**：P1.1 Inventory 与 P2.1 Java Sampling ConfigRevision 已实现。**P2.2 增量**实现单 Agent Release、冻结 Target、当前 Desired Assignment 和审计事件（统一 Schema DSL、Admin HTTP 202、双数据库事务测试）。**Policy/Selector、OpAMP 实际投递和 ACK Reconciler、P3 多 Agent 灰度与回滚仍未实现。** Org/IAM 权限真源集成仍待评审；本文不代替 DD-001 批准。
 >
 > **来源**：[DD-001（Draft）](../design-docs/dd-001_opamp-control-plane.md)、[EP-001（Blocked）](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md)、[FR-001—FR-013](../requirements/APM_CONTROL_PLANE.md)、[P1.1 持久化实现](p1-durable-inventory.md)、[技术选型](technology-selection.md)。
 
@@ -54,7 +54,7 @@ erDiagram
 | `policies` | 策略逻辑身份 | 低频更新 | P2 | 未创建 |
 | `policy_revisions` | 不可变策略版本 | Append-only | P2 | 未创建 |
 | `policy_bindings` | Scope/Selector → 生效版本 | 有 CAS 的少量修改 | P2 | 未创建 |
-| `config_revisions` | 按 AgentKind 编译的不可变完整配置 | Append-only | **P2.1** | **编译与 Goose 00002 已实现，P2.2 可引用已有 Revision** |
+| `config_revisions` | 按 AgentKind 编译的不可变完整配置 | Append-only | **P2.1** | **编译与统一 Schema DSL 已实现，P2.2 可引用已有 Revision** |
 | `config_releases` | 一次发布的命令、状态、幂等键、计划 | 发布创建，状态变更 | P2.2 / P3 灰度 | **单 Agent Pending 发布与幂等键已实现；灰度未实现** |
 | `release_targets` | 某次发布的**冻结目标快照**与批次结果 | 目标不可变，执行状态可更新 | P2.2 / P3 灰度 | **单 Agent、batch_no=0、Pending/Superseded 已实现** |
 | `agent_assignments` | 每 Agent **当前** Desired/Observed 和 CAS | 可变、可恢复 | P2.2 / P2.3 | **Desired/Generation/RowVersion CAS 已实现；ACK 状态更新待 P2.3** |
@@ -146,7 +146,7 @@ erDiagram
 
 ### 3.4 `agent_instances` — Agent Inventory（已存在；目标为原位演进）
 
-**当前已实现主键**：`(org_id,instance_uid)`。已实现的 [PostgreSQL Migration](../../db/migrations/postgres/00001_agent_instances.sql)、[MySQL Migration](../../db/migrations/mysql/00001_agent_instances.sql) 与 GORM 模型使用相同的 Org 作用域。生产 Org 授权集成仍待审批，不能将数据库字段存在等同于已验证平台 IAM。
+**当前已实现主键**：`(org_id,instance_uid)`。[DataFox Schema DSL](https://github.com/datafoxlabs/datafox-schema/tree/main/controlplane/migrations) 与 GORM 模型使用相同的 Org 作用域。生产 Org 授权集成仍待审批，不能将数据库字段存在等同于已验证平台 IAM。
 
 | 字段 | 状态 | 类型 | 约束 / 语义 |
 | --- | --- | --- | --- |
@@ -222,7 +222,7 @@ erDiagram
 | `binding_id` | UUID text | PK |
 | `policy_revision_id` | UUID text | FK → policy_revisions |
 | `agent_kind` | VARCHAR(64) | NOT NULL，和 Policy/Adapter 兼容 |
-| `scope_type` | VARCHAR(24) | TENANT / ENVIRONMENT / SERVICE / INSTANCE |
+| `scope_type` | VARCHAR(24) | ORG / ENVIRONMENT / SERVICE / INSTANCE |
 | `selector_json` | TEXT / LONGTEXT | canonical Selector，所有可匹配键明确版本化 |
 | `selector_hash` | CHAR(64) | SHA-256(selector_json) |
 | `priority` | INTEGER | 同 Scope 内的显式优先级 |
@@ -234,9 +234,9 @@ erDiagram
 
 **建议索引**：`(org_id,agent_kind,enabled,scope_type,priority)`；**精确 Selector 防重复**可选择 `(org_id,agent_kind,scope_type,selector_hash,priority)` 唯一（需在正式评审中确认是否允许同 Selector 多条 Disabled 版本）。**部分重叠 Selector 的冲突不能只依赖 SQL 唯一索引**，必须由 Resolver 在稳定排序/冲突检测中拒绝同级不同内容；更新 Binding 与相关发布必须遵循事务和版本检查。Binding 中的 `service.name` 匹配值来自 Agent 声明，匹配动作必须先完成 Org 授权和 Adapter 能力判定。
 
-### P2.4 物理落地（Goose 00004）
+### P2.4 物理落地（DataFox Schema DSL）
 
-P2.4 使用 `db/migrations/postgres/00004_policies.sql` 与 `db/migrations/mysql/00004_policies.sql` 实际创建以上三表，并在 `config_revisions.source_policy_revision_id` 上添加同 Org 复合 FK。启动时 Store.Open 要求 Goose 至少执行到 00004；缺失必须失败。MySQL 使用 InnoDB/utf8mb4_bin，UUID/FK 字段使用 ascii_bin；MySQL DDL 不假设事务回滚。
+统一 Schema DSL 初始化以上三表，并为 `config_revisions.source_policy_revision_id` 添加同 Org 复合外键。`Store.Open` 要求 `controlplane_init_schema` 成功历史，缺失必须失败。MySQL 使用 InnoDB/utf8mb4_bin，UUID/FK 字段使用 ascii_bin；MySQL DDL 不假设事务回滚。
 
 首个实际业务合同：**Java Head Sampling**，`policy_type=head_sampling`、`agent_kind=java-apm`。创建 Policy 与首个不可变 Revision 在同一事务内完成；后续 Revision 锁住父 Policy 递增 `revision_number`。Binding 的可变列通过 `row_version` CAS 更新，默认 enabled；同 Org 的 SQL FK 阻止跨 Org 引用 Revision。暂不启用 `expires_at`：到期策略尚无调用场景，若后续实施临时策略再通过独立 Migration 增加。
 
@@ -248,7 +248,7 @@ P2.4 使用 `db/migrations/postgres/00004_policies.sql` 与 `db/migrations/mysql
 
 **P2.1 已实现的子集**：`internal/config.CompileJavaSampling(rate)` 只编译 Java Head Sampling ConfigMap，其 JSON 文件名为 `apm/sampling.json`。先使用 Go Protobuf 的 deterministic marshal 序列化完整 `AgentConfigMap`，然后对**该序列化字节**计算 SHA-256；`hash_algorithm = sha256-proto-deterministic-v1`。此序列化选择属于固定的应用级版本契约，不能假设 Protobuf deterministic marshal 是跨不同实现/版本的通用规范编码；应保留原始 bytes/hash 供以后直接下发。
 
-存储实现为 `internal/storage/gormrepo/config_revisions.go`，PostgreSQL/MySQL 的 `db/migrations/*/00002_config_revisions.sql`。新建 Revision 生成独立 UUID，`(org_id, config_revision_id)` 为复合主键；允许不同 Revision 内容 Hash 相同。仅提供 Create/Get，**不提供 Update/Delete 业务方法**。P2.1 尚无 Policy 主表，`source_policy_revision_id` 暂为可空列，**此时还没有 FK**；后续 Policy 实施时再建立相应约束。没有自动 Agent 分配、发布或 OpAMP 远程下发。
+存储实现为 `internal/storage/gormrepo/config_revisions.go`，PostgreSQL/MySQL 的统一 DataFox Schema DSL。新建 Revision 生成独立 UUID，`(org_id, config_revision_id)` 为复合主键；允许不同 Revision 内容 Hash 相同。仅提供 Create/Get，**不提供 Update/Delete 业务方法**。P2.1 尚无 Policy 主表，`source_policy_revision_id` 暂为可空列，**此时还没有 FK**；后续 Policy 实施时再建立相应约束。没有自动 Agent 分配、发布或 OpAMP 远程下发。
 
 **主键**：`(org_id,config_revision_id)`。一个 `policy_revision` 可因不同 AgentKind、ConfigDialect、发行版/能力要求，编译成多个不同 Config Revision。每条记录对应**完整的 OpAMP RemoteConfig ConfigMap**，不是单独的一个 `sampling.rate` 字段。
 
@@ -518,16 +518,16 @@ CREATE TABLE policy_revisions (
 
 | 阶段 | 实施内容 | 验收条件 |
 | --- | --- | --- |
-| P1.1 Org Scope（代码已实现） | 初始 PostgreSQL/MySQL Goose SQL、GORM `AgentRecord`、Repository、`auth.Principal`、Credential JSON 和 Admin API 统一 `org_id` | 双数据库全新建库、Agent 注册/查询、权限隔离测试通过后才能作为稳定交付证据；**不代表平台 IAM 已联通** |
+| P1.1 Org Scope（代码已实现） | 初始 PostgreSQL/MySQL Schema DSL、GORM `AgentRecord`、Repository、`auth.Principal`、Credential JSON 和 Admin API 统一 `org_id` | 双数据库全新建库、Agent 注册/查询、权限隔离测试通过后才能作为稳定交付证据；**不代表平台 IAM 已联通** |
 | P2 授权主体 | 按正式安全设计引入 `agent_principals`、`credential_bindings`；是否把当前 `credential_id` 替换为稳定 Principal 归属由设计审批决定 | Token 轮换不会意外改变 Agent 所有权；撤销/授权路径经过可信 Org 验证 |
 | P2 Policy | `policies`、`policy_revisions`、`policy_bindings` | Revision 不可变，Selector 冲突有确定性行为 |
 | P2 Config/Release | `config_revisions`、`config_releases`、`release_targets`、`agent_assignments`、`config_events` | 发布事务原子性、Assignment CAS、ACK 归因、重启恢复和跨 Org 隔离 |
 | P3 Rollout | 在 Release/Target 中补充必要的灰度字段和查询索引 | 受控批次、失败阻断、回滚和审计可恢复 |
 | 按需扩展 | 只有性能/产品证据充分时才增加 `agent_observations`、`apm_services`、`release_batches` | 以实际查询/写负载和保留要求评估必要性 |
 
-**当前初始 Schema 不存在 `tenant_id` 与 `org_id` 双字段、不做双读双写、不为旧的 `default` 值造 Org，也不自动迁移未确认归属的数据。** 如果实际发现已经部署的共享/生产数据，须停止直接修改初始 Migration 的做法，重新审查是否必须引入增量 Goose Migration 和可信映射。这是对事实前提的保护，不是当前方案中隐藏的兼容分支。
+**当前初始 Schema 不存在 `tenant_id` 与 `org_id` 双字段、不做双读双写、不为旧的 `default` 值造 Org，也不自动迁移未确认归属的数据。** 如果实际发现已经部署的共享/生产数据，须停止直接初始化并另行设计受控迁移，当前分支不提供数据回填或兼容。这是对事实前提的保护，不是当前方案中隐藏的兼容分支。
 
-即使不保留历史数据，也要在 PostgreSQL/MySQL 分别验证全新建库、字段约束、唯一性、可信 Org 注入和代码行为。MySQL `CREATE/ALTER TABLE` 可能隐式提交；Goose 负责明确版本的执行，生产运行时不使用 GORM AutoMigrate。
+即使不保留历史数据，也要在 PostgreSQL/MySQL 分别验证全新建库、字段约束、唯一性、可信 Org 注入和代码行为。MySQL `CREATE/ALTER TABLE` 可能隐式提交；storekit/migrator 负责记录迁移执行历史，生产运行时不使用 GORM AutoMigrate。
 
 ## 10. 延迟引入的三个扩展表
 
@@ -551,7 +551,7 @@ CREATE TABLE policy_revisions (
 | Config 不可变 / 完整恢复 | 同字节 ConfigMap、Hash、Dialect 和 AgentKind，重启后可再次发送 |
 | Selector 冲突 | 相同优先级、部分重叠 Selector、Instance Override TTL 等确定性行为 |
 | HTTP / WS | HTTP 回执和 freshness、WS 单 writer 和会话所有权分别测试 |
-| MySQL / PostgreSQL | 分方言 Goose 升级、约束冲突、UTC、字符集、事务和重试语义实测 |
+| MySQL / PostgreSQL | 双数据库 DSL 初始化、约束冲突、UTC、字符集、事务和重试语义实测 |
 | 审计与回滚 | 新 Release/事件留痕、旧 Release 不删除、Config 与 Token Secret 不落普通日志 |
 | 容量与保留 | 无未经测量的吞吐或固定 TTL 声明；根据实际需求确定索引、保留/归档策略 |
 
@@ -570,8 +570,8 @@ CREATE TABLE policy_revisions (
 
 ## 13. 维护与溯源
 
-- P1.1 真实 Migration：[PostgreSQL](../../db/migrations/postgres/00001_agent_instances.sql) / [MySQL](../../db/migrations/mysql/00001_agent_instances.sql)。
+- 当前 Control Plane Schema：[DataFox Schema DSL](https://github.com/datafoxlabs/datafox-schema/tree/main/controlplane/migrations)。
 - 当前 GORM `AgentRecord`、`Observe`、`Get`、`List`：[store.go](../../internal/storage/gormrepo/store.go)。
 - 需求不变量：[FR-001–FR-013](../requirements/APM_CONTROL_PLANE.md)。
 - 主架构与发布状态：[开发者架构指南](README.md)、[DD-001](../design-docs/dd-001_opamp-control-plane.md)、[EP-001](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md)。
-- 设计归属：本文为独立技术详设，**不是**新的受治理 DD-NNN，也不是批准快照；长期权威仍归 DD-001/后续被批准的设计与 ADR。实施后如出现偏差，应先更新对应批准的设计和此文件，再增加新的 Goose Migration。
+- 设计归属：本文为独立技术详设，**不是**新的受治理 DD-NNN，也不是批准快照；长期权威仍归 DD-001/后续被批准的设计与 ADR。实施后如出现偏差，应先更新对应批准的设计和此文件，再增加新的 DataFox Schema Migration。
