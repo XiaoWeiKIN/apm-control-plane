@@ -362,7 +362,7 @@ func TestSupersededActiveRolloutPausesPostgresAndMySQL(t *testing.T) {
 				}
 				defer store.Close()
 
-				org := fixtureOrgID("p3-supersede-"+ mode)
+				org := fixtureOrgID("p3-supersede-" + mode)
 				owner := auth.Principal{OrgID: org, CredentialID: "agent"}
 				uids := []string{newUID(t), newUID(t), newUID(t)}
 				for _, uid := range uids {
