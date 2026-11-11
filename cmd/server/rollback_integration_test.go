@@ -40,7 +40,7 @@ func TestRollbackAdminAPIPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			const workspace = "p33-rollback-http"
+			const org = "p33-rollback-http"
 			uids := make([]string, 2)
 			for i := range uids {
 				raw := make([]byte, 16)
@@ -48,7 +48,7 @@ func TestRollbackAdminAPIPostgresAndMySQL(t *testing.T) {
 					t.Fatal(err)
 				}
 				uids[i] = hex.EncodeToString(raw)
-				if _, err := store.Observe(ctx, auth.Principal{WorkspaceID: workspace, CredentialID: "agent"},
+				if _, err := store.Observe(ctx, auth.Principal{OrgID: org, CredentialID: "agent"},
 					uids[i], gormrepo.Observation{
 						SeenAt: time.Now().UTC(), Transport: "http",
 						Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
@@ -59,26 +59,26 @@ func TestRollbackAdminAPIPostgresAndMySQL(t *testing.T) {
 			}
 			first, _ := config.CompileJavaSampling(0.8)
 			second, _ := config.CompileJavaSampling(0.1)
-			a, err := store.CreateConfigRevision(ctx, workspace, "admin", first)
+			a, err := store.CreateConfigRevision(ctx, org, "admin", first)
 			if err != nil {
 				t.Fatal(err)
 			}
-			b, err := store.CreateConfigRevision(ctx, workspace, "admin", second)
+			b, err := store.CreateConfigRevision(ctx, org, "admin", second)
 			if err != nil {
 				t.Fatal(err)
 			}
-			source, err := store.PublishRollout(ctx, workspace, "admin", a.ConfigRevisionID, uids, 1, "")
+			source, err := store.PublishRollout(ctx, org, "admin", a.ConfigRevisionID, uids, 1, "")
 			if err != nil {
 				t.Fatal(err)
 			}
 			creds := auth.New([]appconfig.Credential{
-				{ID: "admin", WorkspaceID: workspace, Token: "p33-admin-long"},
-				{ID: "other", WorkspaceID: "p33-other", Token: "p33-other-long"},
+				{ID: "admin", OrgID: org, Token: "p33-admin-long"},
+				{ID: "other", OrgID: "p33-other", Token: "p33-other-long"},
 			})
 			wakes := make([]string, 0, 1)
 			h := adminRolloutHandler(store, creds, func(ws, uid string) {
-				if ws != workspace {
-					t.Errorf("wrong Workspace wake: %s", ws)
+				if ws != org {
+					t.Errorf("wrong Org wake: %s", ws)
 				}
 				wakes = append(wakes, uid)
 			})

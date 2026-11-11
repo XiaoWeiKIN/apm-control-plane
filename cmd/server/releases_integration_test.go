@@ -39,8 +39,8 @@ func TestAdminReleaseHTTPPersistencePostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			uid := hex.EncodeToString(uidBytes)
-			workspace := "api-release-workspace"
-			p := auth.Principal{WorkspaceID: workspace, CredentialID: "java-owner"}
+			org := "api-release-org"
+			p := auth.Principal{OrgID: org, CredentialID: "java-owner"}
 			if _, err := store.Observe(ctx, p, uid, gormrepo.Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",
 				Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus |
@@ -53,14 +53,14 @@ func TestAdminReleaseHTTPPersistencePostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			revision, err := store.CreateConfigRevision(ctx, workspace, "admin-a", snapshot)
+			revision, err := store.CreateConfigRevision(ctx, org, "admin-a", snapshot)
 			if err != nil {
 				t.Fatal(err)
 			}
 			mux := http.NewServeMux()
 			mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(store, auth.New([]appconfig.Credential{
-				{ID: "admin-a", WorkspaceID: workspace, Token: "admin-a-test-secret-long"},
-				{ID: "admin-b", WorkspaceID: "another-workspace", Token: "admin-b-test-secret-long"},
+				{ID: "admin-a", OrgID: org, Token: "admin-a-test-secret-long"},
+				{ID: "admin-b", OrgID: "another-org", Token: "admin-b-test-secret-long"},
 			}), nil))
 			server := httptest.NewServer(mux)
 			defer server.Close()
@@ -87,7 +87,7 @@ func TestAdminReleaseHTTPPersistencePostgresAndMySQL(t *testing.T) {
 			}
 			body := `{"config_revision_id":"` + revision.ConfigRevisionID + `"}`
 			if code, _ := post("admin-b-test-secret-long", body, ""); code != http.StatusNotFound {
-				t.Fatalf("another Workspace published Agent: HTTP %d", code)
+				t.Fatalf("another Org published Agent: HTTP %d", code)
 			}
 			if code, _ := post("admin-a-test-secret-long", `{"config_revision_id":"invalid"}`, ""); code != http.StatusBadRequest {
 				t.Fatalf("invalid Revision accepted: HTTP %d", code)
@@ -101,7 +101,7 @@ func TestAdminReleaseHTTPPersistencePostgresAndMySQL(t *testing.T) {
 			if code != http.StatusAccepted || replay.ReleaseID != release.ReleaseID || replay.DesiredGeneration != 1 {
 				t.Fatalf("replay generated duplicate Release: HTTP %d %+v", code, replay)
 			}
-			assignment, err := store.GetAgentAssignment(ctx, workspace, uid)
+			assignment, err := store.GetAgentAssignment(ctx, org, uid)
 			if err != nil || assignment.ReleaseID != release.ReleaseID || assignment.DesiredGeneration != 1 ||
 				assignment.State != "PENDING" || assignment.DesiredHash != revision.ConfigHash {
 				t.Fatalf("API release missing Assignment: %+v %v", assignment, err)
