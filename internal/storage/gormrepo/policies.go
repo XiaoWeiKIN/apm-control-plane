@@ -16,7 +16,7 @@ import (
 )
 
 type PolicyRecord struct {
-	WorkspaceID string    `gorm:"column:workspace_id;primaryKey" json:"workspace_id"`
+	OrgID string    `gorm:"column:org_id;primaryKey" json:"org_id"`
 	PolicyID    string    `gorm:"column:policy_id;primaryKey" json:"policy_id"`
 	PolicyType  string    `gorm:"column:policy_type" json:"policy_type"`
 	AgentKind   string    `gorm:"column:agent_kind" json:"agent_kind"`
@@ -30,7 +30,7 @@ type PolicyRecord struct {
 func (PolicyRecord) TableName() string { return "policies" }
 
 type PolicyRevisionRecord struct {
-	WorkspaceID      string    `gorm:"column:workspace_id;primaryKey" json:"workspace_id"`
+	OrgID      string    `gorm:"column:org_id;primaryKey" json:"org_id"`
 	PolicyRevisionID string    `gorm:"column:policy_revision_id;primaryKey" json:"policy_revision_id"`
 	PolicyID         string    `gorm:"column:policy_id" json:"policy_id"`
 	RevisionNumber   int64     `gorm:"column:revision_number" json:"revision_number"`
@@ -44,7 +44,7 @@ type PolicyRevisionRecord struct {
 func (PolicyRevisionRecord) TableName() string { return "policy_revisions" }
 
 type PolicyBindingRecord struct {
-	WorkspaceID      string    `gorm:"column:workspace_id;primaryKey" json:"workspace_id"`
+	OrgID      string    `gorm:"column:org_id;primaryKey" json:"org_id"`
 	BindingID        string    `gorm:"column:binding_id;primaryKey" json:"binding_id"`
 	PolicyRevisionID string    `gorm:"column:policy_revision_id" json:"policy_revision_id"`
 	AgentKind        string    `gorm:"column:agent_kind" json:"agent_kind"`
@@ -63,7 +63,7 @@ type PolicyBindingRecord struct {
 func (PolicyBindingRecord) TableName() string { return "policy_bindings" }
 
 type PolicyResolution struct {
-	WorkspaceID      string          `json:"workspace_id"`
+	OrgID      string          `json:"org_id"`
 	InstanceUID      string          `json:"instance_uid"`
 	BindingID        string          `json:"binding_id"`
 	PolicyID         string          `json:"policy_id"`
@@ -72,14 +72,14 @@ type PolicyResolution struct {
 	Body             json.RawMessage `json:"body"`
 }
 
-func policyIdentityOK(workspace, actor string) bool {
-	return workspace != "" && utf8.RuneCountInString(workspace) <= 96 &&
+func policyIdentityOK(org, actor string) bool {
+	return org != "" && utf8.RuneCountInString(org) <= 96 &&
 		actor != "" && utf8.RuneCountInString(actor) <= 128
 }
 
 // CreatePolicy writes the logical identity and its first immutable Java Revision atomically.
-func (s *Store) CreatePolicy(ctx context.Context, workspace, actor, name string, rate float64) (PolicyRecord, PolicyRevisionRecord, error) {
-	if !policyIdentityOK(workspace, actor) || name == "" || utf8.RuneCountInString(name) > 128 {
+func (s *Store) CreatePolicy(ctx context.Context, org, actor, name string, rate float64) (PolicyRecord, PolicyRevisionRecord, error) {
+	if !policyIdentityOK(org, actor) || name == "" || utf8.RuneCountInString(name) > 128 {
 		return PolicyRecord{}, PolicyRevisionRecord{}, policy.ErrInvalid
 	}
 	body, hash, err := policy.JavaSamplingBody(rate)
@@ -95,10 +95,10 @@ func (s *Store) CreatePolicy(ctx context.Context, workspace, actor, name string,
 		return PolicyRecord{}, PolicyRevisionRecord{}, err
 	}
 	now := time.Now().UTC()
-	p := PolicyRecord{WorkspaceID: workspace, PolicyID: policyID, PolicyType: "head_sampling",
+	p := PolicyRecord{OrgID: org, PolicyID: policyID, PolicyType: "head_sampling",
 		AgentKind: config.JavaAgentKind, Name: name, Status: "ACTIVE", CreatedBy: actor,
 		CreatedAt: now, UpdatedAt: now}
-	rev := PolicyRevisionRecord{WorkspaceID: workspace, PolicyRevisionID: revisionID,
+	rev := PolicyRevisionRecord{OrgID: org, PolicyRevisionID: revisionID,
 		PolicyID: policyID, RevisionNumber: 1, SchemaVersion: 1,
 		BodyJSON: body, BodySHA256: hash, CreatedBy: actor, CreatedAt: now}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -114,8 +114,8 @@ func (s *Store) CreatePolicy(ctx context.Context, workspace, actor, name string,
 }
 
 // CreatePolicyRevision locks the parent Policy rather than MAX(revision)+1 without locking.
-func (s *Store) CreatePolicyRevision(ctx context.Context, workspace, actor, policyID string, rate float64) (PolicyRevisionRecord, error) {
-	if !policyIdentityOK(workspace, actor) || len(policyID) != 36 {
+func (s *Store) CreatePolicyRevision(ctx context.Context, org, actor, policyID string, rate float64) (PolicyRevisionRecord, error) {
+	if !policyIdentityOK(org, actor) || len(policyID) != 36 {
 		return PolicyRevisionRecord{}, policy.ErrInvalid
 	}
 	body, hash, err := policy.JavaSamplingBody(rate)
@@ -130,7 +130,7 @@ func (s *Store) CreatePolicyRevision(ctx context.Context, workspace, actor, poli
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var p PolicyRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("workspace_id = ? AND policy_id = ?", workspace, policyID).Take(&p).Error; err != nil {
+			Where("org_id = ? AND policy_id = ?", org, policyID).Take(&p).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return policy.ErrNotFound
 			}
@@ -141,14 +141,14 @@ func (s *Store) CreatePolicyRevision(ctx context.Context, workspace, actor, poli
 		}
 		var current int64
 		if err := tx.Model(&PolicyRevisionRecord{}).
-			Where("workspace_id = ? AND policy_id = ?", workspace, policyID).
+			Where("org_id = ? AND policy_id = ?", org, policyID).
 			Select("COALESCE(MAX(revision_number), 0)").Scan(&current).Error; err != nil {
 			return err
 		}
 		if current == math.MaxInt64 {
 			return policy.ErrConflict
 		}
-		out = PolicyRevisionRecord{WorkspaceID: workspace, PolicyRevisionID: id,
+		out = PolicyRevisionRecord{OrgID: org, PolicyRevisionID: id,
 			PolicyID: policyID, RevisionNumber: current + 1, SchemaVersion: 1,
 			BodyJSON: body, BodySHA256: hash, CreatedBy: actor, CreatedAt: time.Now().UTC()}
 		return tx.Create(&out).Error
@@ -165,8 +165,8 @@ type BindingInput struct {
 	RowVersion       int64           `json:"row_version,omitempty"`
 }
 
-func (s *Store) CreatePolicyBinding(ctx context.Context, workspace, actor string, in BindingInput) (PolicyBindingRecord, error) {
-	if !policyIdentityOK(workspace, actor) || len(in.PolicyRevisionID) != 36 ||
+func (s *Store) CreatePolicyBinding(ctx context.Context, org, actor string, in BindingInput) (PolicyBindingRecord, error) {
+	if !policyIdentityOK(org, actor) || len(in.PolicyRevisionID) != 36 ||
 		in.Priority < math.MinInt32 || in.Priority > math.MaxInt32 {
 		return PolicyBindingRecord{}, policy.ErrInvalid
 	}
@@ -179,15 +179,15 @@ func (s *Store) CreatePolicyBinding(ctx context.Context, workspace, actor string
 		return PolicyBindingRecord{}, err
 	}
 	var rev PolicyRevisionRecord
-	if err := s.db.WithContext(ctx).Where("workspace_id = ? AND policy_revision_id = ?",
-		workspace, in.PolicyRevisionID).Take(&rev).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("org_id = ? AND policy_revision_id = ?",
+		org, in.PolicyRevisionID).Take(&rev).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return PolicyBindingRecord{}, policy.ErrNotFound
 		}
 		return PolicyBindingRecord{}, err
 	}
 	now := time.Now().UTC()
-	row := PolicyBindingRecord{WorkspaceID: workspace, BindingID: id,
+	row := PolicyBindingRecord{OrgID: org, BindingID: id,
 		PolicyRevisionID: in.PolicyRevisionID, AgentKind: config.JavaAgentKind,
 		ScopeType: in.ScopeType, SelectorJSON: sel, SelectorHash: hash,
 		Priority: in.Priority, Enabled: true, RowVersion: 1,
@@ -198,8 +198,8 @@ func (s *Store) CreatePolicyBinding(ctx context.Context, workspace, actor string
 	return row, nil
 }
 
-func (s *Store) UpdatePolicyBinding(ctx context.Context, workspace, actor, bindingID string, in BindingInput) (PolicyBindingRecord, error) {
-	if !policyIdentityOK(workspace, actor) || len(bindingID) != 36 || len(in.PolicyRevisionID) != 36 ||
+func (s *Store) UpdatePolicyBinding(ctx context.Context, org, actor, bindingID string, in BindingInput) (PolicyBindingRecord, error) {
+	if !policyIdentityOK(org, actor) || len(bindingID) != 36 || len(in.PolicyRevisionID) != 36 ||
 		in.Priority < math.MinInt32 || in.Priority > math.MaxInt32 || in.RowVersion < 1 || in.RowVersion == math.MaxInt64 {
 		return PolicyBindingRecord{}, policy.ErrInvalid
 	}
@@ -210,7 +210,7 @@ func (s *Store) UpdatePolicyBinding(ctx context.Context, workspace, actor, bindi
 	var updated PolicyBindingRecord
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var rev PolicyRevisionRecord
-		if err := tx.Where("workspace_id = ? AND policy_revision_id = ?", workspace, in.PolicyRevisionID).Take(&rev).Error; err != nil {
+		if err := tx.Where("org_id = ? AND policy_revision_id = ?", org, in.PolicyRevisionID).Take(&rev).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return policy.ErrNotFound
 			}
@@ -218,7 +218,7 @@ func (s *Store) UpdatePolicyBinding(ctx context.Context, workspace, actor, bindi
 		}
 		now := time.Now().UTC()
 		r := tx.Model(&PolicyBindingRecord{}).
-			Where("workspace_id = ? AND binding_id = ? AND row_version = ?", workspace, bindingID, in.RowVersion).
+			Where("org_id = ? AND binding_id = ? AND row_version = ?", org, bindingID, in.RowVersion).
 			Updates(map[string]any{"policy_revision_id": in.PolicyRevisionID,
 				"selector_json": sel, "selector_hash": hash, "scope_type": in.ScopeType,
 				"priority": in.Priority, "enabled": in.Enabled, "row_version": in.RowVersion + 1,
@@ -229,7 +229,7 @@ func (s *Store) UpdatePolicyBinding(ctx context.Context, workspace, actor, bindi
 		if r.RowsAffected != 1 {
 			var count int64
 			if err := tx.Model(&PolicyBindingRecord{}).
-				Where("workspace_id = ? AND binding_id = ?", workspace, bindingID).Count(&count).Error; err != nil {
+				Where("org_id = ? AND binding_id = ?", org, bindingID).Count(&count).Error; err != nil {
 				return err
 			}
 			if count == 0 {
@@ -237,7 +237,7 @@ func (s *Store) UpdatePolicyBinding(ctx context.Context, workspace, actor, bindi
 			}
 			return policy.ErrConflict
 		}
-		return tx.Where("workspace_id = ? AND binding_id = ?", workspace, bindingID).Take(&updated).Error
+		return tx.Where("org_id = ? AND binding_id = ?", org, bindingID).Take(&updated).Error
 	})
 	return updated, err
 }
@@ -253,12 +253,12 @@ type policyBindingCandidate struct {
 }
 
 // policyBindingSnapshot reads enabled bindings once; publishing locks existing rows.
-func (s *Store) policyBindingSnapshot(ctx context.Context, workspace string, lockBindings bool) ([]policyBindingCandidate, error) {
+func (s *Store) policyBindingSnapshot(ctx context.Context, org string, lockBindings bool) ([]policyBindingCandidate, error) {
 	var entries []policyBindingCandidate
 	query := s.db.WithContext(ctx).Table("policy_bindings").
 		Select("policy_bindings.binding_id, policy_revisions.policy_id, policy_bindings.policy_revision_id, policy_bindings.scope_type, policy_bindings.selector_json, policy_bindings.priority, policy_revisions.body_sha256").
-		Joins("JOIN policy_revisions ON policy_revisions.workspace_id = policy_bindings.workspace_id AND policy_revisions.policy_revision_id = policy_bindings.policy_revision_id").
-		Where("policy_bindings.workspace_id = ? AND policy_bindings.agent_kind = ? AND policy_bindings.enabled = ?", workspace, config.JavaAgentKind, true)
+		Joins("JOIN policy_revisions ON policy_revisions.org_id = policy_bindings.org_id AND policy_revisions.policy_revision_id = policy_bindings.policy_revision_id").
+		Where("policy_bindings.org_id = ? AND policy_bindings.agent_kind = ? AND policy_bindings.enabled = ?", org, config.JavaAgentKind, true)
 	if lockBindings {
 		// 使用当前读并阻止已有 Binding 被并发修改。
 		query = query.Clauses(clause.Locking{Strength: "SHARE"})
@@ -307,22 +307,22 @@ func selectPolicyBinding(agent AgentRecord, entries []policyBindingCandidate) (*
 }
 
 // ResolveAgentPolicy is read-only. A matched Policy is never silently published as Desired.
-func (s *Store) ResolveAgentPolicy(ctx context.Context, workspace, uid string) (PolicyResolution, error) {
-	agent, err := s.Get(ctx, workspace, uid)
+func (s *Store) ResolveAgentPolicy(ctx context.Context, org, uid string) (PolicyResolution, error) {
+	agent, err := s.Get(ctx, org, uid)
 	if err != nil {
 		return PolicyResolution{}, err
 	}
-	return s.resolveAgentPolicy(ctx, workspace, agent, false)
+	return s.resolveAgentPolicy(ctx, org, agent, false)
 }
 
 // Publishing uses the already locked Agent and locks existing Bindings; preview is read-only.
-func (s *Store) resolveAgentPolicy(ctx context.Context, workspace string, agent AgentRecord, lockBindings bool) (PolicyResolution, error) {
+func (s *Store) resolveAgentPolicy(ctx context.Context, org string, agent AgentRecord, lockBindings bool) (PolicyResolution, error) {
 	// 1. 校验 Java 类型，不对不支持的 Agent 加载 Binding。
 	if agent.AgentKind != config.JavaAgentKind {
 		return PolicyResolution{}, ErrUnsupportedReleaseTarget
 	}
 	// 2. 读取当前有效 Binding 并按 Scope/Priority 求解。
-	entries, err := s.policyBindingSnapshot(ctx, workspace, lockBindings)
+	entries, err := s.policyBindingSnapshot(ctx, org, lockBindings)
 	if err != nil {
 		return PolicyResolution{}, err
 	}
@@ -333,7 +333,7 @@ func (s *Store) resolveAgentPolicy(ctx context.Context, workspace string, agent 
 	// 3. 读取命中 Revision 的真实内容，不创建 Release 或修改 Assignment。
 	var rev PolicyRevisionRecord
 	revisionQuery := s.db.WithContext(ctx).
-		Where("workspace_id = ? AND policy_revision_id = ?", workspace, selected.PolicyRevisionID)
+		Where("org_id = ? AND policy_revision_id = ?", org, selected.PolicyRevisionID)
 	if lockBindings {
 		revisionQuery = revisionQuery.Clauses(clause.Locking{Strength: "SHARE"})
 	}
@@ -341,7 +341,7 @@ func (s *Store) resolveAgentPolicy(ctx context.Context, workspace string, agent 
 	if err != nil {
 		return PolicyResolution{}, err
 	}
-	return PolicyResolution{WorkspaceID: workspace, InstanceUID: agent.InstanceUID,
+	return PolicyResolution{OrgID: org, InstanceUID: agent.InstanceUID,
 		BindingID: selected.BindingID, PolicyID: selected.PolicyID,
 		PolicyRevisionID: rev.PolicyRevisionID, BodySHA256: rev.BodySHA256,
 		Body: json.RawMessage(rev.BodyJSON)}, nil

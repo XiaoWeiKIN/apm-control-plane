@@ -44,7 +44,7 @@ func TestConfigRevisionPersistencePostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			first, err := store.CreateConfigRevision(ctx, "workspace-one", "admin-one", snapshot)
+			first, err := store.CreateConfigRevision(ctx, "org-one", "admin-one", snapshot)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -71,12 +71,12 @@ func TestConfigRevisionPersistencePostgresAndMySQL(t *testing.T) {
 			if decoded.ConfigMap["apm/sampling.json"] == nil {
 				t.Fatal("persisted ConfigRevision missing Java sampling object")
 			}
-			if _, err := store.GetConfigRevision(ctx, "workspace-two", first.ConfigRevisionID); !errors.Is(err, ErrConfigRevisionNotFound) {
-				t.Fatalf("cross-workspace ConfigRevision leaked: %v", err)
+			if _, err := store.GetConfigRevision(ctx, "org-two", first.ConfigRevisionID); !errors.Is(err, ErrConfigRevisionNotFound) {
+				t.Fatalf("cross-org ConfigRevision leaked: %v", err)
 			}
 
 			// Identical bytes may be published by separate immutable business revisions.
-			second, err := store.CreateConfigRevision(ctx, "workspace-one", "admin-one", snapshot)
+			second, err := store.CreateConfigRevision(ctx, "org-one", "admin-one", snapshot)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,12 +84,12 @@ func TestConfigRevisionPersistencePostgresAndMySQL(t *testing.T) {
 				t.Fatalf("ConfigRevision identity was deduplicated by hash: %s %s", first.ConfigRevisionID, second.ConfigRevisionID)
 			}
 			if _, err := store.CreateConfigRevision(ctx, "", "admin-one", snapshot); err == nil {
-				t.Fatal("empty Workspace accepted")
+				t.Fatal("empty Org accepted")
 			}
-			if _, err := store.CreateConfigRevision(ctx, "workspace-one", "", snapshot); err == nil {
+			if _, err := store.CreateConfigRevision(ctx, "org-one", "", snapshot); err == nil {
 				t.Fatal("empty actor accepted")
 			}
-			if _, err := store.CreateConfigRevision(ctx, "workspace-one", "admin-one", config.Snapshot{}); err == nil {
+			if _, err := store.CreateConfigRevision(ctx, "org-one", "admin-one", config.Snapshot{}); err == nil {
 				t.Fatal("empty ConfigMap accepted")
 			}
 			if err := store.Close(); err != nil {
@@ -100,7 +100,7 @@ func TestConfigRevisionPersistencePostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			restored, err := store.GetConfigRevision(ctx, "workspace-one", first.ConfigRevisionID)
+			restored, err := store.GetConfigRevision(ctx, "org-one", first.ConfigRevisionID)
 			if err != nil {
 				t.Fatal(err)
 			}

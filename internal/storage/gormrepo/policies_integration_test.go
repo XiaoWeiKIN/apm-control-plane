@@ -34,7 +34,7 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 
-			p := auth.Principal{WorkspaceID: "policy-resolution-contract", CredentialID: "java-owner"}
+			p := auth.Principal{OrgID: "policy-resolution-contract", CredentialID: "java-owner"}
 			id := newUID(t)
 			capability := uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig)
 			if _, err := store.Observe(ctx, p, id, Observation{SeenAt: time.Now().UTC(), Transport: "http",
@@ -42,36 +42,36 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// Workspace must be scoped by trusted principal, never by the selector.
-			if _, err := store.ResolveAgentPolicy(ctx, "other-workspace", id); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("cross Workspace inventory access: %v", err)
+			// Org must be scoped by trusted principal, never by the selector.
+			if _, err := store.ResolveAgentPolicy(ctx, "other-org", id); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("cross Org inventory access: %v", err)
 			}
-			if _, err := store.ResolveAgentPolicy(ctx, p.WorkspaceID, id); !errors.Is(err, policy.ErrNotFound) {
+			if _, err := store.ResolveAgentPolicy(ctx, p.OrgID, id); !errors.Is(err, policy.ErrNotFound) {
 				t.Fatalf("unexpected policy without Binding: %v", err)
 			}
 
-			_, base, err := store.CreatePolicy(ctx, p.WorkspaceID, "admin", "default", 0.1)
+			_, base, err := store.CreatePolicy(ctx, p.OrgID, "admin", "default", 0.1)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, env, err := store.CreatePolicy(ctx, p.WorkspaceID, "admin", "production", 0.2)
+			_, env, err := store.CreatePolicy(ctx, p.OrgID, "admin", "production", 0.2)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, service, err := store.CreatePolicy(ctx, p.WorkspaceID, "admin", "checkout", 0.3)
+			_, service, err := store.CreatePolicy(ctx, p.OrgID, "admin", "checkout", 0.3)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, contender, err := store.CreatePolicy(ctx, p.WorkspaceID, "admin", "collision", 0.4)
+			_, contender, err := store.CreatePolicy(ctx, p.OrgID, "admin", "collision", 0.4)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.CreatePolicyRevision(ctx, "other-workspace", "admin", base.PolicyID, 0.5); !errors.Is(err, policy.ErrNotFound) {
-				t.Fatalf("cross-workspace revision creation: %v", err)
+			if _, err := store.CreatePolicyRevision(ctx, "other-org", "admin", base.PolicyID, 0.5); !errors.Is(err, policy.ErrNotFound) {
+				t.Fatalf("cross-org revision creation: %v", err)
 			}
 			createBinding := func(revisionID, scope string, selector policy.Selector, priority int) PolicyBindingRecord {
 				t.Helper()
-				b, err := store.CreatePolicyBinding(ctx, p.WorkspaceID, "admin", BindingInput{
+				b, err := store.CreatePolicyBinding(ctx, p.OrgID, "admin", BindingInput{
 					PolicyRevisionID: revisionID, ScopeType: scope, Selector: selector, Priority: priority,
 				})
 				if err != nil {
@@ -79,12 +79,12 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 				}
 				return b
 			}
-			workspace := createBinding(base.PolicyRevisionID, policy.ScopeWorkspace, policy.Selector{}, 100)
+			org := createBinding(base.PolicyRevisionID, policy.ScopeOrg, policy.Selector{}, 100)
 			envBinding := createBinding(env.PolicyRevisionID, policy.ScopeEnvironment, policy.Selector{Environment: "prod"}, 0)
 			serviceBinding := createBinding(service.PolicyRevisionID, policy.ScopeService, policy.Selector{ServiceName: "checkout"}, 1)
 			resolve := func(want string) {
 				t.Helper()
-				got, err := store.ResolveAgentPolicy(ctx, p.WorkspaceID, id)
+				got, err := store.ResolveAgentPolicy(ctx, p.OrgID, id)
 				if err != nil || got.PolicyRevisionID != want {
 					t.Fatalf("resolved revision %+v, want %s: %v", got, want, err)
 				}
@@ -94,45 +94,45 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 			}
 			resolve(service.PolicyRevisionID)
 			other := createBinding(contender.PolicyRevisionID, policy.ScopeService, policy.Selector{ServiceName: "checkout", Environment: "prod"}, 1)
-			if _, err := store.ResolveAgentPolicy(ctx, p.WorkspaceID, id); !errors.Is(err, policy.ErrConflict) {
+			if _, err := store.ResolveAgentPolicy(ctx, p.OrgID, id); !errors.Is(err, policy.ErrConflict) {
 				t.Fatalf("ambiguous top priority did not fail: %v", err)
 			}
 			// A strictly higher priority resolves an otherwise ambiguous lower level.
 			higher := createBinding(service.PolicyRevisionID, policy.ScopeService, policy.Selector{ServiceName: "checkout"}, 2)
 			resolve(service.PolicyRevisionID)
-			// Missing or cross-Workspace bindings must not be reported as stale CAS conflicts.
+			// Missing or cross-Org bindings must not be reported as stale CAS conflicts.
 			update := BindingInput{
 				PolicyRevisionID: service.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 1, Enabled: true, RowVersion: 1,
 			}
-			if _, err := store.UpdatePolicyBinding(ctx, p.WorkspaceID, "admin", "11111111-1111-4111-8111-111111111111", update); !errors.Is(err, policy.ErrNotFound) {
+			if _, err := store.UpdatePolicyBinding(ctx, p.OrgID, "admin", "11111111-1111-4111-8111-111111111111", update); !errors.Is(err, policy.ErrNotFound) {
 				t.Fatalf("missing binding should be 404: %v", err)
 			}
-			_, foreignRevision, err := store.CreatePolicy(ctx, "other-workspace", "admin", "foreign", 0.2)
+			_, foreignRevision, err := store.CreatePolicy(ctx, "other-org", "admin", "foreign", 0.2)
 			if err != nil {
 				t.Fatal(err)
 			}
 			update.PolicyRevisionID = foreignRevision.PolicyRevisionID
-			if _, err := store.UpdatePolicyBinding(ctx, "other-workspace", "admin", serviceBinding.BindingID, update); !errors.Is(err, policy.ErrNotFound) {
-				t.Fatalf("cross-Workspace binding should be 404: %v", err)
+			if _, err := store.UpdatePolicyBinding(ctx, "other-org", "admin", serviceBinding.BindingID, update); !errors.Is(err, policy.ErrNotFound) {
+				t.Fatalf("cross-Org binding should be 404: %v", err)
 			}
 			// Concurrent callers cannot overwrite a newer Binding row_version.
-			if _, err := store.UpdatePolicyBinding(ctx, p.WorkspaceID, "admin", higher.BindingID, BindingInput{
+			if _, err := store.UpdatePolicyBinding(ctx, p.OrgID, "admin", higher.BindingID, BindingInput{
 				PolicyRevisionID: higher.PolicyRevisionID, ScopeType: higher.ScopeType, Selector: policy.Selector{ServiceName: "checkout"},
 				Priority: higher.Priority, Enabled: false, RowVersion: higher.RowVersion,
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.UpdatePolicyBinding(ctx, p.WorkspaceID, "admin", higher.BindingID, BindingInput{
+			if _, err := store.UpdatePolicyBinding(ctx, p.OrgID, "admin", higher.BindingID, BindingInput{
 				PolicyRevisionID: higher.PolicyRevisionID, ScopeType: higher.ScopeType, Selector: policy.Selector{ServiceName: "checkout"},
 				Priority: higher.Priority, Enabled: true, RowVersion: higher.RowVersion,
 			}); !errors.Is(err, policy.ErrConflict) {
 				t.Fatalf("stale Binding CAS not rejected: %v", err)
 			}
-			if _, err := store.ResolveAgentPolicy(ctx, p.WorkspaceID, id); !errors.Is(err, policy.ErrConflict) {
+			if _, err := store.ResolveAgentPolicy(ctx, p.OrgID, id); !errors.Is(err, policy.ErrConflict) {
 				t.Fatalf("conflicting fallback not restored: %v", err)
 			}
-			if _, err := store.UpdatePolicyBinding(ctx, p.WorkspaceID, "admin", other.BindingID, BindingInput{
+			if _, err := store.UpdatePolicyBinding(ctx, p.OrgID, "admin", other.BindingID, BindingInput{
 				PolicyRevisionID: other.PolicyRevisionID, ScopeType: other.ScopeType,
 				Selector: policy.Selector{ServiceName: "checkout", Environment: "prod"},
 				Priority: 1, Enabled: false, RowVersion: 1,
@@ -140,20 +140,20 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			resolve(service.PolicyRevisionID)
-			for _, b := range []PolicyBindingRecord{serviceBinding, envBinding, workspace} {
+			for _, b := range []PolicyBindingRecord{serviceBinding, envBinding, org} {
 				selectors := map[string]policy.Selector{
 					policy.ScopeService:     {ServiceName: "checkout"},
 					policy.ScopeEnvironment: {Environment: "prod"},
-					policy.ScopeWorkspace:   {},
+					policy.ScopeOrg:   {},
 				}
-				if _, err := store.UpdatePolicyBinding(ctx, p.WorkspaceID, "admin", b.BindingID, BindingInput{
+				if _, err := store.UpdatePolicyBinding(ctx, p.OrgID, "admin", b.BindingID, BindingInput{
 					PolicyRevisionID: b.PolicyRevisionID, ScopeType: b.ScopeType, Selector: selectors[b.ScopeType],
 					Priority: b.Priority, Enabled: false, RowVersion: b.RowVersion,
 				}); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if _, err := store.ResolveAgentPolicy(ctx, p.WorkspaceID, id); !errors.Is(err, policy.ErrNotFound) {
+			if _, err := store.ResolveAgentPolicy(ctx, p.OrgID, id); !errors.Is(err, policy.ErrNotFound) {
 				t.Fatalf("disabled rules still matched: %v", err)
 			}
 
@@ -165,7 +165,7 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					rev, err := store.CreatePolicyRevision(ctx, p.WorkspaceID, "admin", base.PolicyID, 0.6)
+					rev, err := store.CreatePolicyRevision(ctx, p.OrgID, "admin", base.PolicyID, 0.6)
 					if err != nil {
 						errs <- err
 						return

@@ -26,10 +26,10 @@ const deliveryRetryInterval = 15 * time.Second
 
 // ReconcileAgentConfig records an Agent receipt and offers the current durable
 // Desired configuration. Offering a response is not proof of transport or apply.
-func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceUID string, reported *ConfigStatus, offer bool) (*DesiredConfig, bool, error) {
+func (s *Store) ReconcileAgentConfig(ctx context.Context, orgID, instanceUID string, reported *ConfigStatus, offer bool) (*DesiredConfig, bool, error) {
 	// 1. 无发布意图的心跳走只读快速路径；不为每次轮询开启事务。
 	var existing AgentAssignmentRecord
-	err := s.db.WithContext(ctx).Where("workspace_id = ? AND instance_uid = ?", workspaceID, instanceUID).Take(&existing).Error
+	err := s.db.WithContext(ctx).Where("org_id = ? AND instance_uid = ?", orgID, instanceUID).Take(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, nil
 	}
@@ -50,13 +50,13 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 		// 2. 按发布事务的 Agent → Assignment 锁顺序串行化，防止旧回执覆盖新版本。
 		var agent AgentRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("workspace_id = ? AND instance_uid = ?", workspaceID, instanceUID).
+			Where("org_id = ? AND instance_uid = ?", orgID, instanceUID).
 			Take(&agent).Error; err != nil {
 			return err
 		}
 		var assignment AgentAssignmentRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("workspace_id = ? AND instance_uid = ?", workspaceID, instanceUID).
+			Where("org_id = ? AND instance_uid = ?", orgID, instanceUID).
 			Take(&assignment).Error; err != nil {
 			return err
 		}
@@ -98,8 +98,8 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 					"state": state, "last_error": lastError, "updated_at": now,
 				}
 				r := tx.Model(&AgentAssignmentRecord{}).
-					Where("workspace_id = ? AND instance_uid = ? AND desired_generation = ? AND row_version = ?",
-						workspaceID, instanceUID, assignment.DesiredGeneration, assignment.RowVersion).Updates(updates)
+					Where("org_id = ? AND instance_uid = ? AND desired_generation = ? AND row_version = ?",
+						orgID, instanceUID, assignment.DesiredGeneration, assignment.RowVersion).Updates(updates)
 				if r.Error != nil {
 					return r.Error
 				}
@@ -139,7 +139,7 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 
 		// 5. 重新检查 Agent 类型、Capability 和不可变 ConfigMap，禁止下发不兼容内容。
 		var revision ConfigRevisionRecord
-		if err := tx.Where("workspace_id = ? AND config_revision_id = ?", workspaceID, assignment.ConfigRevisionID).
+		if err := tx.Where("org_id = ? AND config_revision_id = ?", orgID, assignment.ConfigRevisionID).
 			Take(&revision).Error; err != nil {
 			return err
 		}
@@ -150,8 +150,8 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 			revision.HashAlgorithm != config.HashAlgorithm ||
 			uint64(agent.Capabilities)&uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig) == 0 {
 			r := tx.Model(&AgentAssignmentRecord{}).
-				Where("workspace_id = ? AND instance_uid = ? AND desired_generation = ? AND row_version = ?",
-					workspaceID, instanceUID, assignment.DesiredGeneration, assignment.RowVersion).
+				Where("org_id = ? AND instance_uid = ? AND desired_generation = ? AND row_version = ?",
+					orgID, instanceUID, assignment.DesiredGeneration, assignment.RowVersion).
 				Updates(map[string]any{"state": "UNSUPPORTED", "row_version": assignment.RowVersion + 1, "updated_at": now})
 			if r.Error != nil {
 				return r.Error
@@ -175,8 +175,8 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 		// 6. 持久记录本次响应式提供的尝试，等待后续独立 ACK；事务内不进行网络发送。
 		nextRetry := now.Add(deliveryRetryInterval)
 		r := tx.Model(&AgentAssignmentRecord{}).
-			Where("workspace_id = ? AND instance_uid = ? AND desired_generation = ? AND row_version = ?",
-				workspaceID, instanceUID, assignment.DesiredGeneration, assignment.RowVersion).
+			Where("org_id = ? AND instance_uid = ? AND desired_generation = ? AND row_version = ?",
+				orgID, instanceUID, assignment.DesiredGeneration, assignment.RowVersion).
 			Updates(map[string]any{
 				"state": "WAITING_ACK", "row_version": assignment.RowVersion + 1,
 				"attempt_count": assignment.AttemptCount + 1, "last_sent_at": now,
@@ -204,8 +204,8 @@ func (s *Store) ReconcileAgentConfig(ctx context.Context, workspaceID, instanceU
 // progress separate from the historical single-Agent Release status contract.
 func setReleaseDeliveryStatus(tx *gorm.DB, a AgentAssignmentRecord, state, lastError string, now time.Time) error {
 	r := tx.Model(&ReleaseTargetRecord{}).
-		Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND desired_generation = ?",
-			a.WorkspaceID, a.ReleaseID, a.InstanceUID, a.DesiredGeneration).
+		Where("org_id = ? AND release_id = ? AND instance_uid = ? AND desired_generation = ?",
+			a.OrgID, a.ReleaseID, a.InstanceUID, a.DesiredGeneration).
 		Updates(map[string]any{"status": state, "last_error": lastError, "updated_at": now})
 	if r.Error != nil {
 		return r.Error
@@ -217,7 +217,7 @@ func setReleaseDeliveryStatus(tx *gorm.DB, a AgentAssignmentRecord, state, lastE
 	// 1. 先锁 Release，避免并发 Agent ACK 把汇总状态互相覆盖。
 	var release ConfigReleaseRecord
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("workspace_id = ? AND release_id = ?", a.WorkspaceID, a.ReleaseID).
+		Where("org_id = ? AND release_id = ?", a.OrgID, a.ReleaseID).
 		Take(&release).Error; err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func setReleaseDeliveryStatus(tx *gorm.DB, a AgentAssignmentRecord, state, lastE
 	}
 	if plan.BatchSize == 0 {
 		return tx.Model(&ConfigReleaseRecord{}).
-			Where("workspace_id = ? AND release_id = ?", a.WorkspaceID, a.ReleaseID).
+			Where("org_id = ? AND release_id = ?", a.OrgID, a.ReleaseID).
 			Updates(map[string]any{"status": state}).Error
 	}
 
@@ -240,7 +240,7 @@ func setReleaseDeliveryStatus(tx *gorm.DB, a AgentAssignmentRecord, state, lastE
 	}
 	var pending int64
 	if err := tx.Model(&ReleaseTargetRecord{}).
-		Where("workspace_id = ? AND release_id = ? AND status <> 'APPLIED'", a.WorkspaceID, a.ReleaseID).
+		Where("org_id = ? AND release_id = ? AND status <> 'APPLIED'", a.OrgID, a.ReleaseID).
 		Count(&pending).Error; err != nil {
 		return err
 	}
@@ -271,7 +271,7 @@ func insertDeliveryEvent(tx *gorm.DB, a AgentAssignmentRecord, eventType string,
 	}
 	releaseID, uid, generation := a.ReleaseID, a.InstanceUID, a.DesiredGeneration
 	return tx.Create(&ConfigEventRecord{
-		WorkspaceID: a.WorkspaceID, EventID: id, EventType: eventType,
+		OrgID: a.OrgID, EventID: id, EventType: eventType,
 		ReleaseID: &releaseID, InstanceUID: &uid, DesiredGeneration: &generation,
 		ConfigHash: hash, ReportedStatus: status, ActorType: "AGENT",
 		ActorID: uid, DetailsJSON: details, OccurredAt: now,

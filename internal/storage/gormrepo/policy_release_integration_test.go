@@ -36,9 +36,9 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 
-			workspace := "p25-policy-release"
+			org := "p25-policy-release"
 			uid := newUID(t)
-			owner := auth.Principal{WorkspaceID: workspace, CredentialID: "java-agent"}
+			owner := auth.Principal{OrgID: org, CredentialID: "java-agent"}
 			if _, err := store.Observe(ctx, owner, uid, Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",
 				Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
@@ -46,12 +46,12 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			createdPolicy, revision, err := store.CreatePolicy(ctx, workspace, "admin", "checkout-sampling", 0.2)
+			createdPolicy, revision, err := store.CreatePolicy(ctx, org, "admin", "checkout-sampling", 0.2)
 			if err != nil {
 				t.Fatal(err)
 			}
 			selector := policy.Selector{ServiceName: "checkout", Environment: "prod"}
-			binding, err := store.CreatePolicyBinding(ctx, workspace, "admin", BindingInput{
+			binding, err := store.CreatePolicyBinding(ctx, org, "admin", BindingInput{
 				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: selector, Priority: 1,
 			})
@@ -59,37 +59,37 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// 1. 未命中、跨 Workspace 和过期预览均不得创建 ConfigRevision。
-			if _, err := store.PublishAgentPolicy(ctx, "other-workspace", uid,
+			// 1. 未命中、跨 Org 和过期预览均不得创建 ConfigRevision。
+			if _, err := store.PublishAgentPolicy(ctx, "other-org", uid,
 				revision.PolicyRevisionID, "admin", ""); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("cross-workspace release accepted: %v", err)
+				t.Fatalf("cross-org release accepted: %v", err)
 			}
-			if _, err := store.PublishAgentPolicy(ctx, workspace, uid,
+			if _, err := store.PublishAgentPolicy(ctx, org, uid,
 				"00000000-0000-4000-8000-000000000000", "admin", ""); !errors.Is(err, policy.ErrNotFound) {
 				t.Fatalf("unknown revision with matching binding should not be found: %v", err)
 			}
 			var count int64
-			if err := store.db.Model(&ConfigRevisionRecord{}).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 0 {
+			if err := store.db.Model(&ConfigRevisionRecord{}).Where("org_id = ?", org).Count(&count).Error; err != nil || count != 0 {
 				t.Fatalf("rejected request created ConfigRevision: %d %v", count, err)
 			}
 
 			// 已知 Revision 不再命中返回冲突；未知 Revision 且无匹配 Binding 返回 NotFound。
-			disabled, err := store.UpdatePolicyBinding(ctx, workspace, "admin", binding.BindingID, BindingInput{
+			disabled, err := store.UpdatePolicyBinding(ctx, org, "admin", binding.BindingID, BindingInput{
 				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: selector, Priority: 1, Enabled: false, RowVersion: binding.RowVersion,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID,
+			if _, err := store.PublishAgentPolicy(ctx, org, uid, revision.PolicyRevisionID,
 				"admin", ""); !errors.Is(err, policy.ErrConflict) {
 				t.Fatalf("disabled expected binding should conflict: %v", err)
 			}
-			if _, err := store.PublishAgentPolicy(ctx, workspace, uid,
+			if _, err := store.PublishAgentPolicy(ctx, org, uid,
 				"00000000-0000-4000-8000-000000000000", "admin", ""); !errors.Is(err, policy.ErrNotFound) {
 				t.Fatalf("unknown policy revision should not be found: %v", err)
 			}
-			binding, err = store.UpdatePolicyBinding(ctx, workspace, "admin", binding.BindingID, BindingInput{
+			binding, err = store.UpdatePolicyBinding(ctx, org, "admin", binding.BindingID, BindingInput{
 				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: selector, Priority: 1, Enabled: true, RowVersion: disabled.RowVersion,
 			})
@@ -106,20 +106,20 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.PublishAgentPolicy(ctx, workspace, unsupportedUID,
+			if _, err := store.PublishAgentPolicy(ctx, org, unsupportedUID,
 				revision.PolicyRevisionID, "admin", ""); !errors.Is(err, ErrUnsupportedReleaseTarget) {
 				t.Fatalf("Agent without RemoteConfig capability accepted: %v", err)
 			}
-			if err := store.db.Model(&ConfigRevisionRecord{}).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 0 {
+			if err := store.db.Model(&ConfigRevisionRecord{}).Where("org_id = ?", org).Count(&count).Error; err != nil || count != 0 {
 				t.Fatalf("unsupported Agent left ConfigRevision: %d %v", count, err)
 			}
 
 			// 2. Binding 在发布读取快照后更新时，不能发布过期的 Revision（MySQL RR）。
-			nextRevision, err := store.CreatePolicyRevision(ctx, workspace, "admin", createdPolicy.PolicyID, 0.4)
+			nextRevision, err := store.CreatePolicyRevision(ctx, org, "admin", createdPolicy.PolicyID, 0.4)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.PublishAgentPolicy(ctx, workspace, uid, nextRevision.PolicyRevisionID,
+			if _, err := store.PublishAgentPolicy(ctx, org, uid, nextRevision.PolicyRevisionID,
 				"admin", ""); !errors.Is(err, policy.ErrConflict) {
 				t.Fatalf("existing unselected revision should conflict: %v", err)
 			}
@@ -139,7 +139,7 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			}
 			publishErrs := make(chan error, 1)
 			go func() {
-				_, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID,
+				_, err := store.PublishAgentPolicy(ctx, org, uid, revision.PolicyRevisionID,
 					"admin", "binding-race-"+uid[:16])
 				publishErrs <- err
 			}()
@@ -149,7 +149,7 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 				close(resume)
 				t.Fatal("policy release did not reach locked binding read")
 			}
-			updated, err := store.UpdatePolicyBinding(ctx, workspace, "admin", binding.BindingID, BindingInput{
+			updated, err := store.UpdatePolicyBinding(ctx, org, "admin", binding.BindingID, BindingInput{
 				PolicyRevisionID: nextRevision.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: selector, Priority: 1, Enabled: true, RowVersion: binding.RowVersion,
 			})
@@ -163,64 +163,64 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			if err := store.db.Callback().Query().Remove(resolveGate); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.UpdatePolicyBinding(ctx, workspace, "admin", binding.BindingID, BindingInput{
+			if _, err := store.UpdatePolicyBinding(ctx, org, "admin", binding.BindingID, BindingInput{
 				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: selector, Priority: 1, Enabled: true, RowVersion: updated.RowVersion,
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.db.Model(&ConfigRevisionRecord{}).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 0 {
+			if err := store.db.Model(&ConfigRevisionRecord{}).Where("org_id = ?", org).Count(&count).Error; err != nil || count != 0 {
 				t.Fatalf("stale binding release created ConfigRevision: %d %v", count, err)
 			}
 
 			// 3. 事务提交后，ConfigRevision/Release/Target/Assignment/Event 必须保持相同来源。
 			key := "p25-" + uid[:16]
-			first, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID, "admin", key)
+			first, err := store.PublishAgentPolicy(ctx, org, uid, revision.PolicyRevisionID, "admin", key)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if first.Status != "PENDING" || first.DesiredGeneration != 1 {
 				t.Fatalf("unexpected release: %+v", first)
 			}
-			cfg, err := store.GetConfigRevision(ctx, workspace, first.ConfigRevisionID)
+			cfg, err := store.GetConfigRevision(ctx, org, first.ConfigRevisionID)
 			if err != nil || cfg.SourcePolicyRevisionID == nil ||
 				*cfg.SourcePolicyRevisionID != revision.PolicyRevisionID ||
 				cfg.ConfigHash == "" || len(cfg.ConfigMapBytes) == 0 {
 				t.Fatalf("missing immutable compiled provenance: %+v %v", cfg, err)
 			}
 			var release ConfigReleaseRecord
-			if err := store.db.Where("workspace_id = ? AND release_id = ?", workspace, first.ReleaseID).
+			if err := store.db.Where("org_id = ? AND release_id = ?", org, first.ReleaseID).
 				Take(&release).Error; err != nil || release.PolicyRevisionID == nil ||
 				*release.PolicyRevisionID != revision.PolicyRevisionID {
 				t.Fatalf("release lost Policy Revision provenance: %+v %v", release, err)
 			}
-			assignment, err := store.GetAgentAssignment(ctx, workspace, uid)
+			assignment, err := store.GetAgentAssignment(ctx, org, uid)
 			if err != nil || assignment.DesiredHash != cfg.ConfigHash || assignment.DesiredGeneration != 1 {
 				t.Fatalf("atomic Desired wrong: %+v %v", assignment, err)
 			}
 			// P2.3 continues to send the exact immutable ConfigMap and converge only on matching ACK.
-			offered, assigned, err := store.ReconcileAgentConfig(ctx, workspace, uid, nil, true)
+			offered, assigned, err := store.ReconcileAgentConfig(ctx, org, uid, nil, true)
 			if err != nil || !assigned || offered == nil || offered.ConfigHash != cfg.ConfigHash {
 				t.Fatalf("OpAMP durable offer not available: %+v %t %v", offered, assigned, err)
 			}
-			if _, _, err := store.ReconcileAgentConfig(ctx, workspace, uid,
+			if _, _, err := store.ReconcileAgentConfig(ctx, org, uid,
 				&ConfigStatus{Hash: cfg.ConfigHash, Status: "APPLIED"}, false); err != nil {
 				t.Fatal(err)
 			}
-			applied, err := store.GetAgentAssignment(ctx, workspace, uid)
+			applied, err := store.GetAgentAssignment(ctx, org, uid)
 			if err != nil || applied.State != "APPLIED" {
 				t.Fatalf("hash ACK did not converge: %+v %v", applied, err)
 			}
 
 			// 3. 同一 Key 重试返回原 Release，不产生额外配置或推进 Generation。
-			again, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID, "admin", key)
+			again, err := store.PublishAgentPolicy(ctx, org, uid, revision.PolicyRevisionID, "admin", key)
 			if err != nil || again.ReleaseID != first.ReleaseID || again.ConfigRevisionID != first.ConfigRevisionID {
 				t.Fatalf("idempotency replay: %+v %v", again, err)
 			}
-			if err := store.db.Model(&ConfigRevisionRecord{}).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 1 {
+			if err := store.db.Model(&ConfigRevisionRecord{}).Where("org_id = ?", org).Count(&count).Error; err != nil || count != 1 {
 				t.Fatalf("idempotent publish duplicated ConfigRevision: %d %v", count, err)
 			}
-			if _, err := store.PublishAgentPolicy(ctx, workspace, uid, "00000000-0000-4000-8000-000000000000",
+			if _, err := store.PublishAgentPolicy(ctx, org, uid, "00000000-0000-4000-8000-000000000000",
 				"admin", key); !errors.Is(err, ErrReleaseConflict) {
 				t.Fatalf("same key different request should conflict: %v", err)
 			}
@@ -235,17 +235,17 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			_, err = store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID, "admin", "failure-"+uid[:16])
+			_, err = store.PublishAgentPolicy(ctx, org, uid, revision.PolicyRevisionID, "admin", "failure-"+uid[:16])
 			if !errors.Is(err, auditErr) {
 				t.Fatalf("audit failure not propagated: %v", err)
 			}
 			if err := store.db.Callback().Create().Remove(callback); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.db.Model(&ConfigRevisionRecord{}).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 1 {
+			if err := store.db.Model(&ConfigRevisionRecord{}).Where("org_id = ?", org).Count(&count).Error; err != nil || count != 1 {
 				t.Fatalf("rollback left orphan ConfigRevision: %d %v", count, err)
 			}
-			still, err := store.GetAgentAssignment(ctx, workspace, uid)
+			still, err := store.GetAgentAssignment(ctx, org, uid)
 			if err != nil || still.DesiredGeneration != 1 || still.State != "APPLIED" {
 				t.Fatalf("rollback damaged active Assignment: %+v %v", still, err)
 			}
@@ -258,7 +258,7 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 				wg.Add(1)
 				go func(i int) {
 					defer wg.Done()
-					r, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID, "admin",
+					r, err := store.PublishAgentPolicy(ctx, org, uid, revision.PolicyRevisionID, "admin",
 						string(rune('a'+i))+"-"+uid[:16])
 					if err != nil {
 						errs <- err
@@ -283,7 +283,7 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 
 			// 6. PostgreSQL：解析读取完成后新增的高优先级 Binding 在下一次发布生效。
 			if tt.driver == "postgres" {
-				newRevision, err := store.CreatePolicyRevision(ctx, workspace, "admin", createdPolicy.PolicyID, 0.8)
+				newRevision, err := store.CreatePolicyRevision(ctx, org, "admin", createdPolicy.PolicyID, 0.8)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -307,7 +307,7 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 				}
 				published := make(chan publishResult, 1)
 				go func() {
-					release, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID,
+					release, err := store.PublishAgentPolicy(ctx, org, uid, revision.PolicyRevisionID,
 						"admin", "binding-insert-"+uid[:16])
 					published <- publishResult{release, err}
 				}()
@@ -317,7 +317,7 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 					close(resume)
 					t.Fatal("policy resolution query did not complete")
 				}
-				_, insertErr := store.CreatePolicyBinding(ctx, workspace, "admin", BindingInput{
+				_, insertErr := store.CreatePolicyBinding(ctx, org, "admin", BindingInput{
 					PolicyRevisionID: newRevision.PolicyRevisionID, ScopeType: policy.ScopeService,
 					Selector: selector, Priority: 2,
 				})
@@ -332,11 +332,11 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 				if err := store.db.Callback().Query().Remove(callback); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := store.PublishAgentPolicy(ctx, workspace, uid, revision.PolicyRevisionID,
+				if _, err := store.PublishAgentPolicy(ctx, org, uid, revision.PolicyRevisionID,
 					"admin", ""); !errors.Is(err, policy.ErrConflict) {
 					t.Fatalf("next publication should see higher-priority binding: %v", err)
 				}
-				if _, err := store.PublishAgentPolicy(ctx, workspace, uid, newRevision.PolicyRevisionID,
+				if _, err := store.PublishAgentPolicy(ctx, org, uid, newRevision.PolicyRevisionID,
 					"admin", ""); err != nil {
 					t.Fatalf("new binding did not become effective: %v", err)
 				}
