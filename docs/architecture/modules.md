@@ -4,13 +4,13 @@
 >
 > **事实基线**：`main@61700ac72b0472994f13a39642f9e36a85228b11` 已合并 P1.1、P2.1 ConfigRevision 和 P2.2 单 Agent Release/Target/Assignment/Event 原子 Pending 发布。本 P2.3a 分支在持久 Desired 上增加 OpAMP 响应式配置投递与 ACK 收敛。**P2.3a 已合并 HTTP 响应式投递与 ACK；P2.3b 实现单实例 WS 主动推送/重连恢复，跨节点 HA 和 P3 灰度仍未实现；本 P2.4 分支新增 Java Policy Selector 的只读解析。** `internal/release` 是目标模块边界；现在仅有 `cmd/server/releases.go` 的 API 与 `gormrepo/releases.go` 的事务逻辑，不为了目录对称新增空包。
 >
-> **读者任务**：决定某个功能应该放在哪个模块，理解一次配置发布与回执如何流转，按照最小的跨模块依赖开发 P2。表结构与数据库约束的详细来源见 [Workspace Schema 设计](storage-schema.md)。
+> **读者任务**：决定某个功能应该放在哪个模块，理解一次配置发布与回执如何流转，按照最小的跨模块依赖开发 P2。表结构与数据库约束的详细来源见 [Org Schema 设计](storage-schema.md)。
 
 ## 1. 一个 Go 进程，明确六条功能边界
 
 推荐 **模块化单体（Modular Monolith）**：当前业务没有多服务部署、分布式消息或独立服务扩容的测量需求。六个主要功能边界分别是 **Agent Registry、OpAMP Gateway、Policy、Config、Release、Reconciler**。其中 Gateway 是协议适配模块，另外五个偏向业务/状态管理；不把“六个模块”理解成六个微服务。
 
-`Workspace/Auth`、`Management API`、`Storage` 是三个横向支撑模块，而不是六个额外独立领域。`AgentConfigAdapter` 属于 Config 的可扩展内部边界，`Rollout` 属于 Release 的 P3 能力。
+`Org/Auth`、`Management API`、`Storage` 是三个横向支撑模块，而不是六个额外独立领域。`AgentConfigAdapter` 属于 Config 的可扩展内部边界，`Rollout` 属于 Release 的 P3 能力。
 
 ~~~mermaid
 flowchart TB
@@ -18,7 +18,7 @@ flowchart TB
     AG["OpAMP Agents<br/>Java 首期 · Go/Python/Collector 后续"]
     subgraph CP["一个 Go Control Plane 进程"]
       API["Management API"]
-      AUTH["Workspace / Auth"]
+      AUTH["Org / Auth"]
       GW["OpAMP Gateway"]
       REG["Agent Registry"]
       POL["Policy"]
@@ -66,7 +66,7 @@ flowchart TB
 
 ### 2.1 Agent Registry
 
-AgentKey 必须是 `(workspace_id, instance_uid)`，而不是裸 UID。Workspace 来自已认证的 Credential/平台身份上下文，不来自 AgentDescription；Agent 自报的 Service/Environment 只用于被授权范围内的 Inventory 展示和后续策略匹配。
+AgentKey 必须是 `(org_id, instance_uid)`，而不是裸 UID。Org 来自已认证的 Credential/平台身份上下文，不来自 AgentDescription；Agent 自报的 Service/Environment 只用于被授权范围内的 Inventory 展示和后续策略匹配。
 
 P1.1 目前将最新 Status Snapshot 放在 `agent_instances` 中，运行时 `runtimeAgent` 还保存 WS Connection、Sequence、临时 Demo RemoteConfig。P2 实施后 **Config Desired 不再由内存 `runtimeAgent.remote` / `desiredHash` 作为事实源**；Inventory 继续管理 Agent 元数据及连接可用性。这是迁移业务责任，不要求现在单独拆出 `agent_observations` 热表。
 
@@ -82,11 +82,11 @@ Gateway 把 `protobufs.AgentToServer` 映射为 Agent Observation/配置回执�
 
 ### 2.3 Policy Manager
 
-Policy 表达业务意图，例如：在 Workspace A 的 `prod/checkout` Service 使用 Java Head Sampling 10%。Policy Manager 管理不可变 `policy_revisions` 与当前 `policy_bindings` 的 Scope/Selector/Priority。
+Policy 表达业务意图，例如：在 Org A 的 `prod/checkout` Service 使用 Java Head Sampling 10%。Policy Manager 管理不可变 `policy_revisions` 与当前 `policy_bindings` 的 Scope/Selector/Priority。
 
-Resolver 必须先确认 Workspace Scope，再判断 AgentKind、Selector 和优先级；同级发生内容冲突时**显式失败**，不得依赖遍历顺序。首期只支持 Java 采样策略，不能将其 JSON 作为 Go/Python/Collector 的公共格式。
+Resolver 必须先确认 Org Scope，再判断 AgentKind、Selector 和优先级；同级发生内容冲突时**显式失败**，不得依赖遍历顺序。首期只支持 Java 采样策略，不能将其 JSON 作为 Go/Python/Collector 的公共格式。
 
-P2.4 以确定性 Selector 规则实现 Workspace/Environment/Service/Instance Scope，服务端按具体 Agent 解析并返回命中 Revision；不自动编译并发布 ConfigRevision，具体合同见 [P2.4 Policy 解析](p24-policy-resolution.md)。
+P2.4 以确定性 Selector 规则实现 Org/Environment/Service/Instance Scope，服务端按具体 Agent 解析并返回命中 Revision；不自动编译并发布 ConfigRevision，具体合同见 [P2.4 Policy 解析](p24-policy-resolution.md)。
 
 ### 2.4 Config Manager 与 AgentConfigAdapter
 
@@ -120,13 +120,13 @@ Reconciler 在 DB 中读取当前 `agent_assignments`（Desired）和 Agent 回�
 
 | 支撑模块 | 正确职责 | 当前状态与限制 |
 | --- | --- | --- |
-| **Workspace / Auth** | 分离 Agent/Admin Credential，生成可信 Workspace Principal，授权后才执行 Registry/发布操作 | `internal/auth` 已支持受信配置里的 `workspace_id`；**尚未真正接入平台 Workspace/IAM 的存在性、角色和撤销验证** |
+| **Org / Auth** | 分离 Agent/Admin Credential，生成可信 Org Principal，授权后才执行 Registry/发布操作 | `internal/auth` 已支持受信配置里的 `org_id`；**尚未真正接入平台 Org/IAM 的存在性、角色和撤销验证** |
 | **Management API** | HTTP 路由、入参验证、认证/授权、资源响应与错误映射；调用 Release/Registry | `cmd/server/main.go` 已有 Inventory 和 P0 Demo API；P2.2 Release 与 P2.4 Policy Authoring/Resolution API 已实现 |
 | **Storage** | 通过 GORM + 选定 PostgreSQL/MySQL Dialector 实现业务查询、事务、CAS 与错误映射；Goose 独立迁移 | P1.1 + P2.1 已有；**P2.2 新增 Goose 00003、单 Agent 原子 Release/Assignment CAS**，P2.3a 已提交 ACK 状态更新 |
 
 **优先复用现有 GORM Repository**，不要为每张业务表都建立一次转发型 Service/Repository/UnitOfWork。只有发布事务确实需要跨多组操作、或测试需要隔离边界时，才定义必要的事务方法与接口。PostgreSQL 与 MySQL 采用**同一套业务实现与行为合同测试**，仅保留需要的 Dialector 与 SQL Migration 差异。
 
-Workspace 概念与 Logs/Metrics/Traces/Dashboard 属于同一可观测平台，但本仓库并不管理 Workspace 主数据，也不能由 Agent 自报值创建 Workspace。生产上接入权威 IAM 和 Token 生命周期，仍是单独待批准的安全工作。
+Org 概念与 Logs/Metrics/Traces/Dashboard 属于同一可观测平台，但本仓库并不管理 Org 主数据，也不能由 Agent 自报值创建 Org。生产上接入权威 IAM 和 Token 生命周期，仍是单独待批准的安全工作。
 
 ## 4. 状态所有权与依赖方向
 
@@ -158,7 +158,7 @@ cmd/
   testagent/                 HTTP OpAMP 测试客户端
 internal/
   appconfig/                 [已有] Koanf 启动配置
-  auth/                      [已有] 可信 Workspace Credential
+  auth/                      [已有] 可信 Org Credential
   storage/
     gormrepo/                [已有] GORM + 两种 Dialector
   registry/                  [待拆] AgentKey、资产/Observation
@@ -177,17 +177,17 @@ db/migrations/
 
 ## 6. P2/P3 增量顺序与验收
 
-推荐先完成**单 Agent 的持久配置闭环**，再开发 Workspace/Environment/Service 级 Policy，避免高频主路径一开始就包含 Selector/灰度的复杂分支。
+推荐先完成**单 Agent 的持久配置闭环**，再开发 Org/Environment/Service 级 Policy，避免高频主路径一开始就包含 Selector/灰度的复杂分支。
 
 | 增量 | 优先落地的模块 | 交付时必须可观察的行为 |
 | --- | --- | --- |
 | **P2.1** 配置内容 | Config + Storage | 编译一个 Java `apm/sampling.json`，持久化完整 ConfigRevision/Hash，双数据库读回后字节一致；不冒充动态 JVM 采样已成功 |
 | **P2.2** 发布事务 | Release + Storage | Admin 针对**单个 Agent** 发布，Release/Target/Assignment/Event 同一个事务提交或全部失败；Desired 重启后不丢 |
 | **P2.3a/b** 协调闭环 | Reconciler + Gateway + Registry | HTTP 轮询与在线 WS 主动 Push 获取 ConfigMap；匹配 ACK 更新状态；旧 ACK 不污染新 Generation；离线重连从 DB 恢复（见 [P2.3 文档](p2-reconcile-delivery.md)） |
-| **P2.4** 策略解析 | Policy + Storage + Management API | Workspace/Environment/Service/Instance Selector 确定性匹配；最高同级冲突显式拒绝；只读结果不触发 Java 配置发布（见 [实现合同](p24-policy-resolution.md)） |
+| **P2.4** 策略解析 | Policy + Storage + Management API | Org/Environment/Service/Instance Selector 确定性匹配；最高同级冲突显式拒绝；只读结果不触发 Java 配置发布（见 [实现合同](p24-policy-resolution.md)） |
 | **P2.5** 策略单 Agent 发布 | Policy + Config + Release | 校验预览命中 Revision，编译并持久化完整 ConfigMap；Policy 来源、Release/Target/Assignment/Event 同事务提交；复用 P2.3 下发/ACK（见 [P2.5 合同](p25-policy-release.md)） |
 | **P3.3** 显式补偿回滚 | Release + Storage + Gateway | 原冻结目标集合、显式目标 ConfigRevision、源 Release RowVersion CAS；新 Release 记录 rollback_of_release_id 与 ROLLBACK_REQUESTED 审计，按 P3.1 分批 ACK（见 [P3.3 合同](p33-explicit-rollback.md)） |
-| **P3.2** 策略目标与受控恢复 | Policy + Release + Storage | 有界 Workspace Inventory 中按有效 PolicyRevision 选择并冻结 Agent，暂停后验证 APPLIED/Generation 并通过 Admin RowVersion CAS 显式恢复；不做自动批次推进（见 [P3.2 合同](p32-policy-rollout-recovery.md)） |
+| **P3.2** 策略目标与受控恢复 | Policy + Release + Storage | 有界 Org Inventory 中按有效 PolicyRevision 选择并冻结 Agent，暂停后验证 APPLIED/Generation 并通过 Admin RowVersion CAS 显式恢复；不做自动批次推进（见 [P3.2 合同](p32-policy-rollout-recovery.md)） |
 | **P3.1** 有界分批发布 | Release + Storage + Gateway | 显式 2–16 Agent 原子冻结，首批 Desired 激活；按 Hash ACK 人工推进下一批，目标失败或 Generation 冲突暂停，后续策略枚举/回滚待实现（见 [P3.1 合同](p3-frozen-rollout.md)） |
 | **P3 后续** 受控灰度/回滚 | Release（扩展 Rollout） | Selector 动态冻结目标、审批/暂停恢复、失败阻断、显式回滚产生新 Release/审计事件 |
 
@@ -197,7 +197,7 @@ P2.1 ConfigRevision 与 P2.2 发布事务已作为相邻独立增量实施。P2.
 
 | 情况 | 预期责任方 / 结果 |
 | --- | --- |
-| Workspace 凭证无法认证或越权 | Auth / API/Gateway 拒绝，绝不因 Agent Description 扩权 |
+| Org 凭证无法认证或越权 | Auth / API/Gateway 拒绝，绝不因 Agent Description 扩权 |
 | 目标 Agent 不存在或 UID 所有权冲突 | Registry/Storage 直接失败，不继续编译或下发 |
 | Agent 不支持配置格式或缺少 Capability | Config 返回 Unsupported，Release/Assignment 保留原因，Gateway 不发送不兼容内容 |
 | ConfigRevision/Release 事务提交失败 | Storage 回滚，Release 不触发发送 |
@@ -208,8 +208,8 @@ P2.1 ConfigRevision 与 P2.2 发布事务已作为相邻独立增量实施。P2.
 
 ## 7. 决策边界与维护方式
 
-目前可直接确认的产品/技术输入是：通用多语言 Agent 管理、**Java 配置 Adapter 首期**、平台统一 `workspace_id`、Go 模块化单体、GORM PostgreSQL/MySQL + Goose、单 Agent 配置闭环优先。这不表示 P2 已实现。
+目前可直接确认的产品/技术输入是：通用多语言 Agent 管理、**Java 配置 Adapter 首期**、平台统一 `org_id`、Go 模块化单体、GORM PostgreSQL/MySQL + Goose、单 Agent 配置闭环优先。这不表示 P2 已实现。
 
-**仍待正式评审**：Workspace/IAM 权威校验、稳定 Agent Principal 与 Credential 轮换、UID Session Fencing、Policy 重叠 Selector 的最终冲突合同、Config 相同 Hash 跨 Release 的统计语义、HA 与实际规模/SLO。凡涉及真实安全授权或长期不可逆数据库约束，应与 DD-001/ADR 流程保持一致，不能以本文替代审批。
+**仍待正式评审**：Org/IAM 权威校验、稳定 Agent Principal 与 Credential 轮换、UID Session Fencing、Policy 重叠 Selector 的最终冲突合同、Config 相同 Hash 跨 Release 的统计语义、HA 与实际规模/SLO。凡涉及真实安全授权或长期不可逆数据库约束，应与 DD-001/ADR 流程保持一致，不能以本文替代审批。
 
-**更新规则**：本文件是模块所有权和实现顺序的阅读入口；[Workspace Schema](storage-schema.md) 拥有表级字段、约束、索引和 Migration 合同；[整体架构](README.md) 描述端到端生命周期；[EP-001](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) 跟踪里程碑与验证证据。实现 PR 若移动方法或改变 owner，应同步更新这里，避免维护两份矛盾的模块边界。
+**更新规则**：本文件是模块所有权和实现顺序的阅读入口；[Org Schema](storage-schema.md) 拥有表级字段、约束、索引和 Migration 合同；[整体架构](README.md) 描述端到端生命周期；[EP-001](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) 跟踪里程碑与验证证据。实现 PR 若移动方法或改变 owner，应同步更新这里，避免维护两份矛盾的模块边界。

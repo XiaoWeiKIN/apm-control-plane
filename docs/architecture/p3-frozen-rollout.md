@@ -4,7 +4,7 @@
 
 ## 目标
 
-复用 P2.2/P2.3 的 `config_releases`、`release_targets.batch_no`、`agent_assignments`、`config_events`。一次管理请求显式提交 **2–16 个不同的 Java Agent UID**、已有的 ConfigRevision 和正整数 `batch_size`。所有 UID 先按字典序稳定排序；Workspace 来自可信 Admin Bearer Credential，不来自请求。
+复用 P2.2/P2.3 的 `config_releases`、`release_targets.batch_no`、`agent_assignments`、`config_events`。一次管理请求显式提交 **2–16 个不同的 Java Agent UID**、已有的 ConfigRevision 和正整数 `batch_size`。所有 UID 先按字典序稳定排序；Org 来自可信 Admin Bearer Credential，不来自请求。
 
 一个数据库事务完成 Release、全部 Frozen Target、首批 Desired Assignment 和审计事件。后续批次仅写 Target `QUEUED`，**不写 Agent Assignment、不提前发送 RemoteConfig**。所有 Target 冻结 `config_revision_id`、`batch_no` 和预期 `desired_generation`；改变时须创建新发布，不能静默修改旧 Target。
 
@@ -15,10 +15,10 @@
 | 方法 | 路径 | 契约 |
 | --- | --- | --- |
 | POST | `/api/v1/rollouts` | 正文 `{"config_revision_id":"UUID","instance_uids":["32-char-hex","..."],"batch_size":1}`，可选 `Idempotency-Key`；202 返回冻结快照、状态和刚激活 UID |
-| GET | `/api/v1/rollouts/{release_id}` | 200 返回持久 Release/Target 状态，跨 Workspace 返回 404 |
+| GET | `/api/v1/rollouts/{release_id}` | 200 返回持久 Release/Target 状态，跨 Org 返回 404 |
 | POST | `/api/v1/rollouts/{release_id}/advance` | 当前批次全部 APPLIED 才提交下一批；尚未收敛返回 409，不做数据写入 |
 
-发布请求里的 UID 数量为 2–16，重复 UID、未知字段、不支持的 BatchSize 明确 400；Workspace 内 Agent 或 ConfigRevision 缺失返回 404；目标缺少 Java Kind/RemoteConfig Capability 或 Dialect 不兼容返回 422。幂等 Key 在 Workspace 内与原 P2 Release 入口共享唯一约束，相同 Key+同请求仅返回原 Release，Key 冲突返回 409。
+发布请求里的 UID 数量为 2–16，重复 UID、未知字段、不支持的 BatchSize 明确 400；Org 内 Agent 或 ConfigRevision 缺失返回 404；目标缺少 Java Kind/RemoteConfig Capability 或 Dialect 不兼容返回 422。幂等 Key 在 Org 内与原 P2 Release 入口共享唯一约束，相同 Key+同请求仅返回原 Release，Key 冲突返回 409。
 
 ## 协调与状态
 
@@ -54,4 +54,4 @@ P3.1 **不**包含 Policy Binding 自动多 Agent 枚举、百分比灰度/批�
 
 ## 验证
 
-要求 PR 最新 Head 上严格 gofmt、go test -race、go vet、RepoFoundry 与真实 PostgreSQL 17/MySQL 8.4 合同测试。验收覆盖重复 UID、跨 Workspace、ConfigRevision Capability、不提前下发 Queued、全量冻结原子性、失败审计回滚、Hash-matched ACK 才可 Advance、Target Failure 停止扩散、Generation 漂移与 Store 重开恢复。
+要求 PR 最新 Head 上严格 gofmt、go test -race、go vet、RepoFoundry 与真实 PostgreSQL 17/MySQL 8.4 合同测试。验收覆盖重复 UID、跨 Org、ConfigRevision Capability、不提前下发 Queued、全量冻结原子性、失败审计回滚、Hash-matched ACK 才可 Advance、Target Failure 停止扩散、Generation 漂移与 Store 重开恢复。

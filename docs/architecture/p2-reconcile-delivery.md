@@ -4,9 +4,9 @@
 
 ## 1. 目标与边界
 
-基于 P2.2 已提交的 `config_revisions`、`config_releases`、`release_targets`、`agent_assignments` 和 `config_events`，让已经建立可信 Workspace/Agent 凭证绑定的 Java Agent 从 OpAMP HTTP 轮询或 WS 消息响应中获取完整 ConfigMap，并以报告的 RemoteConfigStatus 和 Hash 收敛当前 Assignment。
+基于 P2.2 已提交的 `config_revisions`、`config_releases`、`release_targets`、`agent_assignments` 和 `config_events`，让已经建立可信 Org/Agent 凭证绑定的 Java Agent 从 OpAMP HTTP 轮询或 WS 消息响应中获取完整 ConfigMap，并以报告的 RemoteConfigStatus 和 Hash 收敛当前 Assignment。
 
-P2.3a 和 P2.3b 均不增加物理表、消息队列或独立进程。只有已经发布到指定 `workspace_id + instance_uid` 的 Revision 可以下发。发送响应不表示接收、应用或真实 JVM 动态采样成功。
+P2.3a 和 P2.3b 均不增加物理表、消息队列或独立进程。只有已经发布到指定 `org_id + instance_uid` 的 Revision 可以下发。发送响应不表示接收、应用或真实 JVM 动态采样成功。
 
 ## 2. 执行顺序
 
@@ -54,16 +54,16 @@ ConfigMap 内容使用 P2.1 确定性 protobuf Bytes。投递前以 SHA-256 重�
 ## 4. 恢复和后续工作
 
 - **HTTP**：每次轮询读取数据库 Desired，不依赖进程内待发队列；进程重启后可以继续。
-- **WebSocket P2.3b**：首次收到通过归属认证的 Agent 消息后，建立一个 WS Session Writer。对于持久 Assignment，OnMessage 仅对账 ACK，不同步发送 ConfigMap；后台 Writer 按 Workspace + UID 读取最新 Desired，通过 OpAMP `Connection.Send` 主动推送。上游 opamp-go v0.25.0 在 WS connection 内使用互斥锁序列化实际写入。P0 `PUT /sampling` 的内存演示链路继续保留。
+- **WebSocket P2.3b**：首次收到通过归属认证的 Agent 消息后，建立一个 WS Session Writer。对于持久 Assignment，OnMessage 仅对账 ACK，不同步发送 ConfigMap；后台 Writer 按 Org + UID 读取最新 Desired，通过 OpAMP `Connection.Send` 主动推送。上游 opamp-go v0.25.0 在 WS connection 内使用互斥锁序列化实际写入。P0 `PUT /sampling` 的内存演示链路继续保留。
 - **Admin 唤醒**：发布事务提交后，在成功 HTTP 202 分支无阻塞投递一个容量为 1 的唤醒信号；合并通知不影响语义，因为每次读取持久 Assignment。Admin 不等待网络 Send。
 - **离线/重启恢复**：Desired 持久保留；HTTP 通过下一次轮询恢复，WS 在完成身份认证并发送首个 Agent 消息后启动 Writer，从数据库读取最新配置。无法向尚未重新连线的 Agent 主动发送。
 - **重试**：持久 `next_retry_at` 仍是固定 15 秒；在线 WS 先保持 5 秒检查覆盖重连后的 15 秒重试窗口，连续 5 次没有配置提供后逐步延长检查间隔（最多 40 秒），发布唤醒不受检查间隔影响。重连后未 ACK 的版本仍受持久期限约束，漏掉唤醒时最多等待当前检查间隔；不扫描离线 Agent，也不增加新队列或 Migration。终态 FAILED/UNSUPPORTED 需要新发布。
 - **证据界限**：`CONFIG_OFFERED` 只表示网关准备发送，不代表对端收到；依然只以匹配 Hash 的回执更新 APPLIED。当前单进程 Session 不提供多实例推送、跨节点订阅或全局 Session Fencing。
-- **平台安全**：继续使用现有静态配置绑定的 Workspace/Agent Token；未解决 DD-001、EP-001 所跟踪的正式 IAM 与稳定 Principal 阻塞。
+- **平台安全**：继续使用现有静态配置绑定的 Org/Agent Token；未解决 DD-001、EP-001 所跟踪的正式 IAM 与稳定 Principal 阻塞。
 - **状态查询**：Assignment 是 P2.3 当前状态事实源，P0 `PUT /sampling` 与旧 Agent List 视图仍属于兼容演示，不承诺展示持久 Desired。纯运行时 Session 在无连接、无 P0 演示配置且空闲超过 5 分钟后按请求机会回收，不删除持久 Inventory。
 
 ## 5. 验证
 
-要求 PR Head 上严格 gofmt、go test -race、go vet、RepoFoundry 校验通过；真实 PostgreSQL 17 / MySQL 8.4 运行 OpAMP HTTP 端到端用例，验证发布后响应完整 Hash/ConfigMap、等待 ACK 不重复提供、相同 Hash APPLIED 收敛、新发布旧 ACK 不污染 Generation、跨 Workspace 查询不泄露。
+要求 PR Head 上严格 gofmt、go test -race、go vet、RepoFoundry 校验通过；真实 PostgreSQL 17 / MySQL 8.4 运行 OpAMP HTTP 端到端用例，验证发布后响应完整 Hash/ConfigMap、等待 ACK 不重复提供、相同 Hash APPLIED 收敛、新发布旧 ACK 不污染 Generation、跨 Org 查询不泄露。
 
 不能以这些测试替代 WS 主动推送、网络断开、实际 JVM 采样与生产身份/HA 的验收。
