@@ -150,7 +150,7 @@ func (r *registry) snapshot(rec gormrepo.AgentRecord, now time.Time) map[string]
 	}
 	return map[string]any{
 		"instance_uid":         rec.InstanceUID,
-		"org_id":         rec.OrgID,
+		"org_id":               rec.OrgID,
 		"service_name":         rec.ServiceName,
 		"service_namespace":    rec.ServiceNamespace,
 		"environment":          rec.Environment,

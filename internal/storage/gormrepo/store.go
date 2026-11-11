@@ -28,7 +28,7 @@ var (
 )
 
 type AgentRecord struct {
-	OrgID         string    `gorm:"column:org_id;primaryKey"`
+	OrgID               string    `gorm:"column:org_id;primaryKey"`
 	InstanceUID         string    `gorm:"column:instance_uid;primaryKey"`
 	CredentialID        string    `gorm:"column:credential_id"`
 	AgentKind           string    `gorm:"column:agent_kind"`

@@ -9,7 +9,7 @@ import (
 )
 
 type Principal struct {
-	OrgID  string
+	OrgID        string
 	CredentialID string
 }
 

@@ -17,7 +17,7 @@ var (
 )
 
 const (
-	ScopeOrg   = "ORG"
+	ScopeOrg         = "ORG"
 	ScopeEnvironment = "ENVIRONMENT"
 	ScopeService     = "SERVICE"
 	ScopeInstance    = "INSTANCE"

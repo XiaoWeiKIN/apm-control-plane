@@ -25,7 +25,7 @@ var (
 )
 
 type ConfigReleaseRecord struct {
-	OrgID         string     `gorm:"column:org_id;primaryKey"`
+	OrgID               string     `gorm:"column:org_id;primaryKey"`
 	ReleaseID           string     `gorm:"column:release_id;primaryKey"`
 	PolicyRevisionID    *string    `gorm:"column:policy_revision_id"`
 	AgentKind           string     `gorm:"column:agent_kind"`
@@ -45,7 +45,7 @@ type ConfigReleaseRecord struct {
 func (ConfigReleaseRecord) TableName() string { return "config_releases" }
 
 type ReleaseTargetRecord struct {
-	OrgID       string    `gorm:"column:org_id;primaryKey"`
+	OrgID             string    `gorm:"column:org_id;primaryKey"`
 	ReleaseID         string    `gorm:"column:release_id;primaryKey"`
 	InstanceUID       string    `gorm:"column:instance_uid;primaryKey"`
 	ConfigRevisionID  string    `gorm:"column:config_revision_id"`
@@ -60,7 +60,7 @@ type ReleaseTargetRecord struct {
 func (ReleaseTargetRecord) TableName() string { return "release_targets" }
 
 type AgentAssignmentRecord struct {
-	OrgID       string     `gorm:"column:org_id;primaryKey"`
+	OrgID             string     `gorm:"column:org_id;primaryKey"`
 	InstanceUID       string     `gorm:"column:instance_uid;primaryKey"`
 	ReleaseID         string     `gorm:"column:release_id"`
 	ConfigRevisionID  string     `gorm:"column:config_revision_id"`
@@ -81,7 +81,7 @@ type AgentAssignmentRecord struct {
 func (AgentAssignmentRecord) TableName() string { return "agent_assignments" }
 
 type ConfigEventRecord struct {
-	OrgID       string    `gorm:"column:org_id;primaryKey"`
+	OrgID             string    `gorm:"column:org_id;primaryKey"`
 	EventID           string    `gorm:"column:event_id;primaryKey"`
 	EventType         string    `gorm:"column:event_type"`
 	ReleaseID         *string   `gorm:"column:release_id"`
@@ -100,7 +100,7 @@ func (ConfigEventRecord) TableName() string { return "config_events" }
 
 // ReleaseResult represents persisted release intent, not delivery or Agent application.
 type ReleaseResult struct {
-	OrgID       string `json:"org_id"`
+	OrgID             string `json:"org_id"`
 	ReleaseID         string `json:"release_id"`
 	InstanceUID       string `json:"instance_uid"`
 	ConfigRevisionID  string `json:"config_revision_id"`

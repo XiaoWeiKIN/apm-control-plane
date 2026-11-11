@@ -17,7 +17,7 @@ var ErrConfigRevisionNotFound = errors.New("config revision not found")
 
 // ConfigRevisionRecord stores an immutable, complete OpAMP ConfigMap snapshot.
 type ConfigRevisionRecord struct {
-	OrgID            string    `gorm:"column:org_id;primaryKey"`
+	OrgID                  string    `gorm:"column:org_id;primaryKey"`
 	ConfigRevisionID       string    `gorm:"column:config_revision_id;primaryKey"`
 	SourcePolicyRevisionID *string   `gorm:"column:source_policy_revision_id"`
 	AgentKind              string    `gorm:"column:agent_kind"`
@@ -59,7 +59,7 @@ func (s *Store) CreateConfigRevision(ctx context.Context, orgID, createdBy strin
 	id := fmt.Sprintf("%x-%x-%x-%x-%x", idBytes[:4], idBytes[4:6], idBytes[6:8], idBytes[8:10], idBytes[10:])
 	hash := snapshot.Hash()
 	record := ConfigRevisionRecord{
-		OrgID:      orgID,
+		OrgID:            orgID,
 		ConfigRevisionID: id,
 		AgentKind:        snapshot.AgentKind(),
 		ConfigDialect:    snapshot.ConfigDialect(),

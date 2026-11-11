@@ -15,7 +15,7 @@ import (
 
 type fakeReleasePublisher struct {
 	calls       int
-	orgID string
+	orgID       string
 	instanceUID string
 	revisionID  string
 	actor       string

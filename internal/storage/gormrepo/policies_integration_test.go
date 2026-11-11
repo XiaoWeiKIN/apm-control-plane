@@ -144,7 +144,7 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 				selectors := map[string]policy.Selector{
 					policy.ScopeService:     {ServiceName: "checkout"},
 					policy.ScopeEnvironment: {Environment: "prod"},
-					policy.ScopeOrg:   {},
+					policy.ScopeOrg:         {},
 				}
 				if _, err := store.UpdatePolicyBinding(ctx, p.OrgID, "admin", b.BindingID, BindingInput{
 					PolicyRevisionID: b.PolicyRevisionID, ScopeType: b.ScopeType, Selector: selectors[b.ScopeType],

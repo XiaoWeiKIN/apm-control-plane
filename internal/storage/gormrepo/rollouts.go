@@ -35,7 +35,7 @@ type RolloutTarget struct {
 }
 
 type RolloutView struct {
-	OrgID         string          `json:"org_id"`
+	OrgID               string          `json:"org_id"`
 	ReleaseID           string          `json:"release_id"`
 	Status              string          `json:"status"`
 	RowVersion          int64           `json:"row_version"`

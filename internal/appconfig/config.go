@@ -18,9 +18,9 @@ import (
 
 // Credential is loaded from secret environment variables, never from public YAML.
 type Credential struct {
-	ID          string `json:"id"`
+	ID    string `json:"id"`
 	OrgID string `json:"org_id"`
-	Token       string `json:"token"`
+	Token string `json:"token"`
 }
 
 type Database struct {
