@@ -35,7 +35,7 @@ func TestSharedWorkloadCredentialPostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 
-			org := fixtureOrgID("workload-"+ tc.driver + "-" + newUID(t))
+			org := fixtureOrgID("workload-" + tc.driver + "-" + newUID(t))
 			owner := auth.Principal{OrgID: org, CredentialID: "shared-credential"}
 			observation := Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",

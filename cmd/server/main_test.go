@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"encoding/hex"
-	"hash/fnv"
 	"errors"
+	"hash/fnv"
 	"net"
 	"net/http"
 	"net/http/httptest"

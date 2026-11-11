@@ -297,7 +297,7 @@ func TestConcurrentPolicyRolloutIdempotencyPostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 			uids := []string{newUID(t), newUID(t)}
-			org := fixtureOrgID("p32-idempotency-"+ uids[0][:12])
+			org := fixtureOrgID("p32-idempotency-" + uids[0][:12])
 			principal := auth.Principal{OrgID: org, CredentialID: "java-owner"}
 			for _, uid := range uids {
 				if _, err := store.Observe(ctx, principal, uid, Observation{

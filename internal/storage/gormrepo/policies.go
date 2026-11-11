@@ -16,7 +16,7 @@ import (
 )
 
 type PolicyRecord struct {
-	OrgID      int64    `gorm:"column:org_id;primaryKey" json:"org_id"`
+	OrgID      int64     `gorm:"column:org_id;primaryKey" json:"org_id"`
 	PolicyID   string    `gorm:"column:policy_id;primaryKey" json:"policy_id"`
 	PolicyType string    `gorm:"column:policy_type" json:"policy_type"`
 	AgentKind  string    `gorm:"column:agent_kind" json:"agent_kind"`
@@ -30,7 +30,7 @@ type PolicyRecord struct {
 func (PolicyRecord) TableName() string { return "policies" }
 
 type PolicyRevisionRecord struct {
-	OrgID            int64    `gorm:"column:org_id;primaryKey" json:"org_id"`
+	OrgID            int64     `gorm:"column:org_id;primaryKey" json:"org_id"`
 	PolicyRevisionID string    `gorm:"column:policy_revision_id;primaryKey" json:"policy_revision_id"`
 	PolicyID         string    `gorm:"column:policy_id" json:"policy_id"`
 	RevisionNumber   int64     `gorm:"column:revision_number" json:"revision_number"`
@@ -44,7 +44,7 @@ type PolicyRevisionRecord struct {
 func (PolicyRevisionRecord) TableName() string { return "policy_revisions" }
 
 type PolicyBindingRecord struct {
-	OrgID            int64    `gorm:"column:org_id;primaryKey" json:"org_id"`
+	OrgID            int64     `gorm:"column:org_id;primaryKey" json:"org_id"`
 	BindingID        string    `gorm:"column:binding_id;primaryKey" json:"binding_id"`
 	PolicyRevisionID string    `gorm:"column:policy_revision_id" json:"policy_revision_id"`
 	AgentKind        string    `gorm:"column:agent_kind" json:"agent_kind"`
@@ -63,7 +63,7 @@ type PolicyBindingRecord struct {
 func (PolicyBindingRecord) TableName() string { return "policy_bindings" }
 
 type PolicyResolution struct {
-	OrgID            int64          `json:"org_id"`
+	OrgID            int64           `json:"org_id"`
 	InstanceUID      string          `json:"instance_uid"`
 	BindingID        string          `json:"binding_id"`
 	PolicyID         string          `json:"policy_id"`

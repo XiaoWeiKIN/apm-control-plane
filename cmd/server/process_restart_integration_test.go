@@ -44,7 +44,7 @@ func TestControlPlaneProcessRestartPostgresAndMySQL(t *testing.T) {
 			if dsn == "" {
 				t.Skip(tc.env + " not configured")
 			}
-			org := fixtureOrgID("ep001-process-"+ tc.driver)
+			org := fixtureOrgID("ep001-process-" + tc.driver)
 			rawUID := make([]byte, 16)
 			if _, err := rand.Read(rawUID); err != nil {
 				t.Fatal(err)

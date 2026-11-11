@@ -47,7 +47,7 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 
-			org := fixtureOrgID("ep001-static-auth-"+ tc.driver)
+			org := fixtureOrgID("ep001-static-auth-" + tc.driver)
 			owner := auth.Principal{OrgID: org, CredentialID: "agent-owner"}
 			uids := make([]string, 2)
 			rawUIDs := make([][]byte, 2)
