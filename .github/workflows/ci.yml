@@ -18,6 +18,7 @@ jobs:
           cache: false
       - name: Check Go source formatting
         run: |
+          gofmt -d cmd internal
           unformatted="$(gofmt -l cmd internal)"
           if [ -n "$unformatted" ]; then
             printf 'Go files need gofmt:\n%s\n' "$unformatted"
