@@ -27,7 +27,7 @@ type pushTestDelivery struct {
 	called  chan struct{}
 }
 
-func (s *pushTestDelivery) ReconcileAgentConfig(_ context.Context, _, _ string, _ *gormrepo.ConfigStatus, offer bool) (*gormrepo.DesiredConfig, bool, error) {
+func (s *pushTestDelivery) ReconcileAgentConfig(_ context.Context, _ int64, _ string, _ *gormrepo.ConfigStatus, offer bool) (*gormrepo.DesiredConfig, bool, error) {
 	if s.called != nil {
 		select {
 		case s.called <- struct{}{}:
