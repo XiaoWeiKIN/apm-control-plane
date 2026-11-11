@@ -15,7 +15,7 @@ import (
 
 type fakeReleasePublisher struct {
 	calls       int
-	orgID       string
+	orgID       int64
 	instanceUID string
 	revisionID  string
 	actor       string
@@ -23,7 +23,7 @@ type fakeReleasePublisher struct {
 }
 
 func (f *fakeReleasePublisher) PublishAgentConfig(
-	_ context.Context, orgID, uid, revisionID, actor, key string,
+	_ context.Context, orgID int64, uid, revisionID, actor, key string,
 ) (gormrepo.ReleaseResult, error) {
 	f.calls++
 	f.orgID = orgID
@@ -40,7 +40,7 @@ func (f *fakeReleasePublisher) PublishAgentConfig(
 func TestReleaseHandlerRejectsInvalidRequestsBeforePersistence(t *testing.T) {
 	fake := &fakeReleasePublisher{}
 	authenticator := auth.New([]appconfig.Credential{
-		{ID: "admin-a", OrgID: "org-a", Token: "test-admin-token-1234"},
+		{ID: "admin-a", OrgID: fixtureOrgID("org-a"), Token: "test-admin-token-1234"},
 	})
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(fake, authenticator, nil))
@@ -77,7 +77,7 @@ func TestReleaseHandlerRejectsInvalidRequestsBeforePersistence(t *testing.T) {
 	ok := request("/api/v1/agents/"+uidHex+"/releases", "test-admin-token-1234",
 		`{"config_revision_id":"00000000-0000-4000-8000-000000000001"}`)
 	if ok.Code != http.StatusAccepted || fake.calls != 1 ||
-		fake.orgID != "org-a" || fake.actor != "admin-a" ||
+		fake.orgID != fixtureOrgID("org-a") || fake.actor != "admin-a" ||
 		fake.instanceUID != uidHex || fake.revisionID != revision || fake.key != "request-one" {
 		t.Fatalf("release handler bypassed trusted Scope: code=%d fake=%+v", ok.Code, fake)
 	}

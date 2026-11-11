@@ -44,7 +44,7 @@ func TestControlPlaneProcessRestartPostgresAndMySQL(t *testing.T) {
 			if dsn == "" {
 				t.Skip(tc.env + " not configured")
 			}
-			org := "ep001-process-" + tc.driver
+			org := fixtureOrgID("ep001-process-"+ tc.driver)
 			rawUID := make([]byte, 16)
 			if _, err := rand.Read(rawUID); err != nil {
 				t.Fatal(err)
@@ -67,8 +67,8 @@ func TestControlPlaneProcessRestartPostgresAndMySQL(t *testing.T) {
 				"APM_LISTEN_ADDR="+addr,
 				"APM_DB_DRIVER="+tc.driver,
 				"APM_DATABASE_DSN="+dsn,
-				fmt.Sprintf("APM_AGENT_CREDENTIALS_JSON=[{\"id\":\"agent-owner\",\"org_id\":%q,\"token\":%q}]", org, agentToken),
-				fmt.Sprintf("APM_ADMIN_CREDENTIALS_JSON=[{\"id\":\"admin-owner\",\"org_id\":%q,\"token\":%q},{\"id\":\"other-admin\",\"org_id\":\"other-org\",\"token\":%q}]", org, adminToken, otherToken),
+				fmt.Sprintf("APM_AGENT_CREDENTIALS_JSON=[{\"id\":\"agent-owner\",\"org_id\":%d,\"token\":%q}]", org, agentToken),
+				fmt.Sprintf("APM_ADMIN_CREDENTIALS_JSON=[{\"id\":\"admin-owner\",\"org_id\":%d,\"token\":%q},{\"id\":\"other-admin\",\"org_id\":12345,\"token\":%q}]", org, adminToken, otherToken),
 			)
 			client := &http.Client{Timeout: 2 * time.Second}
 
@@ -213,7 +213,7 @@ func TestControlPlaneProcessRestartPostgresAndMySQL(t *testing.T) {
 				t.Fatal("new Agent received unexpected Desired")
 			}
 			original := getAgent(adminToken, http.StatusOK)
-			if original["org_id"] != org || original["service_name"] != "checkout" {
+			if original["org_id"] != float64(org) || original["service_name"] != "checkout" {
 				t.Fatalf("unexpected initial persisted Agent: %+v", original)
 			}
 			getAgent("", http.StatusUnauthorized)
@@ -260,7 +260,7 @@ func TestControlPlaneProcessRestartPostgresAndMySQL(t *testing.T) {
 			// 3. 新进程无运行时 Session，仍可查询原 Inventory 并下发未确认的 Desired。
 			stop = start()
 			restored := getAgent(adminToken, http.StatusOK)
-			if restored["org_id"] != org || restored["service_name"] != "checkout" {
+			if restored["org_id"] != float64(org) || restored["service_name"] != "checkout" {
 				t.Fatalf("Agent lost after full process restart: %+v", restored)
 			}
 			offered := send(1, nil)

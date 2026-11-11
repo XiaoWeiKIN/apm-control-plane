@@ -46,7 +46,7 @@ func TestPolicyAPIOrgAndDryRunPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			uid := hex.EncodeToString(uidBytes)
-			if _, err := store.Observe(ctx, auth.Principal{OrgID: "policy-http-a", CredentialID: "java-agent"}, uid, gormrepo.Observation{
+			if _, err := store.Observe(ctx, auth.Principal{OrgID: fixtureOrgID("policy-http-a"), CredentialID: "java-agent"}, uid, gormrepo.Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",
 				Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
 				Description:  &gormrepo.Description{Kind: config.JavaAgentKind, Environment: "prod", Service: "checkout"},
@@ -54,8 +54,8 @@ func TestPolicyAPIOrgAndDryRunPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			authenticator := auth.New([]appconfig.Credential{
-				{ID: "admin-a", OrgID: "policy-http-a", Token: "admin-policy-a-secret-long"},
-				{ID: "admin-b", OrgID: "policy-http-b", Token: "admin-policy-b-secret-long"},
+				{ID: "admin-a", OrgID: fixtureOrgID("policy-http-a"), Token: "admin-policy-a-secret-long"},
+				{ID: "admin-b", OrgID: fixtureOrgID("policy-http-b"), Token: "admin-policy-b-secret-long"},
 			})
 			h := policyAPI(store, authenticator)
 			mux := http.NewServeMux()

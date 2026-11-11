@@ -40,7 +40,7 @@ func TestRollbackAdminAPIPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			const org = "p33-rollback-http"
+			org := fixtureOrgID("p33-rollback-http")
 			uids := make([]string, 2)
 			for i := range uids {
 				raw := make([]byte, 16)
@@ -73,7 +73,7 @@ func TestRollbackAdminAPIPostgresAndMySQL(t *testing.T) {
 			}
 			creds := auth.New([]appconfig.Credential{
 				{ID: "admin", OrgID: org, Token: "p33-admin-long"},
-				{ID: "other", OrgID: "p33-other", Token: "p33-other-long"},
+				{ID: "other", OrgID: fixtureOrgID("p33-other"), Token: "p33-other-long"},
 			})
 			wakes := make([]string, 0, 1)
 			h := adminRolloutHandler(store, creds, func(ws, uid string) {

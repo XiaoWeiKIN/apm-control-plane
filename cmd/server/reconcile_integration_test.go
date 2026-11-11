@@ -41,8 +41,7 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			org := "remote-config-http"
-			rawUID := make([]byte, 16)
+			org := fixtureOrgID("remote-config-http")rawUID := make([]byte, 16)
 			if _, err := rand.Read(rawUID); err != nil {
 				t.Fatal(err)
 			}

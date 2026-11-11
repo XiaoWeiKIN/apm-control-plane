@@ -72,7 +72,7 @@ func TestWSFailedSendDisconnectsAndStopsWriter(t *testing.T) {
 	}}
 	reg := newRegistry(newFakeStore(), time.Second)
 	reg.delivery = delivery
-	p := principal("org-a", "agent-a")
+	p := principal(fixtureOrgID("org-a"), "agent-a")
 	uidBytes, uidHex := uid(55)
 	conn := &failingWSConnection{disconnected: make(chan struct{})}
 	reg.sessions[key(p.OrgID, uidHex)] = &runtimeAgent{conn: conn}
@@ -99,7 +99,7 @@ func TestWSReportFullStateWithoutDesired(t *testing.T) {
 	reg := newRegistry(newFakeStore(), time.Second)
 	reg.delivery = &pushTestDelivery{}
 	handler, cc, err := makeGateway(reg, auth.New([]appconfig.Credential{
-		{ID: "agent-a", OrgID: "org-a", Token: "ws-status-token-long"},
+		{ID: "agent-a", OrgID: fixtureOrgID("org-a"), Token: "ws-status-token-long"},
 	}), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +204,7 @@ func TestStopClosesBlockedWSSend(t *testing.T) {
 	reg.delivery = &pushTestDelivery{desired: &gormrepo.DesiredConfig{
 		ConfigMapBytes: snapshot.ConfigMapBytes(), ConfigHash: hex.EncodeToString(hash[:]),
 	}}
-	p := principal("org-stop", "credential")
+	p := principal(fixtureOrgID("org-stop"), "credential")
 	uidBytes, uidHex := uid(57)
 	conn := &blockedWSConnection{
 		entered: make(chan struct{}, 1), closed: make(chan struct{}),

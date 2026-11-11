@@ -39,8 +39,7 @@ func TestAdminReleaseHTTPPersistencePostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			uid := hex.EncodeToString(uidBytes)
-			org := "api-release-org"
-			p := auth.Principal{OrgID: org, CredentialID: "java-owner"}
+			org := fixtureOrgID("api-release-org")p := auth.Principal{OrgID: org, CredentialID: "java-owner"}
 			if _, err := store.Observe(ctx, p, uid, gormrepo.Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",
 				Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus |
@@ -60,7 +59,7 @@ func TestAdminReleaseHTTPPersistencePostgresAndMySQL(t *testing.T) {
 			mux := http.NewServeMux()
 			mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(store, auth.New([]appconfig.Credential{
 				{ID: "admin-a", OrgID: org, Token: "admin-a-test-secret-long"},
-				{ID: "admin-b", OrgID: "another-org", Token: "admin-b-test-secret-long"},
+				{ID: "admin-b", OrgID: fixtureOrgID("another-org"), Token: "admin-b-test-secret-long"},
 			}), nil))
 			server := httptest.NewServer(mux)
 			defer server.Close()

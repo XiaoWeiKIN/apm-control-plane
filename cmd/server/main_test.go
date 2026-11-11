@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"hash/fnv"
 	"errors"
 	"net"
 	"net/http"
@@ -21,6 +22,13 @@ import (
 type fakeStore struct {
 	mu   sync.Mutex
 	data map[string]gormrepo.AgentRecord
+}
+
+// fixtureOrgID gives legacy-named test scenarios deterministic numeric platform Org IDs.
+func fixtureOrgID(label string) int64 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(label))
+	return int64(h.Sum32()) + 1
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{data: make(map[string]gormrepo.AgentRecord)} }
@@ -57,7 +65,7 @@ func (s *fakeStore) Observe(_ context.Context, p auth.Principal, id string, o go
 	s.data[k] = rec
 	return rec, nil
 }
-func (s *fakeStore) Get(_ context.Context, org, id string) (gormrepo.AgentRecord, error) {
+func (s *fakeStore) Get(_ context.Context, org int64, id string) (gormrepo.AgentRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.data[key(org, id)]
@@ -66,7 +74,7 @@ func (s *fakeStore) Get(_ context.Context, org, id string) (gormrepo.AgentRecord
 	}
 	return r, nil
 }
-func (s *fakeStore) List(_ context.Context, org string) ([]gormrepo.AgentRecord, error) {
+func (s *fakeStore) List(_ context.Context, org int64) ([]gormrepo.AgentRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := []gormrepo.AgentRecord{}
@@ -83,14 +91,14 @@ func uid(first byte) ([]byte, string) {
 	id[0] = first
 	return id, hex.EncodeToString(id)
 }
-func principal(org, id string) auth.Principal {
+func principal(org int64, id string) auth.Principal {
 	return auth.Principal{OrgID: org, CredentialID: id}
 }
 
 func TestPolicyDeliveryAndAck(t *testing.T) {
 	store := newFakeStore()
 	reg := newRegistry(store, 30*time.Second)
-	p := principal("acme", "agent-a")
+	p := principal(fixtureOrgID("acme"), "agent-a")
 	id, idHex := uid(1)
 	ctx := context.Background()
 	msg := &protobufs.AgentToServer{InstanceUid: id, SequenceNum: 1, Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig)}
@@ -126,19 +134,19 @@ func TestOrgScopeAndOwnerBinding(t *testing.T) {
 	id, uidHex := uid(2)
 	ctx := context.Background()
 	msg := &protobufs.AgentToServer{InstanceUid: id, SequenceNum: 1}
-	owner := principal("org1", "token1")
+	owner := principal(fixtureOrgID("org1"), "token1")
 	if _, _, err := reg.update(ctx, owner, false, nil, msg); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := reg.update(ctx, principal("org1", "other-token"), false, nil, msg)
+	_, _, err := reg.update(ctx, principal(fixtureOrgID("org1"), "other-token"), false, nil, msg)
 	if !errors.Is(err, gormrepo.ErrOwnership) {
 		t.Fatalf("expected ownership rejection, got %v", err)
 	}
-	if _, err := reg.get(ctx, principal("org2", "admin"), uidHex); !errors.Is(err, gormrepo.ErrNotFound) {
+	if _, err := reg.get(ctx, principal(fixtureOrgID("org2"), "admin"), uidHex); !errors.Is(err, gormrepo.ErrNotFound) {
 		t.Fatalf("org leakage: %v", err)
 	}
 
-	adminCreds := auth.New([]appconfig.Credential{{ID: "admin1", OrgID: "org1", Token: "admin-one-secret-long"}, {ID: "admin2", OrgID: "org2", Token: "admin-two-secret-long"}})
+	adminCreds := auth.New([]appconfig.Credential{{ID: "admin1", OrgID: fixtureOrgID("org1"), Token: "admin-one-secret-long"}, {ID: "admin2", OrgID: fixtureOrgID("org2"), Token: "admin-two-secret-long"}})
 	api := adminHandler(reg, adminCreds)
 	for _, tt := range []struct {
 		token  string
@@ -161,7 +169,7 @@ func TestTransportFreshnessAndIdentityFields(t *testing.T) {
 	st := newFakeStore()
 	reg := newRegistry(st, 15*time.Second)
 	id, uidHex := uid(3)
-	p := principal("org1", "agent1")
+	p := principal(fixtureOrgID("org1"), "agent1")
 	msg := &protobufs.AgentToServer{InstanceUid: id, SequenceNum: 1, AgentDescription: &protobufs.AgentDescription{
 		IdentifyingAttributes: []*protobufs.KeyValue{
 			{Key: "service.name", Value: &protobufs.AnyValue{Value: &protobufs.AnyValue_StringValue{StringValue: "checkout"}}},
@@ -177,13 +185,13 @@ func TestTransportFreshnessAndIdentityFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item["org_id"] != "org1" || item["connected"] != true || item["agent_kind"] != "java-apm" || item["agent_version"] != "agent-2" || item["service_version"] != "app-9" {
+	if item["org_id"] != fixtureOrgID("org1") || item["connected"] != true || item["agent_kind"] != "java-apm" || item["agent_version"] != "agent-2" || item["service_version"] != "app-9" {
 		t.Fatalf("invalid snapshot: %+v", item)
 	}
 	st.mu.Lock()
-	rec := st.data[key("org1", uidHex)]
+	rec := st.data[key(fixtureOrgID("org1"), uidHex)]
 	rec.LastSeen = time.Now().Add(-time.Minute)
-	st.data[key("org1", uidHex)] = rec
+	st.data[key(fixtureOrgID("org1"), uidHex)] = rec
 	st.mu.Unlock()
 	item, err = reg.get(ctx, p, uidHex)
 	if err != nil || item["connected"] != false {
@@ -208,7 +216,7 @@ func (c *mockConnection) Disconnect() error {
 func TestWebsocketSessionExclusion(t *testing.T) {
 	reg := newRegistry(newFakeStore(), time.Second)
 	id, _ := uid(4)
-	p := principal("t1", "c1")
+	p := principal(fixtureOrgID("t1"), "c1")
 	connA, connB := &mockConnection{id: 1}, &mockConnection{id: 2}
 	msg := &protobufs.AgentToServer{InstanceUid: id, SequenceNum: 1}
 	if _, _, err := reg.update(context.Background(), p, true, connA, msg); err != nil {
@@ -225,7 +233,7 @@ func TestWebsocketSessionExclusion(t *testing.T) {
 
 func TestInactiveSessionsAreEvictedWithoutDroppingActiveOrDemoState(t *testing.T) {
 	reg := newRegistry(newFakeStore(), 30*time.Second)
-	p := principal("org", "owner")
+	p := principal(fixtureOrgID("org"), "owner")
 	ctx := context.Background()
 	inactiveUID, inactiveID := uid(60)
 	activeUID, activeID := uid(61)
@@ -281,7 +289,7 @@ func TestBadSamplingAndUID(t *testing.T) {
 }
 
 func TestAdminUnauthorized(t *testing.T) {
-	handler := adminHandler(newRegistry(newFakeStore(), time.Second), auth.New([]appconfig.Credential{{ID: "x", OrgID: "t", Token: "very-long-admin-token"}}))
+	handler := adminHandler(newRegistry(newFakeStore(), time.Second), auth.New([]appconfig.Credential{{ID: "x", OrgID: fixtureOrgID("t"), Token: "very-long-admin-token"}}))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil))
 	if w.Code != http.StatusUnauthorized {
@@ -312,7 +320,7 @@ func TestUnrelatedAgentWriteIsNotBlockedByDatabaseIO(t *testing.T) {
 	unblock := sync.OnceFunc(func() { close(store.release) })
 	defer unblock()
 	reg := newRegistry(store, time.Second)
-	p := principal("org-a", "credential-a")
+	p := principal(fixtureOrgID("org-a"), "credential-a")
 	firstDone := make(chan error, 1)
 	go func() {
 		_, _, err := reg.update(context.Background(), p, false, nil, &protobufs.AgentToServer{InstanceUid: idA, SequenceNum: 1})
@@ -350,7 +358,7 @@ func TestStopWaitsForPendingWriteAndRejectsNewObservations(t *testing.T) {
 	unblock := sync.OnceFunc(func() { close(store.release) })
 	defer unblock()
 	reg := newRegistry(store, time.Second)
-	p := principal("org-a", "credential-a")
+	p := principal(fixtureOrgID("org-a"), "credential-a")
 	conn := &mockConnection{id: 4, disconnected: make(chan struct{})}
 	reg.trackWS(conn)
 	updateDone := make(chan error, 1)

@@ -39,8 +39,7 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			org := "p3-rollout-http"
-			owner := auth.Principal{OrgID: org, CredentialID: "java-owner"}
+			org := fixtureOrgID("p3-rollout-http")owner := auth.Principal{OrgID: org, CredentialID: "java-owner"}
 			uids := make([]string, 3)
 			for i := range uids {
 				raw := make([]byte, 16)
@@ -66,7 +65,7 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 			}
 			creds := auth.New([]appconfig.Credential{
 				{ID: "admin", OrgID: org, Token: "rollout-admin-a-long"},
-				{ID: "other", OrgID: "p3-other", Token: "rollout-admin-b-long"},
+				{ID: "other", OrgID: fixtureOrgID("p3-other"), Token: "rollout-admin-b-long"},
 			})
 			var waked []string
 			h := adminRolloutHandler(store, creds, func(ws, uid string) {

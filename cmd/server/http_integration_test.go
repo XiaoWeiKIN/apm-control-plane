@@ -43,12 +43,12 @@ func TestAgentRegistrationThroughOpAMPToDatabaseAndAPI(t *testing.T) {
 			t.Cleanup(func() { _ = store.Close() })
 			reg := newRegistry(store, 1*time.Millisecond)
 			agentAuth := auth.New([]appconfig.Credential{
-				{ID: "agent-a", OrgID: "team-one", Token: "long-agent-secret-for-test"},
-				{ID: "agent-b", OrgID: "team-one", Token: "other-long-agent-token"},
+				{ID: "agent-a", OrgID: fixtureOrgID("team-one"), Token: "long-agent-secret-for-test"},
+				{ID: "agent-b", OrgID: fixtureOrgID("team-one"), Token: "other-long-agent-token"},
 			})
 			adminAuth := auth.New([]appconfig.Credential{
-				{ID: "admin-a", OrgID: "team-one", Token: "long-admin-secret-for-test"},
-				{ID: "admin-b", OrgID: "team-two", Token: "other-long-admin-token"},
+				{ID: "admin-a", OrgID: fixtureOrgID("team-one"), Token: "long-admin-secret-for-test"},
+				{ID: "admin-b", OrgID: fixtureOrgID("team-two"), Token: "other-long-admin-token"},
 			})
 			handler, connContext, err := makeGateway(reg, agentAuth, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			if err != nil {
@@ -123,7 +123,7 @@ func TestAgentRegistrationThroughOpAMPToDatabaseAndAPI(t *testing.T) {
 				return res.StatusCode, body
 			}
 			code, state := get("long-admin-secret-for-test")
-			if code != http.StatusOK || state["org_id"] != "team-one" || state["service_name"] != "payments" || state["agent_kind"] != "opamp-test-agent" {
+			if code != http.StatusOK || state["org_id"] != float64(fixtureOrgID("team-one")) || state["service_name"] != "payments" || state["agent_kind"] != "opamp-test-agent" {
 				t.Fatalf("API did not reflect OpAMP registration: %d %+v", code, state)
 			}
 			if _, legacyFieldPresent := state["tenant_id"]; legacyFieldPresent {
@@ -182,7 +182,7 @@ func TestAgentRegistrationThroughOpAMPToDatabaseAndAPI(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer reopened.Close()
-			persisted, err := reopened.Get(ctx, "team-one", uid)
+			persisted, err := reopened.Get(ctx, fixtureOrgID("team-one"), uid)
 			if err != nil || persisted.ServiceName != "payments" || persisted.DistributionVersion != "0.1.0" || persisted.LastSeen.IsZero() {
 				t.Fatalf("restart recovery failed: %+v %v", persisted, err)
 			}

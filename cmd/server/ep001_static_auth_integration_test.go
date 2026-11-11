@@ -47,7 +47,7 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 
-			org := "ep001-static-auth-" + tc.driver
+			org := fixtureOrgID("ep001-static-auth-"+ tc.driver)
 			owner := auth.Principal{OrgID: org, CredentialID: "agent-owner"}
 			uids := make([]string, 2)
 			rawUIDs := make([][]byte, 2)
@@ -100,7 +100,7 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 			const otherAdminToken = "ep001-other-admin-token-long"
 			adminAuth := auth.New([]appconfig.Credential{
 				{ID: "admin-owner", OrgID: org, Token: adminToken},
-				{ID: "other-admin", OrgID: "ep001-foreign", Token: otherAdminToken},
+				{ID: "other-admin", OrgID: fixtureOrgID("ep001-foreign"), Token: otherAdminToken},
 			})
 			agentAuth := auth.New([]appconfig.Credential{
 				{ID: owner.CredentialID, OrgID: org, Token: agentToken},

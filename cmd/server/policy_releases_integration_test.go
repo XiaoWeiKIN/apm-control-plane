@@ -43,8 +43,7 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			org := "p25-api-org"
-			rawUID := make([]byte, 16)
+			org := fixtureOrgID("p25-api-org")rawUID := make([]byte, 16)
 			if _, err := rand.Read(rawUID); err != nil {
 				t.Fatal(err)
 			}
@@ -54,7 +53,7 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 			}})
 			adminAuth := auth.New([]appconfig.Credential{
 				{ID: "admin-a", OrgID: org, Token: "p25-admin-token-long"},
-				{ID: "admin-b", OrgID: "another-org", Token: "p25-other-admin-token-long"},
+				{ID: "admin-b", OrgID: fixtureOrgID("another-org"), Token: "p25-other-admin-token-long"},
 			})
 			reg := newRegistry(store, time.Second)
 			reg.delivery = store

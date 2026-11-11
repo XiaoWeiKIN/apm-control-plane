@@ -42,7 +42,7 @@ func TestPolicyRolloutAndResumeAPIPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			const org = "p32-policy-rollout-api"
+			org := fixtureOrgID("p32-policy-rollout-api")
 			for i := 0; i < 2; i++ {
 				uid := make([]byte, 16)
 				if _, err := rand.Read(uid); err != nil {
@@ -70,7 +70,7 @@ func TestPolicyRolloutAndResumeAPIPostgresAndMySQL(t *testing.T) {
 
 			authenticator := auth.New([]appconfig.Credential{
 				{ID: "admin", OrgID: org, Token: "p32-admin-policy-long"},
-				{ID: "other", OrgID: "p32-other-org", Token: "p32-other-admin-long"},
+				{ID: "other", OrgID: fixtureOrgID("p32-other-org"), Token: "p32-other-admin-long"},
 			})
 			wakes := make([]string, 0, 2)
 			h := adminRolloutHandler(store, authenticator, func(ws, uid string) {

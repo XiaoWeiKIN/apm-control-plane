@@ -43,7 +43,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			const org = "ws-push-contract"
+			org := fixtureOrgID("ws-push-contract")
 			uidBytes := make([]byte, 16)
 			if _, err := rand.Read(uidBytes); err != nil {
 				t.Fatal(err)
