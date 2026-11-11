@@ -44,6 +44,7 @@ func TestSelectorScopesAndCanonicalHash(t *testing.T) {
 		{ScopeService, Selector{}},
 		{ScopeInstance, Selector{InstanceUID: "not-a-uid"}},
 		{"TENANT", Selector{}},
+		{"WORKSPACE", Selector{}},
 	} {
 		if _, _, err := tt.selector.Canonical(tt.scope); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("accepted unsupported selector %s %+v: %v", tt.scope, tt.selector, err)
