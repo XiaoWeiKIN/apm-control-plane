@@ -38,7 +38,7 @@ func (ConfigRevisionRecord) TableName() string { return "config_revisions" }
 // any Agent's Desired configuration or sending any OpAMP message.
 func (s *Store) CreateConfigRevision(ctx context.Context, orgID int64, createdBy string, snapshot config.Snapshot) (ConfigRevisionRecord, error) {
 	// 1. 验证创建者、Org 与已编译的完整配置内容。
-	if orgID == "" || utf8.RuneCountInString(orgID) > 96 {
+	if orgID <= 0 {
 		return ConfigRevisionRecord{}, fmt.Errorf("org_id is missing or too long")
 	}
 	if createdBy == "" || utf8.RuneCountInString(createdBy) > 128 {
