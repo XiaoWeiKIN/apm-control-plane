@@ -73,7 +73,7 @@ func TestPolicyRolloutAndResumeAPIPostgresAndMySQL(t *testing.T) {
 				{ID: "other", OrgID: fixtureOrgID("p32-other-org"), Token: "p32-other-admin-long"},
 			})
 			wakes := make([]string, 0, 2)
-			h := adminRolloutHandler(store, authenticator, func(ws, uid string) {
+			h := adminRolloutHandler(store, authenticator, func(ws int64, uid string) {
 				if ws != org {
 					t.Errorf("cross-org wake: %s", ws)
 				}

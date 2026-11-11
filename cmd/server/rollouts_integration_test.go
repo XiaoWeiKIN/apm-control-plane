@@ -69,7 +69,7 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 				{ID: "other", OrgID: fixtureOrgID("p3-other"), Token: "rollout-admin-b-long"},
 			})
 			var waked []string
-			h := adminRolloutHandler(store, creds, func(ws, uid string) {
+			h := adminRolloutHandler(store, creds, func(ws int64, uid string) {
 				if ws != org {
 					t.Errorf("cross Org notification: %s", ws)
 				}

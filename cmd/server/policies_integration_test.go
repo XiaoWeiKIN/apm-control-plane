@@ -130,7 +130,7 @@ func TestPolicyAPIOrgAndDryRunPostgresAndMySQL(t *testing.T) {
 			if resolution.PolicyRevisionID != created.Revision.PolicyRevisionID || resolution.BindingID != binding.BindingID {
 				t.Fatalf("incorrect resolution: %s", resolved)
 			}
-			if _, err := store.GetAgentAssignment(ctx, "policy-http-a", uid); err != gormrepo.ErrNotFound {
+			if _, err := store.GetAgentAssignment(ctx, fixtureOrgID("policy-http-a"), uid); err != gormrepo.ErrNotFound {
 				t.Fatalf("dry-run created an Assignment: %v", err)
 			}
 			request("PUT", "/api/v1/policy-bindings/"+binding.BindingID, "admin-policy-a-secret-long",
