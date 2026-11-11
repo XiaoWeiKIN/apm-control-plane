@@ -71,7 +71,7 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 			var waked []string
 			h := adminRolloutHandler(store, creds, func(ws int64, uid string) {
 				if ws != org {
-					t.Errorf("cross Org notification: %s", ws)
+					t.Errorf("cross Org notification: %d", ws)
 				}
 				waked = append(waked, uid)
 			})
