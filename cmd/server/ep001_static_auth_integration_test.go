@@ -47,8 +47,8 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 
-			workspace := "ep001-static-auth-" + tc.driver
-			owner := auth.Principal{WorkspaceID: workspace, CredentialID: "agent-owner"}
+			org := "ep001-static-auth-" + tc.driver
+			owner := auth.Principal{OrgID: org, CredentialID: "agent-owner"}
 			uids := make([]string, 2)
 			rawUIDs := make([][]byte, 2)
 			for i := range uids {
@@ -72,15 +72,15 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			revision, err := store.CreateConfigRevision(ctx, workspace, "admin-owner", snapshot)
+			revision, err := store.CreateConfigRevision(ctx, org, "admin-owner", snapshot)
 			if err != nil {
 				t.Fatal(err)
 			}
-			createdPolicy, policyRevision, err := store.CreatePolicy(ctx, workspace, "admin-owner", "role-boundary", 0.4)
+			createdPolicy, policyRevision, err := store.CreatePolicy(ctx, org, "admin-owner", "role-boundary", 0.4)
 			if err != nil {
 				t.Fatal(err)
 			}
-			binding, err := store.CreatePolicyBinding(ctx, workspace, "admin-owner", gormrepo.BindingInput{
+			binding, err := store.CreatePolicyBinding(ctx, org, "admin-owner", gormrepo.BindingInput{
 				PolicyRevisionID: policyRevision.PolicyRevisionID,
 				ScopeType:        policy.ScopeService, Selector: policy.Selector{ServiceName: "checkout"},
 				Priority: 10,
@@ -88,7 +88,7 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rollout, err := store.PublishRollout(ctx, workspace, "admin-owner",
+			rollout, err := store.PublishRollout(ctx, org, "admin-owner",
 				revision.ConfigRevisionID, uids, 1, "")
 			if err != nil {
 				t.Fatal(err)
@@ -99,11 +99,11 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 			const adminToken = "ep001-admin-token-long"
 			const otherAdminToken = "ep001-other-admin-token-long"
 			adminAuth := auth.New([]appconfig.Credential{
-				{ID: "admin-owner", WorkspaceID: workspace, Token: adminToken},
-				{ID: "other-admin", WorkspaceID: "ep001-foreign", Token: otherAdminToken},
+				{ID: "admin-owner", OrgID: org, Token: adminToken},
+				{ID: "other-admin", OrgID: "ep001-foreign", Token: otherAdminToken},
 			})
 			agentAuth := auth.New([]appconfig.Credential{
-				{ID: owner.CredentialID, WorkspaceID: workspace, Token: agentToken},
+				{ID: owner.CredentialID, OrgID: org, Token: agentToken},
 			})
 			reg := newRegistry(store, time.Second)
 			reg.delivery = store
@@ -160,7 +160,7 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 				return data
 			}
 
-			// 2. 对所有受保护路由验证缺少凭证、Agent 凭证与跨 Workspace Admin。
+			// 2. 对所有受保护路由验证缺少凭证、Agent 凭证与跨 Org Admin。
 			bindingJSON := fmt.Sprintf(
 				`{"policy_revision_id":%q,"scope_type":"SERVICE","selector":{"service_name":"checkout"},"priority":10}`,
 				policyRevision.PolicyRevisionID)
@@ -210,7 +210,7 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 						if ep.name == "list-agents" {
 							var agents []any
 							if err := json.Unmarshal(raw, &agents); err != nil || len(agents) != 0 {
-								t.Fatalf("foreign Workspace returned Agent inventory: %s %v", raw, err)
+								t.Fatalf("foreign Org returned Agent inventory: %s %v", raw, err)
 							}
 						}
 					}
@@ -238,7 +238,7 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 			}
 
 			// 4. 所有拒绝之后验证原冻结 Release/Desired 与策略内容均未被修改。
-			view, err := store.GetRollout(ctx, workspace, rollout.ReleaseID)
+			view, err := store.GetRollout(ctx, org, rollout.ReleaseID)
 			if err != nil || view.Status != "RUNNING" || view.RowVersion != rollout.RowVersion {
 				t.Fatalf("rejected requests changed rollout: %+v %v", view, err)
 			}
@@ -251,7 +251,7 @@ func TestEP001StaticCredentialBoundariesPostgresAndMySQL(t *testing.T) {
 					t.Fatalf("rejected requests mutated target[%d]: %+v", i, target)
 				}
 			}
-			current, err := store.GetAgentAssignment(ctx, workspace, rollout.Activated[0])
+			current, err := store.GetAgentAssignment(ctx, org, rollout.Activated[0])
 			if err != nil || current.ReleaseID != rollout.ReleaseID || current.DesiredGeneration != 1 {
 				t.Fatalf("rejected requests changed Desired: %+v %v", current, err)
 			}

@@ -20,7 +20,7 @@ type policyReleasePublisher interface {
 // single-Agent release before waking the existing OpAMP delivery path.
 func adminPolicyReleaseHandler(publisher policyReleasePublisher, credentials *auth.Authenticator, onPublished func(string, string)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		// 1. 使用可信 Admin Credential 限定 Workspace 与目标 UID。
+		// 1. 使用可信 Admin Credential 限定 Org 与目标 UID。
 		principal, ok := credentials.Authenticate(req.Header.Get("Authorization"))
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -47,7 +47,7 @@ func adminPolicyReleaseHandler(publisher policyReleasePublisher, credentials *au
 		}
 
 		// 2. 原子解析、编译、写入发布意图；遇到冲突时没有网络副作用。
-		result, err := publisher.PublishAgentPolicy(req.Context(), principal.WorkspaceID, uid,
+		result, err := publisher.PublishAgentPolicy(req.Context(), principal.OrgID, uid,
 			body.PolicyRevisionID, principal.CredentialID, req.Header.Get("Idempotency-Key"))
 		switch {
 		case errors.Is(err, gormrepo.ErrNotFound), errors.Is(err, policy.ErrNotFound):
@@ -64,7 +64,7 @@ func adminPolicyReleaseHandler(publisher policyReleasePublisher, credentials *au
 		default:
 			// 3. 只在 Desired 事务成功提交后唤醒在线 WS；HTTP 轮询仍按原有契约下发。
 			if onPublished != nil {
-				onPublished(principal.WorkspaceID, uid)
+				onPublished(principal.OrgID, uid)
 			}
 			response(w, http.StatusAccepted, result)
 		}

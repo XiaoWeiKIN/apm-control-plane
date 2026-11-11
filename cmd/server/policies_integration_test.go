@@ -23,7 +23,7 @@ import (
 	"github.com/open-telemetry/opamp-go/protobufs"
 )
 
-func TestPolicyAPIWorkspaceAndDryRunPostgresAndMySQL(t *testing.T) {
+func TestPolicyAPIOrgAndDryRunPostgresAndMySQL(t *testing.T) {
 	for _, tt := range []struct{ driver, env string }{
 		{"postgres", "APM_TEST_POSTGRES_DSN"},
 		{"mysql", "APM_TEST_MYSQL_DSN"},
@@ -46,7 +46,7 @@ func TestPolicyAPIWorkspaceAndDryRunPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			uid := hex.EncodeToString(uidBytes)
-			if _, err := store.Observe(ctx, auth.Principal{WorkspaceID: "policy-http-a", CredentialID: "java-agent"}, uid, gormrepo.Observation{
+			if _, err := store.Observe(ctx, auth.Principal{OrgID: "policy-http-a", CredentialID: "java-agent"}, uid, gormrepo.Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",
 				Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
 				Description:  &gormrepo.Description{Kind: config.JavaAgentKind, Environment: "prod", Service: "checkout"},
@@ -54,8 +54,8 @@ func TestPolicyAPIWorkspaceAndDryRunPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			authenticator := auth.New([]appconfig.Credential{
-				{ID: "admin-a", WorkspaceID: "policy-http-a", Token: "admin-policy-a-secret-long"},
-				{ID: "admin-b", WorkspaceID: "policy-http-b", Token: "admin-policy-b-secret-long"},
+				{ID: "admin-a", OrgID: "policy-http-a", Token: "admin-policy-a-secret-long"},
+				{ID: "admin-b", OrgID: "policy-http-b", Token: "admin-policy-b-secret-long"},
 			})
 			h := policyAPI(store, authenticator)
 			mux := http.NewServeMux()
@@ -110,7 +110,7 @@ func TestPolicyAPIWorkspaceAndDryRunPostgresAndMySQL(t *testing.T) {
 			r := request("POST", "/api/v1/policy-bindings", "admin-policy-a-secret-long",
 				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"SERVICE","selector":{"service_name":"checkout","environment":"prod"},"priority":9}`, 201)
 			request("POST", "/api/v1/policy-bindings", "admin-policy-a-secret-long",
-				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"WORKSPACE","selector":{},"priority":0,"enabled":false}`, 400)
+				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"ORG","selector":{},"priority":0,"enabled":false}`, 400)
 			var binding gormrepo.PolicyBindingRecord
 			if err := json.Unmarshal(r, &binding); err != nil {
 				t.Fatal(err)
@@ -121,7 +121,7 @@ func TestPolicyAPIWorkspaceAndDryRunPostgresAndMySQL(t *testing.T) {
 			request("POST", "/api/v1/policy-bindings", "admin-policy-a-secret-long",
 				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"ENVIRONMENT","selector":{"service_name":"checkout"},"priority":9}`, 400)
 			request("POST", "/api/v1/policy-bindings", "admin-policy-a-secret-long",
-				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"WORKSPACE","selector":{},"priority":2147483648}`, 400)
+				`{"policy_revision_id":"`+created.Revision.PolicyRevisionID+`","scope_type":"ORG","selector":{},"priority":2147483648}`, 400)
 			resolved := request("GET", "/api/v1/agents/"+uid+"/policy-resolution", "admin-policy-a-secret-long", "", 200)
 			var resolution gormrepo.PolicyResolution
 			if err := json.Unmarshal(resolved, &resolution); err != nil {
