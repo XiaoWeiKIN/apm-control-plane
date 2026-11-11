@@ -43,7 +43,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			const workspace = "ws-push-contract"
+			const org = "ws-push-contract"
 			uidBytes := make([]byte, 16)
 			if _, err := rand.Read(uidBytes); err != nil {
 				t.Fatal(err)
@@ -53,7 +53,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			reg.delivery = store
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 			handler, cc, err := makeGateway(reg, auth.New([]appconfig.Credential{
-				{ID: "java-credential", WorkspaceID: workspace, Token: "ws-agent-token-long"},
+				{ID: "java-credential", OrgID: org, Token: "ws-agent-token-long"},
 			}), log)
 			if err != nil {
 				t.Fatal(err)
@@ -62,7 +62,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			mux.HandleFunc("/v1/opamp", handler)
 			mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(store,
 				auth.New([]appconfig.Credential{
-					{ID: "admin-credential", WorkspaceID: workspace, Token: "ws-admin-token-long"},
+					{ID: "admin-credential", OrgID: org, Token: "ws-admin-token-long"},
 				}), reg.wakeAgent))
 			server := httptest.NewUnstartedServer(mux)
 			server.Config.ConnContext = cc
@@ -142,7 +142,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				revision, err := store.CreateConfigRevision(ctx, workspace, "admin-credential", snapshot)
+				revision, err := store.CreateConfigRevision(ctx, org, "admin-credential", snapshot)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -171,13 +171,13 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 				t.Helper()
 				deadline := time.Now().Add(5 * time.Second)
 				for time.Now().Before(deadline) {
-					item, err := store.GetAgentAssignment(ctx, workspace, uid)
+					item, err := store.GetAgentAssignment(ctx, org, uid)
 					if err == nil && item.State == want {
 						return
 					}
 					time.Sleep(20 * time.Millisecond)
 				}
-				item, err := store.GetAgentAssignment(ctx, workspace, uid)
+				item, err := store.GetAgentAssignment(ctx, org, uid)
 				t.Fatalf("assignment state: got %+v err=%v; want %s", item, err, want)
 			}
 
@@ -187,7 +187,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			// Register must complete before publishing; read inventory instead of assuming WS processing speed.
 			deadline := time.Now().Add(5 * time.Second)
 			for {
-				_, err := store.Get(ctx, workspace, uid)
+				_, err := store.Get(ctx, org, uid)
 				if err == nil {
 					break
 				}
@@ -235,7 +235,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			reg.delivery = store
 			defer reg.stop()
 			handler, cc, err = makeGateway(reg, auth.New([]appconfig.Credential{
-				{ID: "java-credential", WorkspaceID: workspace, Token: "ws-agent-token-long"},
+				{ID: "java-credential", OrgID: org, Token: "ws-agent-token-long"},
 			}), log)
 			if err != nil {
 				t.Fatal(err)
@@ -246,7 +246,7 @@ func TestWebSocketPushAndReconnectPostgresAndMySQL(t *testing.T) {
 			server.Config.ConnContext = cc
 			server.Start()
 			defer server.Close()
-			restored, err := store.GetAgentAssignment(ctx, workspace, uid)
+			restored, err := store.GetAgentAssignment(ctx, org, uid)
 			if err != nil {
 				t.Fatal(err)
 			}

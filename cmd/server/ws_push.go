@@ -20,7 +20,7 @@ func (r *registry) startWriter(p auth.Principal, conn types.Connection, uid []by
 		r.mu.Unlock()
 		return
 	}
-	rt := r.sessions[key(p.WorkspaceID, id)]
+	rt := r.sessions[key(p.OrgID, id)]
 	if rt == nil {
 		r.mu.Unlock()
 		return
@@ -38,7 +38,7 @@ func (r *registry) startWriter(p auth.Principal, conn types.Connection, uid []by
 	rt.mu.Unlock()
 	r.mu.Unlock()
 
-	go r.pushLoop(p.WorkspaceID, id, append([]byte(nil), uid...), conn, rt, wake, done, log)
+	go r.pushLoop(p.OrgID, id, append([]byte(nil), uid...), conn, rt, wake, done, log)
 	select {
 	case wake <- struct{}{}:
 	default:
@@ -47,9 +47,9 @@ func (r *registry) startWriter(p auth.Principal, conn types.Connection, uid []by
 
 // wakeAgent is called only after the release transaction commits.
 // It never blocks the Admin API on a database or network send.
-func (r *registry) wakeAgent(workspaceID, uid string) {
+func (r *registry) wakeAgent(orgID, uid string) {
 	r.mu.Lock()
-	rt := r.sessions[key(workspaceID, uid)]
+	rt := r.sessions[key(orgID, uid)]
 	if rt == nil || r.closing {
 		r.mu.Unlock()
 		return
@@ -68,7 +68,7 @@ func (r *registry) wakeAgent(workspaceID, uid string) {
 
 // pushLoop is the sole durable-config sender for one WS session.
 // A bounded backoff reduces idle DB polling; wake signals bypass the interval.
-func (r *registry) pushLoop(workspaceID, uid string, rawUID []byte, conn types.Connection, rt *runtimeAgent, wake, done <-chan struct{}, log *slog.Logger) {
+func (r *registry) pushLoop(orgID, uid string, rawUID []byte, conn types.Connection, rt *runtimeAgent, wake, done <-chan struct{}, log *slog.Logger) {
 	defer r.inFlight.Done()
 	checkInterval := 5 * time.Second
 	idleChecks := 0
@@ -90,15 +90,15 @@ func (r *registry) pushLoop(workspaceID, uid string, rawUID []byte, conn types.C
 
 		// 1. 原子读取当前 Desired 与重试期限，不能使用唤醒时的旧配置。
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		desired, _, err := r.delivery.ReconcileAgentConfig(ctx, workspaceID, uid, nil, true)
+		desired, _, err := r.delivery.ReconcileAgentConfig(ctx, orgID, uid, nil, true)
 		cancel()
 		if err != nil {
-			log.Warn("ws config reconciliation failed", "workspace_id", workspaceID, "instance_uid", uid, "error", err)
+			log.Warn("ws config reconciliation failed", "org_id", orgID, "instance_uid", uid, "error", err)
 			continue
 		}
 		config, err := remoteConfigFromDesired(desired)
 		if err != nil {
-			log.Warn("ws config decode failed", "workspace_id", workspaceID, "instance_uid", uid, "error", err)
+			log.Warn("ws config decode failed", "org_id", orgID, "instance_uid", uid, "error", err)
 			continue
 		}
 		if config == nil {
@@ -114,7 +114,7 @@ func (r *registry) pushLoop(workspaceID, uid string, rawUID []byte, conn types.C
 		checkInterval = 5 * time.Second
 		ticker.Reset(checkInterval)
 
-		// 2. 会话可能在 DB 查询时已关闭；不能向旧连接发送当前 Workspace 的配置。
+		// 2. 会话可能在 DB 查询时已关闭；不能向旧连接发送当前 Org 的配置。
 		rt.mu.Lock()
 		active := rt.conn == conn
 		rt.mu.Unlock()
@@ -139,7 +139,7 @@ func (r *registry) pushLoop(workspaceID, uid string, rawUID []byte, conn types.C
 		})
 		cancel()
 		if err != nil {
-			log.Warn("ws remote config send failed", "workspace_id", workspaceID, "instance_uid", uid, "error", err)
+			log.Warn("ws remote config send failed", "org_id", orgID, "instance_uid", uid, "error", err)
 			_ = conn.Disconnect()
 			return
 		}

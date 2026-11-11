@@ -39,8 +39,8 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			workspace := "p3-rollout-http"
-			owner := auth.Principal{WorkspaceID: workspace, CredentialID: "java-owner"}
+			org := "p3-rollout-http"
+			owner := auth.Principal{OrgID: org, CredentialID: "java-owner"}
 			uids := make([]string, 3)
 			for i := range uids {
 				raw := make([]byte, 16)
@@ -60,18 +60,18 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			revision, err := store.CreateConfigRevision(ctx, workspace, "admin", snapshot)
+			revision, err := store.CreateConfigRevision(ctx, org, "admin", snapshot)
 			if err != nil {
 				t.Fatal(err)
 			}
 			creds := auth.New([]appconfig.Credential{
-				{ID: "admin", WorkspaceID: workspace, Token: "rollout-admin-a-long"},
-				{ID: "other", WorkspaceID: "p3-other", Token: "rollout-admin-b-long"},
+				{ID: "admin", OrgID: org, Token: "rollout-admin-a-long"},
+				{ID: "other", OrgID: "p3-other", Token: "rollout-admin-b-long"},
 			})
 			var waked []string
 			h := adminRolloutHandler(store, creds, func(ws, uid string) {
-				if ws != workspace {
-					t.Errorf("cross Workspace notification: %s", ws)
+				if ws != org {
+					t.Errorf("cross Org notification: %s", ws)
 				}
 				waked = append(waked, uid)
 			})
@@ -128,11 +128,11 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 			for batch := 0; batch < 3; batch++ {
 				view := call("GET", "/api/v1/rollouts/"+id, "rollout-admin-a-long", "", 200)
 				target := view.Targets[batch]
-				offered, _, err := store.ReconcileAgentConfig(ctx, workspace, target.InstanceUID, nil, true)
+				offered, _, err := store.ReconcileAgentConfig(ctx, org, target.InstanceUID, nil, true)
 				if err != nil || offered == nil {
 					t.Fatalf("batch %d not offered: %v", batch, err)
 				}
-				if _, _, err := store.ReconcileAgentConfig(ctx, workspace, target.InstanceUID,
+				if _, _, err := store.ReconcileAgentConfig(ctx, org, target.InstanceUID,
 					&gormrepo.ConfigStatus{Hash: offered.ConfigHash, Status: "APPLIED"}, false); err != nil {
 					t.Fatal(err)
 				}
@@ -155,11 +155,11 @@ func TestRolloutAdminHTTPPostgresAndMySQL(t *testing.T) {
 			if len(paused.Activated) != 1 {
 				t.Fatalf("second rollout did not activate first batch: %+v", paused)
 			}
-			offered, _, err := store.ReconcileAgentConfig(ctx, workspace, paused.Activated[0], nil, true)
+			offered, _, err := store.ReconcileAgentConfig(ctx, org, paused.Activated[0], nil, true)
 			if err != nil || offered == nil {
 				t.Fatalf("paused release offer missing: %v", err)
 			}
-			if _, _, err := store.ReconcileAgentConfig(ctx, workspace, paused.Activated[0],
+			if _, _, err := store.ReconcileAgentConfig(ctx, org, paused.Activated[0],
 				&gormrepo.ConfigStatus{Hash: offered.ConfigHash, Status: "FAILED", Error: "rejected"}, false); err != nil {
 				t.Fatal(err)
 			}
