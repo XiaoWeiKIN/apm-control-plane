@@ -86,9 +86,9 @@ jobs:
         run: |
           set -euo pipefail
           DATAFOX_SCHEMA_DSN="$APM_TEST_POSTGRES_DSN" \
-            .datafox-schema/bin/datafox-schema migrate up --domain=controlplane
+            .datafox-schema/bin/datafox-schema migrate up --domain=admin
           DATAFOX_SCHEMA_DSN="mysql://app:testpass@127.0.0.1:3306/controlplane" \
-            .datafox-schema/bin/datafox-schema migrate up --domain=controlplane
+            .datafox-schema/bin/datafox-schema migrate up --domain=admin
       - name: Exercise identical real-engine repository contracts
         shell: bash
         run: |

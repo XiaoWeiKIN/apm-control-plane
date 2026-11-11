@@ -1,13 +1,17 @@
-# Control Plane database schema
+# Relational Schema
 
-The PostgreSQL/MySQL Control Plane schema is defined by the Go DSL in
-[datafox-schema/controlplane/migrations](https://github.com/datafoxlabs/datafox-schema/tree/main/controlplane/migrations).
+The nine Agent Management tables are declared in the unified
+[DataFox Admin migrations](https://github.com/datafoxlabs/datafox-schema/tree/main/admin/migrations)
+using the storekit/migrator Go DSL.
 
-This repository does not maintain its own schema migrations. Initialize a fresh
-database with a single-executor `datafox-schema migrate up --domain=controlplane`
-job **before** starting the service. The runtime checks the
-`controlplane_init_schema` success marker.
+Initialize the relational management schema in a fresh database (or an
+existing Admin database without Agent Management tables) with a single
+executor:
 
-If any Control Plane business table already exists without a successful
-migration record, initialization fails. There is no database takeover,
-automatic repair or data deletion.
+```sh
+datafox-schema migrate up --domain=admin
+```
+
+The application requires a successful `admin_agent_management_schema`
+migration history entry and validates its required tables at startup.
+The server never runs AutoMigrate or implicitly adopts existing tables.

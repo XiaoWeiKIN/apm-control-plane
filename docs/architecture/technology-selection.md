@@ -1,6 +1,6 @@
 # APM Control Plane 技术选型（P1–P3）
 
-> **实现更新（2026-11-11）**：本文件保留 2026-10-19 的历史选型基线，原 Goose 方案已被 `storekit/sqlstore` 与 `datafox-schema/controlplane/migrations` Go DSL 取代。Control Plane 的租户边界统一为平台级 `org_id`（Org），不是 Workspace；现行初始化与启动操作以根目录 README 为准。下文的 Goose 目录、版本和原 P1 阶段结论仅供历史追溯，不是当前部署指令。
+> **实现更新（2026-11-11）**：本文件保留 2026-10-19 的历史选型基线，原 Goose 方案已被 `storekit/sqlstore` 与 `datafox-schema/admin/migrations` Go DSL 取代。Control Plane 的租户边界统一为平台级 `org_id`（Org），不是 Workspace；现行初始化与启动操作以根目录 README 为准。下文的 Goose 目录、版本和原 P1 阶段结论仅供历史追溯，不是当前部署指令。
 >
 > **状态**：技术方案 / 待评审（Proposed）。本文不是 Accepted ADR、已批准的 DD-001，也不代表数据库兼容性已经实现。
 >

@@ -109,7 +109,7 @@ erDiagram
 
 `org_id` 由经过认证的 Agent/Admin Credential 绑定产生，不允许从 AgentDescription、请求体或不可信 Header 推断。现阶段使用部署配置维护凭证映射，尚未集成动态 Org/IAM 校验与撤销；上线前需明确该安全边界。数据库延用当前规范字符串 ID（BIGINT），不另造第二套 ID；与上游 Org 标识的角色和授权必须在 IAM 集成时确认。
 
-当前迁移仅支持空库，Schema 由 `datafox-schema migrate up --domain=controlplane` 初始化；不接管旧 `workspace_id` 表、不执行数据回填，也不建立 Org → Workspace 映射。
+当前迁移仅支持空库，Schema 由 `datafox-schema migrate up --domain=admin` 初始化；不接管旧 `workspace_id` 表、不执行数据回填，也不建立 Org → Workspace 映射。
 
 ### 3.2 `agent_principals` — 稳定授权主体
 
@@ -146,7 +146,7 @@ erDiagram
 
 ### 3.4 `agent_instances` — Agent Inventory（已存在；目标为原位演进）
 
-**当前已实现主键**：`(org_id,instance_uid)`。[DataFox Schema DSL](https://github.com/datafoxlabs/datafox-schema/tree/main/controlplane/migrations) 与 GORM 模型使用相同的 Org 作用域。生产 Org 授权集成仍待审批，不能将数据库字段存在等同于已验证平台 IAM。
+**当前已实现主键**：`(org_id,instance_uid)`。[DataFox Schema DSL](https://github.com/datafoxlabs/datafox-schema/tree/main/admin/migrations) 与 GORM 模型使用相同的 Org 作用域。生产 Org 授权集成仍待审批，不能将数据库字段存在等同于已验证平台 IAM。
 
 | 字段 | 状态 | 类型 | 约束 / 语义 |
 | --- | --- | --- | --- |
@@ -236,7 +236,7 @@ erDiagram
 
 ### P2.4 物理落地（DataFox Schema DSL）
 
-统一 Schema DSL 初始化以上三表，并为 `config_revisions.source_policy_revision_id` 添加同 Org 复合外键。`Store.Open` 要求 `controlplane_init_schema` 成功历史，缺失必须失败。MySQL 使用 InnoDB/utf8mb4_bin，UUID/FK 字段使用 ascii_bin；MySQL DDL 不假设事务回滚。
+统一 Schema DSL 初始化以上三表，并为 `config_revisions.source_policy_revision_id` 添加同 Org 复合外键。`Store.Open` 要求 `admin_agent_management_schema` 成功历史，缺失必须失败。MySQL 使用 InnoDB/utf8mb4_bin，UUID/FK 字段使用 ascii_bin；MySQL DDL 不假设事务回滚。
 
 首个实际业务合同：**Java Head Sampling**，`policy_type=head_sampling`、`agent_kind=java-apm`。创建 Policy 与首个不可变 Revision 在同一事务内完成；后续 Revision 锁住父 Policy 递增 `revision_number`。Binding 的可变列通过 `row_version` CAS 更新，默认 enabled；同 Org 的 SQL FK 阻止跨 Org 引用 Revision。暂不启用 `expires_at`：到期策略尚无调用场景，若后续实施临时策略再通过独立 Migration 增加。
 
@@ -570,7 +570,7 @@ CREATE TABLE policy_revisions (
 
 ## 13. 维护与溯源
 
-- 当前 Control Plane Schema：[DataFox Schema DSL](https://github.com/datafoxlabs/datafox-schema/tree/main/controlplane/migrations)。
+- 当前 Control Plane Schema：[DataFox Schema DSL](https://github.com/datafoxlabs/datafox-schema/tree/main/admin/migrations)。
 - 当前 GORM `AgentRecord`、`Observe`、`Get`、`List`：[store.go](../../internal/storage/gormrepo/store.go)。
 - 需求不变量：[FR-001–FR-013](../requirements/APM_CONTROL_PLANE.md)。
 - 主架构与发布状态：[开发者架构指南](README.md)、[DD-001](../design-docs/dd-001_opamp-control-plane.md)、[EP-001](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md)。

@@ -21,16 +21,16 @@ Agent 身份键为 `(org_id,instance_uid)`，首次注册保留 `credential_id` 
 
 ## 2. 数据库初始化
 
-PostgreSQL / MySQL 使用统一的 `datafox-schema/controlplane/migrations` Go DSL，所有业务表以 `org_id` 作为组织隔离字段。
+PostgreSQL / MySQL 使用统一的 `datafox-schema/admin/migrations` Go DSL，所有业务表以 `org_id` 作为组织隔离字段。
 
 先在空数据库上运行独立 Schema Job：
 
 ```bash
 export DATAFOX_SCHEMA_DSN="$APM_DATABASE_DSN"
-datafox-schema migrate up --domain=controlplane
+datafox-schema migrate up --domain=admin
 ```
 
-MySQL 使用 schema CLI 支持的 URL DSN，运行服务仍使用对应的 Go MySQL DSN（参见根目录 README）。成功后运行时验证 `controlplane_init_schema` 迁移历史和必需列；若已存在未管理的表会直接失败，不自动接管或回填。**运行时不执行 AutoMigrate。**
+MySQL 使用 schema CLI 支持的 URL DSN，运行服务仍使用对应的 Go MySQL DSN（参见根目录 README）。成功后运行时验证 `admin_agent_management_schema` 迁移历史和必需列；若已存在未管理的表会直接失败，不自动接管或回填。**运行时不执行 AutoMigrate。**
 
 ## 3. 启动配置与凭证
 

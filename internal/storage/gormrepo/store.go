@@ -113,14 +113,14 @@ func Open(ctx context.Context, cfg appconfig.Database) (*Store, error) {
 	var applied int64
 	if err := db.WithContext(ctx).Raw(
 		"SELECT COUNT(*) FROM migration_log WHERE migration_id = ? AND success = ?",
-		"controlplane_init_schema", true,
+		"admin_agent_management_schema", true,
 	).Scan(&applied).Error; err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("inspect DataFox controlplane schema: %w", err)
 	}
 	if applied != 1 {
 		_ = sqlDB.Close()
-		return nil, fmt.Errorf("DataFox controlplane schema is not initialized: run datafox-schema migrate up --domain=controlplane")
+		return nil, fmt.Errorf("DataFox Admin Agent Management schema is not initialized: run datafox-schema migrate up --domain=admin")
 	}
 	// 校验必需的表与 Agent Inventory 字段；缺失时明确启动失败。
 	if !db.Migrator().HasTable(&AgentRecord{}) {

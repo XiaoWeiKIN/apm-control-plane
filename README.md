@@ -26,7 +26,7 @@ A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Ag
 
 The P2.1 code increment includes `internal/config.CompileJavaSampling` and `gormrepo.Store.CreateConfigRevision/GetConfigRevision`. It compiles a single Java `apm/sampling.json` to a **complete serialized OpAMP ConfigMap**, stores its immutable bytes and SHA-256 hash under a new Org-scoped UUID Revision, and can read the same bytes after reopening PostgreSQL or MySQL.
 
-Before using these internal operations, initialize the matching Control Plane schema with `datafox-schema migrate up --domain=controlplane`. This new compiled snapshot hashes deterministic protobuf ConfigMap bytes. P2.1 alone does not publish to any Agent.
+Before using these internal operations, initialize the matching Control Plane schema with `datafox-schema migrate up --domain=admin`. This new compiled snapshot hashes deterministic protobuf ConfigMap bytes. P2.1 alone does not publish to any Agent.
 
 ## P2.2: Persist one Agent's Pending Release
 
@@ -38,7 +38,7 @@ The endpoint checks the Agent's Org, type and advertised remote-config capabilit
 
 **HTTP 202 only confirms a committed Desired state.** P2.3 subsequently delivers the Revision through OpAMP and records Hash-matched ACK, but 202 does not establish delivery or JVM application. The P0 `PUT /sampling` remains in-memory. There is no management endpoint yet for creating ConfigRevisions: P2.1 creates these from internal Go code; P2.2 references an existing Revision ID. JVM runtime sampling remains unverified.
 
-Run `datafox-schema migrate up --domain=controlplane` before startup. Startup rejects a missing `controlplane_init_schema` success record or required tables; the service does not alter schemas automatically.
+Run `datafox-schema migrate up --domain=admin` before startup. Startup rejects a missing `admin_agent_management_schema` success record or required tables; the service does not alter schemas automatically.
 
 ## P2.3: OpAMP RemoteConfig delivery and reconciliation
 
@@ -66,9 +66,9 @@ export APM_DB_DRIVER=postgres
 export APM_DATABASE_DSN='postgres://app:replace@127.0.0.1:5432/controlplane?sslmode=disable'
 export DATAFOX_SCHEMA_DSN="$APM_DATABASE_DSN"
 
-datafox-schema migrate status --domain=controlplane
-datafox-schema migrate up --domain=controlplane
-datafox-schema migrate history --domain=controlplane --limit=20
+datafox-schema migrate status --domain=admin
+datafox-schema migrate up --domain=admin
+datafox-schema migrate history --domain=admin --limit=20
 ```
 
 For MySQL, use a `mysql://user:password@host:3306/database` URL for
