@@ -15,7 +15,7 @@ Admin Bearer Credential ---------------------┘             └ MySQL
       └---- 仅查询被授权 Org 的 Agent
 ```
 
-本项目的 `Org` 是**与平台 Org/IAM 同一实体的顶层组织/租户边界**，而不是独立的 APM 专属组织、项目或环境。Org 主数据、成员关系、角色和停用状态由现有平台负责；P1.1 从部署者配置的认证凭证提取作用域，**目前并未集成平台 IAM / Org 查询**。Agent 自报 `org_id`、`service.name` 和 `environment` 不具有授权能力。
+本项目的 `Org` 是**与平台 Org/IAM 同一实体的顶层组织/租户边界（int64 / BIGINT）**，而不是独立的 APM 专属组织、项目或环境。Org 主数据、成员关系、角色和停用状态由现有平台负责；P1.1 从部署者配置的认证凭证提取作用域，**目前并未集成平台 IAM / Org 查询**。Agent 自报 `org_id`、`service.name` 和 `environment` 不具有授权能力。
 
 Agent 身份键为 `(org_id,instance_uid)`，首次注册保留 `credential_id` 的所有权绑定。数据库保存 Agent Kind、发行版/版本、业务 Service 与最近 Observation；WebSocket 连接不写数据库。HTTP 活跃度按最近上报与配置 TTL 推断，不能解释为持久 Socket。
 
@@ -40,15 +40,15 @@ Agent 和 Admin Credential **均须通过两个独立环境变量**传入，JSON
 
 ```json
 [
-  {"id":"agent-dev","org_id":"org-dev","token":"replace-with-a-long-random-agent-token"}
+  {"id":"agent-dev","org_id":1,"token":"replace-with-a-long-random-agent-token"}
 ]
 ```
 
 分别设置 `APM_AGENT_CREDENTIALS_JSON` 和 `APM_ADMIN_CREDENTIALS_JSON`，Admin 使用不同凭证，例如：
 
 ```bash
-export APM_AGENT_CREDENTIALS_JSON='[{"id":"agent-dev","org_id":"org-dev","token":"replace-with-a-long-random-agent-token"}]'
-export APM_ADMIN_CREDENTIALS_JSON='[{"id":"admin-dev","org_id":"org-dev","token":"replace-with-a-different-long-admin-token"}]'
+export APM_AGENT_CREDENTIALS_JSON='[{"id":"agent-dev","org_id":1,"token":"replace-with-a-long-random-agent-token"}]'
+export APM_ADMIN_CREDENTIALS_JSON='[{"id":"admin-dev","org_id":1,"token":"replace-with-a-different-long-admin-token"}]'
 go run ./cmd/server
 ```
 

@@ -68,7 +68,7 @@ erDiagram
 
 | 逻辑类型 | PostgreSQL 候选 | MySQL 候选 | 约束与原因 |
 | --- | --- | --- | --- |
-| Org ID | `VARCHAR(96)`（现有） | `VARCHAR(96)`（现有） | P1.1 当前 Schema 使用 `org_id`；必须从可信凭证配置获得，平台 IAM 集成仍未实现 |
+| Org ID | `BIGINT`（现有平台 ID） | `BIGINT`（现有平台 ID） | P1.1 当前 Schema 使用 `org_id`；必须从可信凭证配置获得，平台 IAM 集成仍未实现 |
 | Agent Instance UID | `VARCHAR(32)` | `CHAR(32) CHARACTER SET ascii COLLATE ascii_bin` | 延用已实现的 16 字节 UID 小写 hex 表示，当前无需同步优化为二进制键 |
 | 新的业务 ID | `VARCHAR(36)` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | 建议由应用产生 UUID 字符串；不依赖自增 ID、`RETURNING` |
 | Principal / Credential 外部引用 | `VARCHAR(128)` | `VARCHAR(128)` | 字符串范围由发行凭证的可信系统定义；不存明文 Token |
@@ -107,7 +107,7 @@ erDiagram
 
 **本服务不维护独立的 `orgs` 主数据表。** 所有 Control Plane 业务表的归属字段统一为 `org_id`，跨业务表关联采用包含 `org_id` 的复合主键/外键，防止跨组织引用。组织的创建、成员、角色、禁用与删除由上游可信 Org/IAM 负责。
 
-`org_id` 由经过认证的 Agent/Admin Credential 绑定产生，不允许从 AgentDescription、请求体或不可信 Header 推断。现阶段使用部署配置维护凭证映射，尚未集成动态 Org/IAM 校验与撤销；上线前需明确该安全边界。数据库延用当前规范字符串 ID（VARCHAR(96)），不另造第二套 ID；与上游 Org 标识的数据类型及规范化方式必须在 IAM 集成时确认。
+`org_id` 由经过认证的 Agent/Admin Credential 绑定产生，不允许从 AgentDescription、请求体或不可信 Header 推断。现阶段使用部署配置维护凭证映射，尚未集成动态 Org/IAM 校验与撤销；上线前需明确该安全边界。数据库延用当前规范字符串 ID（BIGINT），不另造第二套 ID；与上游 Org 标识的角色和授权必须在 IAM 集成时确认。
 
 当前迁移仅支持空库，Schema 由 `datafox-schema migrate up --domain=controlplane` 初始化；不接管旧 `workspace_id` 表、不执行数据回填，也不建立 Org → Workspace 映射。
 
@@ -117,7 +117,7 @@ erDiagram
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| `org_id` | VARCHAR(96) | PK/可信 Org Scope | 组织 |
+| `org_id` | BIGINT | PK/可信 Org Scope | 组织 |
 | `principal_id` | VARCHAR(128) | PK | 服务端颁发的稳定 Agent 所有权主体 |
 | `display_name` | VARCHAR(128) | NOT NULL | 人类可读标记 |
 | `status` | VARCHAR(24) | NOT NULL | ACTIVE / DISABLED |
@@ -132,7 +132,7 @@ erDiagram
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| `org_id` | VARCHAR(96) | PK/可信 Org Scope | 组织 |
+| `org_id` | BIGINT | PK/可信 Org Scope | 组织 |
 | `credential_ref` | VARCHAR(128) | PK | Secret Manager / IAM 的稳定凭证引用 |
 | `principal_id` | VARCHAR(128) | NOT NULL/FK | 绑定稳定 Principal |
 | `credential_kind` | VARCHAR(24) | NOT NULL | SCOPED_TOKEN / MTLS_CERT（未来） |
@@ -150,7 +150,7 @@ erDiagram
 
 | 字段 | 状态 | 类型 | 约束 / 语义 |
 | --- | --- | --- | --- |
-| `org_id` | **现有** | VARCHAR(96) | PK；从可信部署配置的凭证获得，未接入统一 Org/IAM 服务 |
+| `org_id` | **现有** | BIGINT | PK；从可信部署配置的凭证获得，未接入统一 Org/IAM 服务 |
 | `instance_uid` | **现有** | 32-char hex | PK，Agent Instance Key |
 | `credential_id` | **P1.1 当前已有** | VARCHAR(128) | 当前实现的首次注册绑定；未来是否转为稳定 `owner_principal_id` 仍待安全设计审批 |
 | `owner_principal_id` | **拟新增** | VARCHAR(128) | FK → `agent_principals`；换 Token 不改变主体 |
@@ -183,7 +183,7 @@ erDiagram
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `org_id` | VARCHAR(96) | PK/可信 Org Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `policy_id` | UUID text | PK，服务端生成 |
 | `policy_type` | VARCHAR(48) | 如 `head_sampling`，以注册的 Adapter 能力约束 |
 | `agent_kind` | VARCHAR(64) | 目标 AgentKind（如 java-apm） |
@@ -200,7 +200,7 @@ erDiagram
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `org_id` | VARCHAR(96) | PK/可信 Org Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `policy_revision_id` | UUID text | PK |
 | `policy_id` | UUID text | FK → policies |
 | `revision_number` | BIGINT | NOT NULL，严格单调，范围在单一 Policy 内 |
@@ -218,7 +218,7 @@ erDiagram
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `org_id` | VARCHAR(96) | PK/可信 Org Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `binding_id` | UUID text | PK |
 | `policy_revision_id` | UUID text | FK → policy_revisions |
 | `agent_kind` | VARCHAR(64) | NOT NULL，和 Policy/Adapter 兼容 |
@@ -254,7 +254,7 @@ erDiagram
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `org_id` | VARCHAR(96) | PK/可信 Org Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `config_revision_id` | UUID text | PK |
 | `source_policy_revision_id` | Nullable UUID text | FK → policy_revisions；预留未来直接配置输入 |
 | `agent_kind` | VARCHAR(64) | NOT NULL，目标类型 |
@@ -280,7 +280,7 @@ erDiagram
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `org_id` | VARCHAR(96) | PK/可信 Org Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `release_id` | UUID text | PK |
 | `policy_revision_id` | Nullable UUID text | FK → policy_revisions |
 | `agent_kind` | VARCHAR(64) | NOT NULL，只对明确匹配的 Kind 发布 |
@@ -308,7 +308,7 @@ erDiagram
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `org_id` | VARCHAR(96) | PK/可信 Org Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `release_id` | UUID text | PK/FK |
 | `instance_uid` | 32-char hex | PK/FK |
 | `config_revision_id` | UUID text | NOT NULL/FK，Adapter 为该目标编译的内容 |
@@ -328,7 +328,7 @@ erDiagram
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `org_id` | VARCHAR(96) | PK/可信 Org Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `instance_uid` | 32-char hex | PK/FK |
 | `release_id` | UUID text | NOT NULL/FK，创建当前 Desired 的 Release |
 | `config_revision_id` | UUID text | NOT NULL/FK，当前完整配置 |
@@ -372,7 +372,7 @@ UPDATE agent_assignments
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `org_id` | VARCHAR(96) | PK/可信 Org Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `event_id` | UUID text | PK |
 | `event_type` | VARCHAR(48) | 如 RELEASE_CREATED、TARGET_ASSIGNED、CONFIG_SENT、CONFIG_APPLIED、CONFIG_FAILED、ROLLBACK_REQUESTED |
 | `release_id` | Nullable UUID text | FK → config_releases |

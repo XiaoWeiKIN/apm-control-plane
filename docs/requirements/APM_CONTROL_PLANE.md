@@ -47,7 +47,7 @@ The product needs more than one database driver and may use MySQL. Database sele
 
 ## Confirmed org scope
 
-The resource authorization boundary is the **observability platform Org**, shared conceptually across Agent management, logs, metrics, traces and dashboards. The Control Plane must not create its own customer Tenant namespace. Agent Inventory and future Policy/Release/Assignment resources use the authenticated `org_id`. P1.1 currently scopes each credential to an operator-configured Org; authoritative IAM/Org validation remains a separate security requirement. Because no existing deployment data needs compatibility, the initial schema uses `org_id` directly and does not keep a `tenant_id` compatibility column.
+The resource authorization boundary is the **observability platform Org**, shared conceptually across Agent management, logs, metrics, traces and dashboards. The Control Plane must not create its own customer Tenant namespace. Agent Inventory and future Policy/Release/Assignment resources use the same numeric platform `org_id` (Go int64 / SQL BIGINT). P1.1 currently scopes each credential to an operator-configured Org; authoritative IAM/Org validation remains a separate security requirement. Because no existing deployment data needs compatibility, the initial schema uses `org_id` directly and does not keep a `tenant_id` compatibility column.
 
 ## Evidence and authority
 

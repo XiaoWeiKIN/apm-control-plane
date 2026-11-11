@@ -20,7 +20,7 @@ A Go-based **OpAMP Agent Control Plane** for managing Java, Go and Python APM Ag
 - HTTP polling freshness and WebSocket session handling have separate connection semantics.
 - The `PUT /sampling` endpoint remains an **ephemeral P0 demonstration**. P2.1 adds immutable ConfigRevisions; P2.2 persists atomic single-Agent Releases; P2.3 reconciles and delivers Desired via HTTP polling and WebSocket pushes, with durable ACK/audit. Multi-Agent Rollout is not implemented.
 
-**Org is the observability platform's organization-level tenant boundary**, shared with logs, metrics, traces and dashboards. This service does **not** maintain its own organization master table or accept Agent-declared Org IDs as authorization. Current P1.1 obtains trusted scope from operator-supplied credential configuration; integration with the platform's authoritative Org/IAM service is a separate security/design task.
+**Org is the observability platform's organization-level tenant boundary**, shared with logs, metrics, traces and dashboards. Its canonical ID is numeric (`int64` in Go, `BIGINT` in PostgreSQL/MySQL), identical to Platform Admin's existing `org_id`. A person may have memberships in several organizations, but every request operates under a single authenticated Org. This service does **not** maintain its own organization master table or accept Agent-declared Org IDs as authorization. Current P1.1 derives trusted scope from operator-supplied credential configuration; **this is not yet shared platform IAM, user membership authorization or an Org switcher**. Admin and Agent tokens have distinct roles and must bind to an existing platform Org. Integrating the authoritative Org/IAM credential issuer is a separate security task.
 
 ## P2.1: Java ConfigRevision compilation and storage
 
@@ -84,8 +84,8 @@ In local development, use two distinct high-entropy replacement tokens. The name
 ```bash
 export APM_OPAMP_TOKEN='replace-with-random-agent-token-at-least-16-chars'
 export DEMO_ADMIN_TOKEN='replace-with-different-admin-token-at-least-16-chars'
-export APM_AGENT_CREDENTIALS_JSON="$(printf '[{"id":"dev-agent","org_id":"dev-org","token":"%s"}]' "$APM_OPAMP_TOKEN")"
-export APM_ADMIN_CREDENTIALS_JSON="$(printf '[{"id":"dev-admin","org_id":"dev-org","token":"%s"}]' "$DEMO_ADMIN_TOKEN")"
+export APM_AGENT_CREDENTIALS_JSON="$(printf '[{"id":"dev-agent","org_id":1,"token":"%s"}]' "$APM_OPAMP_TOKEN")"
+export APM_ADMIN_CREDENTIALS_JSON="$(printf '[{"id":"dev-admin","org_id":1,"token":"%s"}]' "$DEMO_ADMIN_TOKEN")"
 
 go run ./cmd/server
 ```

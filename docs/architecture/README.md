@@ -65,7 +65,7 @@ flowchart TB
     Collector --> Backend["APM Backend / ClickHouse"]
 ~~~
 
-上图描述**P1–P3 目标拓扑**，不是所有模块都已部署。P1.1 Agent Registry 已通过 GORM 在 PostgreSQL 和 MySQL 上实现持久化，当前数据库初始化由 DataFox Schema DSL 负责；Policy Release 与 Reconciler 仍未实现。Org 是可观测平台统一的组织边界，当前 P1.1 的作用域来自受信的部署凭证配置，平台 Org/IAM 联通还未完成。所谓“未来 Collector”是**被管理对象**，不能与图中的 OTLP Receiver 自动视为同一个实例。
+上图描述**P1–P3 目标拓扑**，不是所有模块都已部署。P1.1 Agent Registry 已通过 GORM 在 PostgreSQL 和 MySQL 上实现持久化，当前数据库初始化由 DataFox Schema DSL 负责；Policy Release 与 Reconciler 仍未实现。Org 是可观测平台统一的数值型组织边界（int64 / BIGINT），当前 P1.1 的作用域来自受信的部署凭证配置，平台 Org/IAM 联通还未完成。所谓“未来 Collector”是**被管理对象**，不能与图中的 OTLP Receiver 自动视为同一个实例。
 
 ## 2. 从一次采样策略发布理解系统
 
@@ -554,8 +554,8 @@ db/migrations/
 Go 1.25+、本地 PostgreSQL 或 MySQL。先按 [P1.1 运行手册](p1-durable-inventory.md) 通过 DataFox Schema CLI 初始化新数据库，再使用受信的 Org Credential JSON 配置启动 Server。下面只展示认证变量部分：
 
 ```bash
-export APM_AGENT_CREDENTIALS_JSON='[{"id":"dev-agent","org_id":"dev-org","token":"replace-with-a-long-random-agent-token"}]'
-export APM_ADMIN_CREDENTIALS_JSON='[{"id":"dev-admin","org_id":"dev-org","token":"replace-with-a-different-long-admin-token"}]'
+export APM_AGENT_CREDENTIALS_JSON='[{"id":"dev-agent","org_id":1,"token":"replace-with-a-long-random-agent-token"}]'
+export APM_ADMIN_CREDENTIALS_JSON='[{"id":"dev-admin","org_id":1,"token":"replace-with-a-different-long-admin-token"}]'
 # 另需配置 APM_DB_DRIVER 和 APM_DATABASE_DSN，并执行 DataFox Schema 初始化
 go run ./cmd/server
 ```
