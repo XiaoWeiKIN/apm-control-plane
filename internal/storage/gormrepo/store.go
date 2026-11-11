@@ -28,7 +28,7 @@ var (
 )
 
 type AgentRecord struct {
-	OrgID               string    `gorm:"column:org_id;primaryKey"`
+	OrgID               int64    `gorm:"column:org_id;primaryKey"`
 	InstanceUID         string    `gorm:"column:instance_uid;primaryKey"`
 	CredentialID        string    `gorm:"column:credential_id"`
 	AgentKind           string    `gorm:"column:agent_kind"`
@@ -180,7 +180,7 @@ func (s *Store) Close() error {
 
 func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs Observation) (AgentRecord, error) {
 	// 1. 验证可信身份与 Observation 字段范围，拒绝无效状态写入。
-	if p.OrgID == "" || p.CredentialID == "" || len(uid) != 32 || obs.SeenAt.IsZero() {
+	if p.OrgID <= 0 || p.CredentialID == "" || len(uid) != 32 || obs.SeenAt.IsZero() {
 		return AgentRecord{}, fmt.Errorf("%w: invalid agent identity or observation", ErrInvalidObservation)
 	}
 	if obs.Capabilities > math.MaxInt64 {
@@ -282,7 +282,7 @@ func (s *Store) Observe(ctx context.Context, p auth.Principal, uid string, obs O
 	return result, err
 }
 
-func (s *Store) Get(ctx context.Context, org, uid string) (AgentRecord, error) {
+func (s *Store) Get(ctx context.Context, org int64, uid string) (AgentRecord, error) {
 	var a AgentRecord
 	err := s.db.WithContext(ctx).Where("org_id = ? AND instance_uid = ?", org, uid).Take(&a).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -291,7 +291,7 @@ func (s *Store) Get(ctx context.Context, org, uid string) (AgentRecord, error) {
 	return a, err
 }
 
-func (s *Store) List(ctx context.Context, org string) ([]AgentRecord, error) {
+func (s *Store) List(ctx context.Context, org int64) ([]AgentRecord, error) {
 	var records []AgentRecord
 	err := s.db.WithContext(ctx).Where("org_id = ?", org).
 		Order("instance_uid ASC").Find(&records).Error

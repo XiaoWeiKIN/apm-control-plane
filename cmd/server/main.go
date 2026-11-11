@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -33,8 +34,8 @@ import (
 // The production implementation is GORM; unit tests use an in-memory fake.
 type AgentStore interface {
 	Observe(context.Context, auth.Principal, string, gormrepo.Observation) (gormrepo.AgentRecord, error)
-	Get(context.Context, string, string) (gormrepo.AgentRecord, error)
-	List(context.Context, string) ([]gormrepo.AgentRecord, error)
+	Get(context.Context, int64, string) (gormrepo.AgentRecord, error)
+	List(context.Context, int64) ([]gormrepo.AgentRecord, error)
 }
 
 // runtimeAgent.users and lastActive are protected by registry.mu.
@@ -76,7 +77,7 @@ var errRegistryClosing = errors.New("control plane is shutting down")
 // No other connection is allowed to overwrite that runtime session.
 var errSessionConflict = errors.New("agent instance already has an active session")
 
-func key(org, uid string) string { return org + "/" + uid }
+func key(org int64, uid string) string { return org + "/" + uid }
 
 func validUID(id string) bool {
 	if len(id) != 32 {
@@ -327,7 +328,7 @@ func (r *registry) disconnect(p auth.Principal, conn types.Connection) {
 	delete(r.wsConnections, conn)
 	agents := make([]*runtimeAgent, 0)
 	for k, rt := range r.sessions {
-		if strings.HasPrefix(k, p.OrgID+"/") {
+		if strings.HasPrefix(k, strconv.FormatInt(p.OrgID, 10)+"/") {
 			agents = append(agents, rt)
 		}
 	}

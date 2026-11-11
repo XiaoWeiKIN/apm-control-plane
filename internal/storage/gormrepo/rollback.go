@@ -5,7 +5,7 @@ import "context"
 // PublishRollback creates a new, audited compensating rollout. The Admin
 // supplies the desired historical ConfigRevision explicitly; no inference from
 // an ACK or mutable current Assignment is made.
-func (s *Store) PublishRollback(ctx context.Context, org, actor, sourceReleaseID, configRevisionID string,
+func (s *Store) PublishRollback(ctx context.Context, org int64, actor, sourceReleaseID, configRevisionID string,
 	expectedRowVersion int64, batchSize int, key string) (RolloutView, error) {
 	// 1. 拒绝无效来源及 CAS 版本，避免对任意单 Agent 发布冒充批量回滚。
 	if !policyIdentityOK(org, actor) || len(sourceReleaseID) != 36 ||

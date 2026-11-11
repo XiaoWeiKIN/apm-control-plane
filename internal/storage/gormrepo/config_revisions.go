@@ -17,7 +17,7 @@ var ErrConfigRevisionNotFound = errors.New("config revision not found")
 
 // ConfigRevisionRecord stores an immutable, complete OpAMP ConfigMap snapshot.
 type ConfigRevisionRecord struct {
-	OrgID                  string    `gorm:"column:org_id;primaryKey"`
+	OrgID                  int64    `gorm:"column:org_id;primaryKey"`
 	ConfigRevisionID       string    `gorm:"column:config_revision_id;primaryKey"`
 	SourcePolicyRevisionID *string   `gorm:"column:source_policy_revision_id"`
 	AgentKind              string    `gorm:"column:agent_kind"`
@@ -36,7 +36,7 @@ func (ConfigRevisionRecord) TableName() string { return "config_revisions" }
 
 // CreateConfigRevision creates a new immutable revision without changing
 // any Agent's Desired configuration or sending any OpAMP message.
-func (s *Store) CreateConfigRevision(ctx context.Context, orgID, createdBy string, snapshot config.Snapshot) (ConfigRevisionRecord, error) {
+func (s *Store) CreateConfigRevision(ctx context.Context, orgID int64, createdBy string, snapshot config.Snapshot) (ConfigRevisionRecord, error) {
 	// 1. 验证创建者、Org 与已编译的完整配置内容。
 	if orgID == "" || utf8.RuneCountInString(orgID) > 96 {
 		return ConfigRevisionRecord{}, fmt.Errorf("org_id is missing or too long")
@@ -77,7 +77,7 @@ func (s *Store) CreateConfigRevision(ctx context.Context, orgID, createdBy strin
 	return record, nil
 }
 
-func (s *Store) GetConfigRevision(ctx context.Context, orgID, id string) (ConfigRevisionRecord, error) {
+func (s *Store) GetConfigRevision(ctx context.Context, orgID int64, id string) (ConfigRevisionRecord, error) {
 	var record ConfigRevisionRecord
 	err := s.db.WithContext(ctx).
 		Where("org_id = ? AND config_revision_id = ?", orgID, id).

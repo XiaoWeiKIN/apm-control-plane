@@ -47,7 +47,7 @@ func (r *registry) startWriter(p auth.Principal, conn types.Connection, uid []by
 
 // wakeAgent is called only after the release transaction commits.
 // It never blocks the Admin API on a database or network send.
-func (r *registry) wakeAgent(orgID, uid string) {
+func (r *registry) wakeAgent(orgID int64, uid string) {
 	r.mu.Lock()
 	rt := r.sessions[key(orgID, uid)]
 	if rt == nil || r.closing {
@@ -68,7 +68,7 @@ func (r *registry) wakeAgent(orgID, uid string) {
 
 // pushLoop is the sole durable-config sender for one WS session.
 // A bounded backoff reduces idle DB polling; wake signals bypass the interval.
-func (r *registry) pushLoop(orgID, uid string, rawUID []byte, conn types.Connection, rt *runtimeAgent, wake, done <-chan struct{}, log *slog.Logger) {
+func (r *registry) pushLoop(orgID int64, uid string, rawUID []byte, conn types.Connection, rt *runtimeAgent, wake, done <-chan struct{}, log *slog.Logger) {
 	defer r.inFlight.Done()
 	checkInterval := 5 * time.Second
 	idleChecks := 0

@@ -25,7 +25,7 @@ var (
 )
 
 type ConfigReleaseRecord struct {
-	OrgID               string     `gorm:"column:org_id;primaryKey"`
+	OrgID               int64     `gorm:"column:org_id;primaryKey"`
 	ReleaseID           string     `gorm:"column:release_id;primaryKey"`
 	PolicyRevisionID    *string    `gorm:"column:policy_revision_id"`
 	AgentKind           string     `gorm:"column:agent_kind"`
@@ -45,7 +45,7 @@ type ConfigReleaseRecord struct {
 func (ConfigReleaseRecord) TableName() string { return "config_releases" }
 
 type ReleaseTargetRecord struct {
-	OrgID             string    `gorm:"column:org_id;primaryKey"`
+	OrgID             int64    `gorm:"column:org_id;primaryKey"`
 	ReleaseID         string    `gorm:"column:release_id;primaryKey"`
 	InstanceUID       string    `gorm:"column:instance_uid;primaryKey"`
 	ConfigRevisionID  string    `gorm:"column:config_revision_id"`
@@ -60,7 +60,7 @@ type ReleaseTargetRecord struct {
 func (ReleaseTargetRecord) TableName() string { return "release_targets" }
 
 type AgentAssignmentRecord struct {
-	OrgID             string     `gorm:"column:org_id;primaryKey"`
+	OrgID             int64     `gorm:"column:org_id;primaryKey"`
 	InstanceUID       string     `gorm:"column:instance_uid;primaryKey"`
 	ReleaseID         string     `gorm:"column:release_id"`
 	ConfigRevisionID  string     `gorm:"column:config_revision_id"`
@@ -81,7 +81,7 @@ type AgentAssignmentRecord struct {
 func (AgentAssignmentRecord) TableName() string { return "agent_assignments" }
 
 type ConfigEventRecord struct {
-	OrgID             string    `gorm:"column:org_id;primaryKey"`
+	OrgID             int64    `gorm:"column:org_id;primaryKey"`
 	EventID           string    `gorm:"column:event_id;primaryKey"`
 	EventType         string    `gorm:"column:event_type"`
 	ReleaseID         *string   `gorm:"column:release_id"`
@@ -100,7 +100,7 @@ func (ConfigEventRecord) TableName() string { return "config_events" }
 
 // ReleaseResult represents persisted release intent, not delivery or Agent application.
 type ReleaseResult struct {
-	OrgID             string `json:"org_id"`
+	OrgID             int64 `json:"org_id"`
 	ReleaseID         string `json:"release_id"`
 	InstanceUID       string `json:"instance_uid"`
 	ConfigRevisionID  string `json:"config_revision_id"`
@@ -120,9 +120,9 @@ func newReleaseUUID() (string, error) {
 
 // PublishAgentConfig creates one frozen target and replaces one Agent's Desired.
 // The committed Desired is delivered asynchronously by the existing Reconciler.
-func (s *Store) PublishAgentConfig(ctx context.Context, orgID, instanceUID, configRevisionID, requestedBy, idempotencyKey string) (ReleaseResult, error) {
+func (s *Store) PublishAgentConfig(ctx context.Context, orgID int64, instanceUID, configRevisionID, requestedBy, idempotencyKey string) (ReleaseResult, error) {
 	// 1. 拒绝非法 Org、Agent、Revision 和幂等键，不启动无效事务。
-	if orgID == "" || utf8.RuneCountInString(orgID) > 96 ||
+	if orgID <= 0 ||
 		requestedBy == "" || utf8.RuneCountInString(requestedBy) > 128 ||
 		len(instanceUID) != 32 || len(configRevisionID) != 36 ||
 		utf8.RuneCountInString(idempotencyKey) > 128 {
@@ -151,7 +151,7 @@ func (s *Store) PublishAgentConfig(ctx context.Context, orgID, instanceUID, conf
 }
 
 // lockAgentForReleaseTx serializes publications targeting the same Agent.
-func lockAgentForReleaseTx(tx *gorm.DB, orgID, instanceUID string) (AgentRecord, error) {
+func lockAgentForReleaseTx(tx *gorm.DB, orgID int64, instanceUID string) (AgentRecord, error) {
 	var agent AgentRecord
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("org_id = ? AND instance_uid = ?", orgID, instanceUID).
@@ -304,7 +304,7 @@ func publishAgentConfigTx(tx *gorm.DB, agent AgentRecord, orgID, instanceUID, co
 	return nil
 }
 
-func (s *Store) GetAgentAssignment(ctx context.Context, orgID, instanceUID string) (AgentAssignmentRecord, error) {
+func (s *Store) GetAgentAssignment(ctx context.Context, orgID int64, instanceUID string) (AgentAssignmentRecord, error) {
 	var a AgentAssignmentRecord
 	err := s.db.WithContext(ctx).Where("org_id = ? AND instance_uid = ?", orgID, instanceUID).Take(&a).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

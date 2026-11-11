@@ -25,7 +25,7 @@ type PolicyRolloutFilter struct {
 
 // PublishPolicyRollout selects a bounded inventory snapshot and freezes matching
 // Java Agents in the existing P3.1 atomic rollout transaction.
-func (s *Store) PublishPolicyRollout(ctx context.Context, org, actor, policyRevisionID string,
+func (s *Store) PublishPolicyRollout(ctx context.Context, org int64, actor, policyRevisionID string,
 	filter PolicyRolloutFilter, batchSize int, key string) (RolloutView, error) {
 	// 1. 拒绝非法 Org、Revision 和候选筛选范围，不接受隐式截断。
 	if !policyIdentityOK(org, actor) || len(policyRevisionID) != 36 ||

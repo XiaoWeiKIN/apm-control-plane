@@ -19,7 +19,7 @@ import (
 // Credential is loaded from secret environment variables, never from public YAML.
 type Credential struct {
 	ID    string `json:"id"`
-	OrgID string `json:"org_id"`
+	OrgID int64 `json:"org_id"`
 	Token string `json:"token"`
 }
 
@@ -177,11 +177,8 @@ func (c Config) Validate() error {
 	seenID, seenToken := map[string]bool{}, map[string]bool{}
 	for _, credentials := range [][]Credential{c.AgentCredentials, c.AdminCredentials} {
 		for _, cred := range credentials {
-			if cred.ID == "" || cred.OrgID == "" || len(cred.Token) < 16 {
-				return fmt.Errorf("credentials require nonempty id/org and token length >= 16")
-			}
-			if utf8.RuneCountInString(cred.OrgID) > 96 {
-				return fmt.Errorf("credential org_id must not exceed 96 characters")
+			if cred.ID == "" || cred.OrgID <= 0 || len(cred.Token) < 16 {
+				return fmt.Errorf("credentials require nonempty id, positive org_id and token length >= 16")
 			}
 			if utf8.RuneCountInString(cred.ID) > 128 {
 				return fmt.Errorf("credential id must not exceed 128 characters")

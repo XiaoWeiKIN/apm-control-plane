@@ -19,9 +19,9 @@ import (
 
 // PublishAgentPolicy atomically resolves a selected Java policy, compiles a
 // ConfigRevision and publishes a single-Agent Desired assignment.
-func (s *Store) PublishAgentPolicy(ctx context.Context, orgID, instanceUID, expectedPolicyRevisionID, requestedBy, idempotencyKey string) (ReleaseResult, error) {
+func (s *Store) PublishAgentPolicy(ctx context.Context, orgID int64, instanceUID, expectedPolicyRevisionID, requestedBy, idempotencyKey string) (ReleaseResult, error) {
 	// 1. 校验可信 Org、目标身份与期望 PolicyRevision，非法输入提前失败。
-	if orgID == "" || utf8.RuneCountInString(orgID) > 96 ||
+	if orgID <= 0 ||
 		requestedBy == "" || utf8.RuneCountInString(requestedBy) > 128 ||
 		len(instanceUID) != 32 || len(expectedPolicyRevisionID) != 36 ||
 		utf8.RuneCountInString(idempotencyKey) > 128 {

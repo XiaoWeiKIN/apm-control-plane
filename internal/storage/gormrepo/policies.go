@@ -16,7 +16,7 @@ import (
 )
 
 type PolicyRecord struct {
-	OrgID      string    `gorm:"column:org_id;primaryKey" json:"org_id"`
+	OrgID      int64    `gorm:"column:org_id;primaryKey" json:"org_id"`
 	PolicyID   string    `gorm:"column:policy_id;primaryKey" json:"policy_id"`
 	PolicyType string    `gorm:"column:policy_type" json:"policy_type"`
 	AgentKind  string    `gorm:"column:agent_kind" json:"agent_kind"`
@@ -30,7 +30,7 @@ type PolicyRecord struct {
 func (PolicyRecord) TableName() string { return "policies" }
 
 type PolicyRevisionRecord struct {
-	OrgID            string    `gorm:"column:org_id;primaryKey" json:"org_id"`
+	OrgID            int64    `gorm:"column:org_id;primaryKey" json:"org_id"`
 	PolicyRevisionID string    `gorm:"column:policy_revision_id;primaryKey" json:"policy_revision_id"`
 	PolicyID         string    `gorm:"column:policy_id" json:"policy_id"`
 	RevisionNumber   int64     `gorm:"column:revision_number" json:"revision_number"`
@@ -44,7 +44,7 @@ type PolicyRevisionRecord struct {
 func (PolicyRevisionRecord) TableName() string { return "policy_revisions" }
 
 type PolicyBindingRecord struct {
-	OrgID            string    `gorm:"column:org_id;primaryKey" json:"org_id"`
+	OrgID            int64    `gorm:"column:org_id;primaryKey" json:"org_id"`
 	BindingID        string    `gorm:"column:binding_id;primaryKey" json:"binding_id"`
 	PolicyRevisionID string    `gorm:"column:policy_revision_id" json:"policy_revision_id"`
 	AgentKind        string    `gorm:"column:agent_kind" json:"agent_kind"`
@@ -63,7 +63,7 @@ type PolicyBindingRecord struct {
 func (PolicyBindingRecord) TableName() string { return "policy_bindings" }
 
 type PolicyResolution struct {
-	OrgID            string          `json:"org_id"`
+	OrgID            int64          `json:"org_id"`
 	InstanceUID      string          `json:"instance_uid"`
 	BindingID        string          `json:"binding_id"`
 	PolicyID         string          `json:"policy_id"`
@@ -72,13 +72,13 @@ type PolicyResolution struct {
 	Body             json.RawMessage `json:"body"`
 }
 
-func policyIdentityOK(org, actor string) bool {
-	return org != "" && utf8.RuneCountInString(org) <= 96 &&
+func policyIdentityOK(org int64, actor string) bool {
+	return org > 0 &&
 		actor != "" && utf8.RuneCountInString(actor) <= 128
 }
 
 // CreatePolicy writes the logical identity and its first immutable Java Revision atomically.
-func (s *Store) CreatePolicy(ctx context.Context, org, actor, name string, rate float64) (PolicyRecord, PolicyRevisionRecord, error) {
+func (s *Store) CreatePolicy(ctx context.Context, org int64, actor, name string, rate float64) (PolicyRecord, PolicyRevisionRecord, error) {
 	if !policyIdentityOK(org, actor) || name == "" || utf8.RuneCountInString(name) > 128 {
 		return PolicyRecord{}, PolicyRevisionRecord{}, policy.ErrInvalid
 	}
@@ -114,7 +114,7 @@ func (s *Store) CreatePolicy(ctx context.Context, org, actor, name string, rate 
 }
 
 // CreatePolicyRevision locks the parent Policy rather than MAX(revision)+1 without locking.
-func (s *Store) CreatePolicyRevision(ctx context.Context, org, actor, policyID string, rate float64) (PolicyRevisionRecord, error) {
+func (s *Store) CreatePolicyRevision(ctx context.Context, org int64, actor, policyID string, rate float64) (PolicyRevisionRecord, error) {
 	if !policyIdentityOK(org, actor) || len(policyID) != 36 {
 		return PolicyRevisionRecord{}, policy.ErrInvalid
 	}
@@ -165,7 +165,7 @@ type BindingInput struct {
 	RowVersion       int64           `json:"row_version,omitempty"`
 }
 
-func (s *Store) CreatePolicyBinding(ctx context.Context, org, actor string, in BindingInput) (PolicyBindingRecord, error) {
+func (s *Store) CreatePolicyBinding(ctx context.Context, org int64, actor string, in BindingInput) (PolicyBindingRecord, error) {
 	if !policyIdentityOK(org, actor) || len(in.PolicyRevisionID) != 36 ||
 		in.Priority < math.MinInt32 || in.Priority > math.MaxInt32 {
 		return PolicyBindingRecord{}, policy.ErrInvalid
@@ -198,7 +198,7 @@ func (s *Store) CreatePolicyBinding(ctx context.Context, org, actor string, in B
 	return row, nil
 }
 
-func (s *Store) UpdatePolicyBinding(ctx context.Context, org, actor, bindingID string, in BindingInput) (PolicyBindingRecord, error) {
+func (s *Store) UpdatePolicyBinding(ctx context.Context, org int64, actor, bindingID string, in BindingInput) (PolicyBindingRecord, error) {
 	if !policyIdentityOK(org, actor) || len(bindingID) != 36 || len(in.PolicyRevisionID) != 36 ||
 		in.Priority < math.MinInt32 || in.Priority > math.MaxInt32 || in.RowVersion < 1 || in.RowVersion == math.MaxInt64 {
 		return PolicyBindingRecord{}, policy.ErrInvalid
@@ -253,7 +253,7 @@ type policyBindingCandidate struct {
 }
 
 // policyBindingSnapshot reads enabled bindings once; publishing locks existing rows.
-func (s *Store) policyBindingSnapshot(ctx context.Context, org string, lockBindings bool) ([]policyBindingCandidate, error) {
+func (s *Store) policyBindingSnapshot(ctx context.Context, org int64, lockBindings bool) ([]policyBindingCandidate, error) {
 	var entries []policyBindingCandidate
 	query := s.db.WithContext(ctx).Table("policy_bindings").
 		Select("policy_bindings.binding_id, policy_revisions.policy_id, policy_bindings.policy_revision_id, policy_bindings.scope_type, policy_bindings.selector_json, policy_bindings.priority, policy_revisions.body_sha256").
@@ -307,7 +307,7 @@ func selectPolicyBinding(agent AgentRecord, entries []policyBindingCandidate) (*
 }
 
 // ResolveAgentPolicy is read-only. A matched Policy is never silently published as Desired.
-func (s *Store) ResolveAgentPolicy(ctx context.Context, org, uid string) (PolicyResolution, error) {
+func (s *Store) ResolveAgentPolicy(ctx context.Context, org int64, uid string) (PolicyResolution, error) {
 	agent, err := s.Get(ctx, org, uid)
 	if err != nil {
 		return PolicyResolution{}, err
@@ -316,7 +316,7 @@ func (s *Store) ResolveAgentPolicy(ctx context.Context, org, uid string) (Policy
 }
 
 // Publishing uses the already locked Agent and locks existing Bindings; preview is read-only.
-func (s *Store) resolveAgentPolicy(ctx context.Context, org string, agent AgentRecord, lockBindings bool) (PolicyResolution, error) {
+func (s *Store) resolveAgentPolicy(ctx context.Context, org int64, agent AgentRecord, lockBindings bool) (PolicyResolution, error) {
 	// 1. 校验 Java 类型，不对不支持的 Agent 加载 Binding。
 	if agent.AgentKind != config.JavaAgentKind {
 		return PolicyResolution{}, ErrUnsupportedReleaseTarget

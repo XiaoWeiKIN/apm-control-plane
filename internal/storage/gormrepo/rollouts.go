@@ -35,7 +35,7 @@ type RolloutTarget struct {
 }
 
 type RolloutView struct {
-	OrgID               string          `json:"org_id"`
+	OrgID               int64          `json:"org_id"`
 	ReleaseID           string          `json:"release_id"`
 	Status              string          `json:"status"`
 	RowVersion          int64           `json:"row_version"`
@@ -64,14 +64,14 @@ type rollbackIntent struct {
 
 // PublishRollout freezes an explicitly bounded target set and activates batch 0
 // in one transaction. Later batches remain QUEUED without changing Desired.
-func (s *Store) PublishRollout(ctx context.Context, org, actor, configID string, uids []string, batchSize int, key string) (RolloutView, error) {
+func (s *Store) PublishRollout(ctx context.Context, org int64, actor, configID string, uids []string, batchSize int, key string) (RolloutView, error) {
 	return s.publishRollout(ctx, org, actor, configID, uids, batchSize, key, nil)
 }
 
 // publishRollout reuses the P3.1 transaction for a compensating Release.
-func (s *Store) publishRollout(ctx context.Context, org, actor, configID string, uids []string, batchSize int, key string, rollback *rollbackIntent) (RolloutView, error) {
+func (s *Store) publishRollout(ctx context.Context, org int64, actor, configID string, uids []string, batchSize int, key string, rollback *rollbackIntent) (RolloutView, error) {
 	// 1. 在开事务前规范化目标，拒绝重复 UID、无界批量和无效作用域。
-	if org == "" || utf8.RuneCountInString(org) > 96 ||
+	if org <= 0 ||
 		actor == "" || utf8.RuneCountInString(actor) > 128 ||
 		len(configID) != 36 || utf8.RuneCountInString(key) > 128 ||
 		len(uids) < 2 || len(uids) > maxRolloutTargets || batchSize < 1 || batchSize > len(uids) {
@@ -314,7 +314,7 @@ func (s *Store) publishRollout(ctx context.Context, org, actor, configID string,
 
 // AdvanceRollout starts exactly the next frozen batch after all earlier targets
 // are APPLIED. It never activates a partial batch after a stale Generation.
-func (s *Store) AdvanceRollout(ctx context.Context, org, releaseID, actor string) (RolloutView, error) {
+func (s *Store) AdvanceRollout(ctx context.Context, org int64, releaseID, actor string) (RolloutView, error) {
 	if !policyIdentityOK(org, actor) || len(releaseID) != 36 {
 		return RolloutView{}, ErrInvalidRollout
 	}
@@ -508,7 +508,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, org, releaseID, actor string
 	return result, err
 }
 
-func rolloutAssignTx(tx *gorm.DB, org, uid, releaseID, configID, hash string,
+func rolloutAssignTx(tx *gorm.DB, org int64, uid, releaseID, configID, hash string,
 	generation int64, current *AgentAssignmentRecord, actor string, now time.Time) error {
 	if current == nil {
 		return tx.Create(&AgentAssignmentRecord{
@@ -586,7 +586,7 @@ func supersedePreviousTargetTx(tx *gorm.DB, current AgentAssignmentRecord, actor
 		current.DesiredGeneration, "ROLLOUT_PAUSED", actor, now)
 }
 
-func rolloutEventTx(tx *gorm.DB, org, releaseID, uid string, generation int64,
+func rolloutEventTx(tx *gorm.DB, org int64, releaseID, uid string, generation int64,
 	eventType, actor string, now time.Time) error {
 	id, err := newReleaseUUID()
 	if err != nil {
@@ -645,7 +645,7 @@ func rolloutViewTx(tx *gorm.DB, release ConfigReleaseRecord) (RolloutView, error
 
 // ResumeRollout only clears PAUSED after a matching explicit Admin CAS.
 // No failed or superseded Target is silently retried or replaced.
-func (s *Store) ResumeRollout(ctx context.Context, org, releaseID, actor string, expectedVersion int64) (RolloutView, error) {
+func (s *Store) ResumeRollout(ctx context.Context, org int64, releaseID, actor string, expectedVersion int64) (RolloutView, error) {
 	if !policyIdentityOK(org, actor) || len(releaseID) != 36 || expectedVersion < 1 {
 		return RolloutView{}, ErrInvalidRollout
 	}
@@ -756,7 +756,7 @@ func (s *Store) ResumeRollout(ctx context.Context, org, releaseID, actor string,
 	return result, err
 }
 
-func (s *Store) GetRollout(ctx context.Context, org, releaseID string) (RolloutView, error) {
+func (s *Store) GetRollout(ctx context.Context, org int64, releaseID string) (RolloutView, error) {
 	var release ConfigReleaseRecord
 	err := s.db.WithContext(ctx).Where("org_id = ? AND release_id = ?", org, releaseID).Take(&release).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
