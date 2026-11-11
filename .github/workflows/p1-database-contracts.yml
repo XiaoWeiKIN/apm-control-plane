@@ -75,7 +75,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: datafoxlabs/datafox-schema
-          ref: refactor/controlplane-schema-migration
+          ref: 4e2b4880a4dde3c4d9573a5dd76200f5a4284fbd
           token: ${{ secrets.DATAFOX_SCHEMA_READ_TOKEN }}
           path: .datafox-schema
       - name: Build DataFox Schema CLI
