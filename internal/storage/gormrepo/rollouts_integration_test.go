@@ -62,7 +62,7 @@ func TestFrozenBatchRolloutPostgresAndMySQL(t *testing.T) {
 				[]string{uids[0], newUID(t)}, 1, ""); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("unknown Agent accepted: %v", err)
 			}
-			if _, err := store.PublishRollout(ctx, "other-org", "admin",
+			if _, err := store.PublishRollout(ctx, fixtureOrgID("other-org"), "admin",
 				revision.ConfigRevisionID, uids, 2, ""); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("cross-org targets leaked: %v", err)
 			}
@@ -188,7 +188,7 @@ func TestFrozenBatchRolloutPostgresAndMySQL(t *testing.T) {
 			if err != nil || done.Status != "COMPLETED" {
 				t.Fatalf("rollout not completed by matching ACKs: %+v %v", done, err)
 			}
-			if _, err := store.GetRollout(ctx, "other-org", batch.ReleaseID); !errors.Is(err, ErrRolloutNotFound) {
+			if _, err := store.GetRollout(ctx, fixtureOrgID("other-org"), batch.ReleaseID); !errors.Is(err, ErrRolloutNotFound) {
 				t.Fatalf("cross-org rollout read: %v", err)
 			}
 			// 已完成发布记录为历史状态；后续直接发布不能反向修改 APPLIED 证明。

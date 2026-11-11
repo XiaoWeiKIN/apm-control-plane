@@ -60,7 +60,7 @@ func TestExplicitRollbackPostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.PublishRollback(ctx, "other-org", "admin", source.ReleaseID,
+			if _, err := store.PublishRollback(ctx, fixtureOrgID("other-org"), "admin", source.ReleaseID,
 				oldConfig.ConfigRevisionID, source.RowVersion, 1, ""); !errors.Is(err, ErrRolloutNotFound) {
 				t.Fatalf("cross-org rollback: %v", err)
 			}

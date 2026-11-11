@@ -60,7 +60,7 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			}
 
 			// 1. 未命中、跨 Org 和过期预览均不得创建 ConfigRevision。
-			if _, err := store.PublishAgentPolicy(ctx, "other-org", uid,
+			if _, err := store.PublishAgentPolicy(ctx, fixtureOrgID("other-org"), uid,
 				revision.PolicyRevisionID, "admin", ""); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("cross-org release accepted: %v", err)
 			}

@@ -63,7 +63,7 @@ func TestSingleAgentReleaseContractPostgresAndMySQL(t *testing.T) {
 			key := "release-" + id[:16]
 
 			// Org and ConfigRevision mismatches cannot create release rows.
-			if _, err := store.PublishAgentConfig(ctx, "other-org", id, revision1.ConfigRevisionID, "admin-a", ""); !errors.Is(err, ErrNotFound) {
+			if _, err := store.PublishAgentConfig(ctx, fixtureOrgID("other-org"), id, revision1.ConfigRevisionID, "admin-a", ""); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("cross-org Agent access: %v", err)
 			}
 			if _, err := store.PublishAgentConfig(ctx, p.OrgID, newUID(t), revision1.ConfigRevisionID, "admin-a", ""); !errors.Is(err, ErrNotFound) {
@@ -201,7 +201,7 @@ func TestSingleAgentReleaseContractPostgresAndMySQL(t *testing.T) {
 			if err != nil || restored.ReleaseID != current.ReleaseID || restored.DesiredGeneration != 4 {
 				t.Fatalf("restart lost Desired: %+v %v", restored, err)
 			}
-			if _, err := store.GetAgentAssignment(ctx, "other-org", id); !errors.Is(err, ErrNotFound) {
+			if _, err := store.GetAgentAssignment(ctx, fixtureOrgID("other-org"), id); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("cross-org assignment leaked: %v", err)
 			}
 		})

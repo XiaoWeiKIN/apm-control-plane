@@ -43,7 +43,7 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 			}
 
 			// Org must be scoped by trusted principal, never by the selector.
-			if _, err := store.ResolveAgentPolicy(ctx, "other-org", id); !errors.Is(err, ErrNotFound) {
+			if _, err := store.ResolveAgentPolicy(ctx, fixtureOrgID("other-org"), id); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("cross Org inventory access: %v", err)
 			}
 			if _, err := store.ResolveAgentPolicy(ctx, p.OrgID, id); !errors.Is(err, policy.ErrNotFound) {
@@ -66,7 +66,7 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.CreatePolicyRevision(ctx, "other-org", "admin", base.PolicyID, 0.5); !errors.Is(err, policy.ErrNotFound) {
+			if _, err := store.CreatePolicyRevision(ctx, fixtureOrgID("other-org"), "admin", base.PolicyID, 0.5); !errors.Is(err, policy.ErrNotFound) {
 				t.Fatalf("cross-org revision creation: %v", err)
 			}
 			createBinding := func(revisionID, scope string, selector policy.Selector, priority int) PolicyBindingRecord {
@@ -108,12 +108,12 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 			if _, err := store.UpdatePolicyBinding(ctx, p.OrgID, "admin", "11111111-1111-4111-8111-111111111111", update); !errors.Is(err, policy.ErrNotFound) {
 				t.Fatalf("missing binding should be 404: %v", err)
 			}
-			_, foreignRevision, err := store.CreatePolicy(ctx, "other-org", "admin", "foreign", 0.2)
+			_, foreignRevision, err := store.CreatePolicy(ctx, fixtureOrgID("other-org"), "admin", "foreign", 0.2)
 			if err != nil {
 				t.Fatal(err)
 			}
 			update.PolicyRevisionID = foreignRevision.PolicyRevisionID
-			if _, err := store.UpdatePolicyBinding(ctx, "other-org", "admin", serviceBinding.BindingID, update); !errors.Is(err, policy.ErrNotFound) {
+			if _, err := store.UpdatePolicyBinding(ctx, fixtureOrgID("other-org"), "admin", serviceBinding.BindingID, update); !errors.Is(err, policy.ErrNotFound) {
 				t.Fatalf("cross-Org binding should be 404: %v", err)
 			}
 			// Concurrent callers cannot overwrite a newer Binding row_version.

@@ -78,10 +78,10 @@ func TestRepositoryContractPostgresAndMySQL(t *testing.T) {
 				t.Fatalf("wrong identity collision: %v", err)
 			}
 			// A different org must never see or overwrite this agent.
-			if _, err := store.Get(ctx, "team-beta", uid); !errors.Is(err, ErrNotFound) {
+			if _, err := store.Get(ctx, fixtureOrgID("team-beta"), uid); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("cross-org read: %v", err)
 			}
-			list, err := store.List(ctx, "team-beta")
+			list, err := store.List(ctx, fixtureOrgID("team-beta"))
 			if err != nil || len(list) != 0 {
 				t.Fatalf("cross-org listing: %+v %v", list, err)
 			}

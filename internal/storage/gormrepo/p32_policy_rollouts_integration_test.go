@@ -80,7 +80,7 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 			}
 
 			filter := PolicyRolloutFilter{Environment: "prod", ServiceName: "checkout"}
-			if _, err := store.PublishPolicyRollout(ctx, "other-org", "admin",
+			if _, err := store.PublishPolicyRollout(ctx, fixtureOrgID("other-org"), "admin",
 				selected.PolicyRevisionID, filter, 1, ""); !errors.Is(err, policy.ErrNotFound) {
 				t.Fatalf("cross-org policy release accepted: %v", err)
 			}
@@ -253,7 +253,7 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 			if err != nil || done.Status != "COMPLETED" {
 				t.Fatalf("rollout not completed: %+v %v", done, err)
 			}
-			if _, err := store.ResumeRollout(ctx, "other-org", created.ReleaseID, "admin", done.RowVersion); !errors.Is(err, ErrRolloutNotFound) {
+			if _, err := store.ResumeRollout(ctx, fixtureOrgID("other-org"), created.ReleaseID, "admin", done.RowVersion); !errors.Is(err, ErrRolloutNotFound) {
 				t.Fatalf("cross-org resume leaked: %v", err)
 			}
 			if _, err := store.ResumeRollout(ctx, org, created.ReleaseID, "admin", done.RowVersion); !errors.Is(err, ErrRolloutBlocked) {
