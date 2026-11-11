@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"hash/fnv"
 	"os"
 	"strings"
 	"testing"
@@ -15,6 +16,13 @@ import (
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/appconfig"
 	"github.com/XiaoWeiKIN/apm-control-plane/internal/auth"
 )
+
+// fixtureOrgID maps named integration scenarios to stable numeric platform Org IDs.
+func fixtureOrgID(label string) int64 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(label))
+	return int64(h.Sum32()) + 1
+}
 
 func newUID(t *testing.T) string {
 	t.Helper()
@@ -43,7 +51,7 @@ func TestRepositoryContractPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			uid := newUID(t)
-			p := auth.Principal{OrgID: "team-alpha", CredentialID: "cred-a"}
+			p := auth.Principal{OrgID: fixtureOrgID("team-alpha"), CredentialID: "cred-a"}
 			obs := Observation{
 				SeenAt: time.Now().UTC(), Transport: "http", Capabilities: 3,
 				Description: &Description{Kind: "java-apm", Distribution: "example-java", DistributionVersion: "1.2.3", Service: "checkout", ServiceVersion: "9.4.1"},
@@ -65,7 +73,7 @@ func TestRepositoryContractPostgresAndMySQL(t *testing.T) {
 				t.Fatalf("lost compressed state: %+v", updated)
 			}
 			// UID ownership stays bound to the credential that registered it.
-			_, err = store.Observe(ctx, auth.Principal{OrgID: "team-alpha", CredentialID: "cred-b"}, uid, obs)
+			_, err = store.Observe(ctx, auth.Principal{OrgID: fixtureOrgID("team-alpha"), CredentialID: "cred-b"}, uid, obs)
 			if !errors.Is(err, ErrOwnership) {
 				t.Fatalf("wrong identity collision: %v", err)
 			}
@@ -117,7 +125,7 @@ func TestInvalidObservationNeverPersists(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			p := auth.Principal{OrgID: "test-org", CredentialID: "test-credential"}
+			p := auth.Principal{OrgID: fixtureOrgID("test-org"), CredentialID: "test-credential"}
 			for _, tc := range []struct {
 				name string
 				obs  Observation

@@ -34,8 +34,7 @@ func TestFrozenBatchRolloutPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			org := "p3-rollout-contract"
-			p := auth.Principal{OrgID: org, CredentialID: "java-owner"}
+			org := fixtureOrgID("p3-rollout-contract")p := auth.Principal{OrgID: org, CredentialID: "java-owner"}
 			uids := []string{newUID(t), newUID(t), newUID(t), newUID(t)}
 			for _, uid := range uids {
 				if _, err := store.Observe(ctx, p, uid, Observation{
@@ -238,8 +237,7 @@ func TestRolloutStopAndRollbackPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			org := "p3-rollback-contract"
-			p := auth.Principal{OrgID: org, CredentialID: "agent"}
+			org := fixtureOrgID("p3-rollback-contract")p := auth.Principal{OrgID: org, CredentialID: "agent"}
 			uids := []string{newUID(t), newUID(t), newUID(t)}
 			for _, uid := range uids {
 				if _, err := store.Observe(ctx, p, uid, Observation{
@@ -362,7 +360,7 @@ func TestSupersededActiveRolloutPausesPostgresAndMySQL(t *testing.T) {
 				}
 				defer store.Close()
 
-				org := "p3-supersede-" + mode
+				org := fixtureOrgID("p3-supersede-"+ mode)
 				owner := auth.Principal{OrgID: org, CredentialID: "agent"}
 				uids := []string{newUID(t), newUID(t), newUID(t)}
 				for _, uid := range uids {

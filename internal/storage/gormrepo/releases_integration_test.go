@@ -40,7 +40,7 @@ func TestSingleAgentReleaseContractPostgresAndMySQL(t *testing.T) {
 				}
 			}()
 			id := newUID(t)
-			p := auth.Principal{OrgID: "release-org", CredentialID: "java-agent"}
+			p := auth.Principal{OrgID: fixtureOrgID("release-org"), CredentialID: "java-agent"}
 			obs := Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",
 				Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus |
@@ -222,7 +222,7 @@ func TestUnsupportedReleaseDoesNotCreateAssignment(t *testing.T) {
 			}
 			defer store.Close()
 			id := newUID(t)
-			p := auth.Principal{OrgID: "reject-org", CredentialID: "nonjava-agent"}
+			p := auth.Principal{OrgID: fixtureOrgID("reject-org"), CredentialID: "nonjava-agent"}
 			if _, err := store.Observe(ctx, p, id, Observation{SeenAt: time.Now().UTC(), Transport: "http", Capabilities: 3, Description: &Description{Kind: "go-apm"}}); err != nil {
 				t.Fatal(err)
 			}
@@ -257,8 +257,7 @@ func TestReleaseIdempotencyKeyAcrossConcurrentTargets(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			org := "concurrent-idempotency-org"
-			uidA, uidB := newUID(t), newUID(t)
+			org := fixtureOrgID("concurrent-idempotency-org")uidA, uidB := newUID(t), newUID(t)
 			for _, id := range []string{uidA, uidB} {
 				if _, err := store.Observe(ctx, auth.Principal{OrgID: org, CredentialID: "owner"},
 					id, Observation{

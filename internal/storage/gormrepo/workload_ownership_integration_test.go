@@ -35,7 +35,7 @@ func TestSharedWorkloadCredentialPostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 
-			org := "workload-" + tc.driver + "-" + newUID(t)
+			org := fixtureOrgID("workload-"+ tc.driver + "-" + newUID(t))
 			owner := auth.Principal{OrgID: org, CredentialID: "shared-credential"}
 			observation := Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",
@@ -72,7 +72,7 @@ func TestSharedWorkloadCredentialPostgresAndMySQL(t *testing.T) {
 			}
 
 			// 3. 相同 UID 在另一 Org 独立，不能覆盖原 Org 的归属。
-			foreign := auth.Principal{OrgID: org + "-other", CredentialID: "foreign-credential"}
+			foreign := auth.Principal{OrgID: org + 1, CredentialID: "foreign-credential"}
 			record, err := store.Observe(ctx, foreign, uids[0], spoofed)
 			if err != nil || record.CredentialID != foreign.CredentialID || record.ServiceName != "spoofed" {
 				t.Fatalf("same UID in distinct Org: %+v %v", record, err)

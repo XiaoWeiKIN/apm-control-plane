@@ -34,7 +34,7 @@ func TestPolicyResolutionPostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 
-			p := auth.Principal{OrgID: "policy-resolution-contract", CredentialID: "java-owner"}
+			p := auth.Principal{OrgID: fixtureOrgID("policy-resolution-contract"), CredentialID: "java-owner"}
 			id := newUID(t)
 			capability := uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig)
 			if _, err := store.Observe(ctx, p, id, Observation{SeenAt: time.Now().UTC(), Transport: "http",

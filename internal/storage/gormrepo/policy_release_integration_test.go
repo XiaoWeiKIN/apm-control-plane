@@ -36,8 +36,7 @@ func TestPolicyReleaseAtomicPostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 
-			org := "p25-policy-release"
-			uid := newUID(t)
+			org := fixtureOrgID("p25-policy-release")uid := newUID(t)
 			owner := auth.Principal{OrgID: org, CredentialID: "java-agent"}
 			if _, err := store.Observe(ctx, owner, uid, Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",

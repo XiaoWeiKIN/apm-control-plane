@@ -33,7 +33,7 @@ func TestConcurrentReleaseAndACKPreservesLatestDesiredPostgresAndMySQL(t *testin
 				t.Fatal(err)
 			}
 			defer store.Close()
-			p := auth.Principal{OrgID: "ack-race-org", CredentialID: "java-agent"}
+			p := auth.Principal{OrgID: fixtureOrgID("ack-race-org"), CredentialID: "java-agent"}
 			uid := newUID(t)
 			if _, err := store.Observe(ctx, p, uid, Observation{
 				SeenAt: time.Now().UTC(), Transport: "websocket",
@@ -116,7 +116,7 @@ func TestFailedACKPersistsReleaseDiagnosticsPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			org, uid := "failed-ack-diagnostics", newUID(t)
+			org, uid := fixtureOrgID("failed-ack-diagnostics"), newUID(t)
 			if _, err := store.Observe(ctx, auth.Principal{OrgID: org, CredentialID: "java-agent"},
 				uid, Observation{
 					SeenAt: time.Now().UTC(), Transport: "http",

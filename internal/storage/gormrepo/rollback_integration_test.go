@@ -34,7 +34,7 @@ func TestExplicitRollbackPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			const org = "p33-rollback-contract"
+			org := fixtureOrgID("p33-rollback-contract")
 			p := auth.Principal{OrgID: org, CredentialID: "agent"}
 			uids := []string{newUID(t), newUID(t), newUID(t)}
 			for _, uid := range uids {
@@ -161,7 +161,7 @@ func TestRollbackAuditFailureIsAtomicPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			const org = "p33-rollback-audit"
+			org := fixtureOrgID("p33-rollback-audit")
 			p := auth.Principal{OrgID: org, CredentialID: "agent"}
 			uids := []string{newUID(t), newUID(t)}
 			for _, uid := range uids {
@@ -237,7 +237,7 @@ func TestRollbackBlocksSourceProgressPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			const org = "p33-rollback-block-source"
+			org := fixtureOrgID("p33-rollback-block-source")
 			uids := []string{newUID(t), newUID(t)}
 			for _, uid := range uids {
 				if _, err := store.Observe(ctx, auth.Principal{OrgID: org, CredentialID: "agent"}, uid,
@@ -310,7 +310,7 @@ func TestConcurrentRollbackAndAdvancePostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			const org = "p33-rollback-advance-race"
+			org := fixtureOrgID("p33-rollback-advance-race")
 			uids := []string{newUID(t), newUID(t)}
 			for _, uid := range uids {
 				if _, err := store.Observe(ctx, auth.Principal{OrgID: org, CredentialID: "agent"}, uid,
@@ -408,7 +408,7 @@ func TestConcurrentRollbackIdempotencyPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			const org = "p33-rollback-idempotent-race"
+			org := fixtureOrgID("p33-rollback-idempotent-race")
 			uids := []string{newUID(t), newUID(t)}
 			for _, uid := range uids {
 				if _, err := store.Observe(ctx, auth.Principal{OrgID: org, CredentialID: "agent"}, uid,
