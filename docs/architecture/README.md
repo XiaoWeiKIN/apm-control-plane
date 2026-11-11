@@ -2,7 +2,7 @@
 
 > 面向贡献者和维护者的技术说明。本文介绍系统的整体结构、核心概念、控制流程、状态与接口边界，并为实现和扩展提供源码入口。
 >
-> **文档状态**：开发者技术说明，已按 2026-10-20 合并的 P1.1 Workspace-scoped Inventory 和 [DD-001 设计草案](../design-docs/dd-001_opamp-control-plane.md) 对照更新。文中的 **现状** 表示仓库已有代码或测试；**目标设计** 表示尚待实施或批准的方案；**未来扩展** 表示不在 EP-001 验收范围内的能力。本文件不是新的受治理 DD，不替代 DD-001 的批准流程，也不是已接受的 ADR。
+> **文档状态**：开发者技术说明，已按 2026-10-20 合并的 P1.1 Org-scoped Inventory 和 [DD-001 设计草案](../design-docs/dd-001_opamp-control-plane.md) 对照更新。文中的 **现状** 表示仓库已有代码或测试；**目标设计** 表示尚待实施或批准的方案；**未来扩展** 表示不在 EP-001 验收范围内的能力。本文件不是新的受治理 DD，不替代 DD-001 的批准流程，也不是已接受的 ADR。
 >
 > **主要读者**：熟悉 Go、OpenTelemetry 或可观测性系统，准备维护 OpAMP 接入、Agent Inventory、远程配置与策略发布模块的工程师。
 
@@ -10,7 +10,7 @@
 
 第一次接触本项目，建议依次阅读「系统概览 → 三条主要流程 → 核心概念 → 模块与契约」。准备开发新功能时，再阅读「并发与一致性 → 安全与故障 → 扩展一个 Agent 类型 → 源码地图」。
 
-核心模块职责、状态归属、Go Package 边界与 P2 开发顺序以 [核心模块与职责边界](modules.md) 为阅读入口；数据库字段、关系与 CAS 约束以 [Workspace Schema](storage-schema.md) 为准。已经采用的 Koanf/GORM/Goose 见 [P1–P3 技术选型](technology-selection.md)。这些开发者文档不替代 DD-001 的正式审批。
+核心模块职责、状态归属、Go Package 边界与 P2 开发顺序以 [核心模块与职责边界](modules.md) 为阅读入口；数据库字段、关系与 CAS 约束以 [Org Schema](storage-schema.md) 为准。历史选型与已迁移至 storekit/DataFox Schema 的差异见 [P1–P3 技术选型](technology-selection.md)。这些开发者文档不替代 DD-001 的正式审批。
 
 本项目的业务需求以 [FR-001～FR-013](../requirements/APM_CONTROL_PLANE.md) 为准；架构审批与版本身份由 [DD-001](../design-docs/dd-001_opamp-control-plane.md) 管理；里程碑和验证由 [EP-001](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md) 管理。
 
@@ -65,7 +65,7 @@ flowchart TB
     Collector --> Backend["APM Backend / ClickHouse"]
 ~~~
 
-上图描述**P1–P3 目标拓扑**，不是所有模块都已部署。P1.1 已通过 GORM/Goose 在 PostgreSQL 和 MySQL 上实现持久化 Agent Registry；Policy Release 与 Reconciler 仍未实现。Workspace 是可观测平台统一的工作空间边界，当前 P1.1 的作用域来自受信的部署凭证配置，平台 Workspace/IAM 联通还未完成。所谓“未来 Collector”是**被管理对象**，不能与图中的 OTLP Receiver 自动视为同一个实例。
+上图描述**P1–P3 目标拓扑**，不是所有模块都已部署。P1.1 Agent Registry 已通过 GORM 在 PostgreSQL 和 MySQL 上实现持久化，当前数据库初始化由 DataFox Schema DSL 负责；Policy Release 与 Reconciler 仍未实现。Org 是可观测平台统一的数值型组织边界（int64 / BIGINT），当前 P1.1 的作用域来自受信的部署凭证配置，平台 Org/IAM 联通还未完成。所谓“未来 Collector”是**被管理对象**，不能与图中的 OTLP Receiver 自动视为同一个实例。
 
 ## 2. 从一次采样策略发布理解系统
 
@@ -116,8 +116,8 @@ sequenceDiagram
 
 | 概念 | 标识和生命周期 | 职责与边界 |
 | --- | --- | --- |
-| **Workspace / Principal** | 经认证的组织/调用者范围 | 决定可以查看、控制哪些 Agent；不得从客户端自报的 `service.name` 推导 |
-| **Service** | Workspace + Environment + Namespace/Name | 业务工作负载分组；一个 Service 可以关联多个 APM Agent；Collector 不必映射为 Java Service |
+| **Org / Principal** | 经认证的组织/调用者范围 | 决定可以查看、控制哪些 Agent；不得从客户端自报的 `service.name` 推导 |
+| **Service** | Org + Environment + Namespace/Name | 业务工作负载分组；一个 Service 可以关联多个 APM Agent；Collector 不必映射为 Java Service |
 | **Agent Instance** | OpAMP `instance_uid`，限定在已认证范围内 | 某个运行中的被管理 Agent；UID 按协议是 16 字节，并非长期资产或授权凭据 |
 | **Agent Session** | 一次 WS 会话或 HTTP 请求上下文 | 短生命周期通信状态。HTTP 活跃程度由最近轮询时间推断，不能当作长连接 |
 | **Agent Kind** | `java-apm` / `go-apm` / `python-apm` / `otel-collector` 等平台标识 | 选择元数据规则和配置 Adapter；仅是类型，不代表已经支持该配置能力 |
@@ -141,7 +141,7 @@ OpenTelemetry [Instrumentation Agent Guidelines](https://github.com/open-telemet
 
 建议使用 **Go 模块化单体（modular monolith）**。模块名称表示代码职责，不要求每个模块都是独立服务。只在容量、发布节奏或会话所有权有实测依据时拆部署单元。
 
-**模块所有权与实施合同统一见 [核心模块与职责边界](modules.md)**：六个主要功能是 Registry、OpAMP Gateway、Policy、Config、Release、Reconciler；Workspace/Auth、Management API 和 Storage 为三个支撑模块。AgentConfigAdapter 属于 Config，Rollout 属于 Release。下表是概览，不能把模块名或逻辑表名自动映射成独立服务/Repository。
+**模块所有权与实施合同统一见 [核心模块与职责边界](modules.md)**：六个主要功能是 Registry、OpAMP Gateway、Policy、Config、Release、Reconciler；Org/Auth、Management API 和 Storage 为三个支撑模块。AgentConfigAdapter 属于 Config，Rollout 属于 Release。下表是概览，不能把模块名或逻辑表名自动映射成独立服务/Repository。
 
 | 逻辑模块 | 输入 | 负责的状态与行为 | 不负责 |
 | --- | --- | --- | --- |
@@ -286,7 +286,7 @@ Global Default
             └── Instance Override（具备 TTL 与审计）
 ```
 
-Resolver 首先检查 Workspace 授权与 Agent Kind，再选择该目标唯一适用的策略集合。一个 Agent 可能匹配多条规则，因此必须定义稳定优先级并拒绝同级冲突，不能取 Go Map 遍历中的“第一个”。
+Resolver 首先检查 Org 授权与 Agent Kind，再选择该目标唯一适用的策略集合。一个 Agent 可能匹配多条规则，因此必须定义稳定优先级并拒绝同级冲突，不能取 Go Map 遍历中的“第一个”。
 
 首期仅 Java Sampling Adapter 消费 Sampling Policy；如果目标为 Collector，即使它宣告 `AcceptsRemoteConfig`，也不能收到 `apm/sampling.json`。其他 Runtime 的配置方式、重启要求和编译器要单独扩展。
 
@@ -384,13 +384,13 @@ Rollout Controller 将发布目标分成可审计批次。每批使用匹配 Has
 
 ## 8. 数据与一致性模型（目标设计）
 
-**数据库字段、复合 Workspace 外键、事务/CAS、双方言和迁移路径的详细合同**见 [Workspace Schema 设计](storage-schema.md)：目标共 11 张核心逻辑表与三张按需扩展表，其中目前仅 `agent_instances` 已由 P1.1 持久化。**模块职责与状态归属**见 [核心模块设计](modules.md)。
+**数据库字段、复合 Org 外键、事务/CAS、双方言和迁移路径的详细合同**见 [Org Schema 设计](storage-schema.md)：目标共 11 张核心逻辑表与三张按需扩展表，其中目前仅 `agent_instances` 已由 P1.1 持久化。**模块职责与状态归属**见 [核心模块设计](modules.md)。
 
-一个 Control Plane 部署只选择 PostgreSQL 或 MySQL 中的一种主数据库；GORM 使用统一 Repository，Goose Migration 按数据库方言分别维护。当前只有 `agent_instances(workspace_id, instance_uid)` 已落地。未来的 Policy、ConfigRevision、Release、Target、Assignment 和 Event 都需要以数据库为可靠事实源，活动网络 Connection 则只存在于进程内存。
+一个 Control Plane 部署只选择 PostgreSQL 或 MySQL 中的一种主数据库；GORM 使用统一 Repository，建库由 DataFox Schema DSL 负责。当前 Inventory、Policy、Config Revision、Release、Target、Assignment 和 Event 表均已定义。未来的 Policy、ConfigRevision、Release、Target、Assignment 和 Event 都需要以数据库为可靠事实源，活动网络 Connection 则只存在于进程内存。
 
 逻辑关键约束：
 
-- AgentKey 必须包含被授权的 Workspace 范围，不能把可冲突的客户端 UID 裸值当全局授权键。
+- AgentKey 必须包含被授权的 Org 范围，不能把可冲突的客户端 UID 裸值当全局授权键。
 - PolicyRevision 与 ConfigRevision 不可变；同样 ConfigHash 可以被不同发布复用。
 - 更新 Assignment 的 Desired Version 应带版本检查（CAS/乐观并发），避免较旧 Reconciler 回写覆盖新发布。
 - 一个 Agent 的当前 Assignment 不应由独立的两个发布并发写入；冲突要么明确排队，要么明确失败。
@@ -432,7 +432,7 @@ Rollout Controller 将发布目标分成可审计批次。每批使用匹配 Has
 }
 ```
 
-Server 应先验证调用者是否能控制相应 Workspace/Service，再在授权范围内解析 AgentKind 和 Selector。HTTP 成功响应仅说明发布意图已被持久化，不说明任一 Agent 已应用。
+Server 应先验证调用者是否能控制相应 Org/Service，再在授权范围内解析 AgentKind 和 Selector。HTTP 成功响应仅说明发布意图已被持久化，不说明任一 Agent 已应用。
 
 ### 8.2 不同 Agent Kind 的首期能力矩阵
 
@@ -449,13 +449,13 @@ Server 应先验证调用者是否能控制相应 Workspace/Service，再在授�
 
 远程配置具有修改采集行为、Exporter 目标甚至潜在数据访问范围的能力。OpAMP 规范将 Remote Configuration 视为需要特殊保护的能力。
 
-**P0 事实**：`cmd/server/main.go` 使用两个不同的全局 Bearer Token，默认监听 `127.0.0.1:4320`，并未实现每 Agent/工作空间的可信身份绑定、mTLS、RBAC 或生产 TLS 终止。它只能作为本地 PoC，不能被宣称为生产多工作空间边界。
+**P0 事实**：`cmd/server/main.go` 使用两个不同的全局 Bearer Token，默认监听 `127.0.0.1:4320`，并未实现每 Agent/组织的可信身份绑定、mTLS、RBAC 或生产 TLS 终止。它只能作为本地 PoC，不能被宣称为生产多组织边界。
 
 **目标设计的最低要求**：
 
-1. Management Principal 与 Agent Principal 分离。Admin API 对 Workspace、Service、策略操作执行授权；Agent token/mTLS 身份只被授予限定的实例及所属范围。
+1. Management Principal 与 Agent Principal 分离。Admin API 对 Org、Service、策略操作执行授权；Agent token/mTLS 身份只被授予限定的实例及所属范围。
 2. TLS 保护所有外部网络上的控制连接。若由反向代理终止 TLS，必须防止客户端伪造转发身份头。
-3. 不从 `AgentDescription.service.name`、`service.version`、`host.name` 或 AgentKind 自报信息推导工作空间权限。
+3. 不从 `AgentDescription.service.name`、`service.version`、`host.name` 或 AgentKind 自报信息推导组织权限。
 4. Config Adapter 不得让不兼容的 Agent 接受任意文件格式；Java 专用 JSON 不发送给 Go/Python/Collector 实例。
 5. 发布前校验配置的 Exporter Endpoint、敏感字段和允许的目标。秘密配置需使用单独的加密与轮换机制，避免将凭证直接写进日志或审计事件。
 6. Management API 与 OpAMP Endpoint 应分别进行速率限制、请求大小限制、超时及可审计拒绝处理。
@@ -513,7 +513,7 @@ Agent 凭证最终采用 Scoped Token 还是 mTLS、以及重复 UID 的转移�
 
 | 路径 | 可直接阅读的内容 | 状态 |
 | --- | --- | --- |
-| [`cmd/server/main.go`](../../cmd/server/main.go) | OpAMP Server.Attach、OnConnecting、OnMessage、运行时 Session 和 Workspace-scoped 管理路由 | 已实现 P1.1 |
+| [`cmd/server/main.go`](../../cmd/server/main.go) | OpAMP Server.Attach、OnConnecting、OnMessage、运行时 Session 和 Org-scoped 管理路由 | 已实现 P1.1 |
 | [`cmd/server/main_test.go`](../../cmd/server/main_test.go) | UID、鉴权、采样配置分配与 ACK Hash 测试 | 已有单元测试 |
 | [`cmd/testagent/main.go`](../../cmd/testagent/main.go) | HTTP 轮询测试 Client，验证 JSON 并回报 APPLIED | 测试模拟，不是真实 SDK |
 | [`docs/architecture.md`](../architecture.md) | P0 协议、认证和持久化边界 | 已有事实说明 |
@@ -530,7 +530,7 @@ cmd/
   testagent/                   [已有] OpAMP HTTP 测试 Agent
 internal/
   appconfig/                   [已有] Koanf 启动配置
-  auth/                        [已有] Workspace Credential / Principal
+  auth/                        [已有] Org Credential / Principal
   storage/
     gormrepo/                  [已有] 统一 GORM Repository，PG/MySQL Dialector
   registry/                    [待拆] Agent Instance、Observation
@@ -549,18 +549,18 @@ db/migrations/
 
 ## 13. 本地验证和贡献者交接
 
-### 13.1 复现 Workspace-scoped P1.1
+### 13.1 复现 Org-scoped P1.1
 
-Go 1.25+、本地 PostgreSQL 或 MySQL。先按 [P1.1 运行手册](p1-durable-inventory.md) 执行对应的 Goose 初始化 Migration，再使用受信的 Workspace Credential JSON 配置启动 Server。下面只展示认证变量部分：
+Go 1.25+、本地 PostgreSQL 或 MySQL。先按 [P1.1 运行手册](p1-durable-inventory.md) 通过 DataFox Schema CLI 初始化新数据库，再使用受信的 Org Credential JSON 配置启动 Server。下面只展示认证变量部分：
 
 ```bash
-export APM_AGENT_CREDENTIALS_JSON='[{"id":"dev-agent","workspace_id":"dev-workspace","token":"replace-with-a-long-random-agent-token"}]'
-export APM_ADMIN_CREDENTIALS_JSON='[{"id":"dev-admin","workspace_id":"dev-workspace","token":"replace-with-a-different-long-admin-token"}]'
-# 另需配置 APM_DB_DRIVER 和 APM_DATABASE_DSN，并执行对应 Goose migration
+export APM_AGENT_CREDENTIALS_JSON='[{"id":"dev-agent","org_id":1,"token":"replace-with-a-long-random-agent-token"}]'
+export APM_ADMIN_CREDENTIALS_JSON='[{"id":"dev-admin","org_id":1,"token":"replace-with-a-different-long-admin-token"}]'
+# 另需配置 APM_DB_DRIVER 和 APM_DATABASE_DSN，并执行 DataFox Schema 初始化
 go run ./cmd/server
 ```
 
-`cmd/testagent` 的客户端 Bearer Token 仍通过 `APM_OPAMP_TOKEN` 设置；**该变量不会为服务端创建一个默认 Workspace**。测试客户端与 Admin 请求必须各自使用正确的 Token。服务端只信任认证后的 Workspace 作用域，不会从 AgentDescription 获取授权。
+`cmd/testagent` 的客户端 Bearer Token 仍通过 `APM_OPAMP_TOKEN` 设置；**该变量不会为服务端创建一个默认 Org**。测试客户端与 Admin 请求必须各自使用正确的 Token。服务端只信任认证后的 Org 作用域，不会从 AgentDescription 获取授权。
 
 完整初始化、运行与查询命令以 [P1.1 运行手册](p1-durable-inventory.md) 为准。P0 采样 JSON 模拟回执仍不是 JVM Sampler 热更新证明。
 

@@ -6,6 +6,7 @@ on:
       - "cmd/server/**"
       - "internal/**"
       - "db/migrations/**"
+      - ".github/workflows/p1-database-contracts.yml"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/p1-database-contracts.yml"
@@ -60,17 +61,34 @@ jobs:
         with:
           go-version: '1.25.9'
           cache: true
-      - name: Install pinned Goose
+      - name: Require read access to private DataFox Schema
+        env:
+          SCHEMA_READ_TOKEN: ${{ secrets.DATAFOX_SCHEMA_READ_TOKEN }}
+        run: |
+          if [ -z "$SCHEMA_READ_TOKEN" ]; then
+            echo "DATAFOX_SCHEMA_READ_TOKEN is required for private schema migration tests"
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${SCHEMA_READ_TOKEN}@github.com/".insteadOf "https://github.com/"
+          echo "GOPRIVATE=github.com/datafoxlabs/*" >> "$GITHUB_ENV"
+      - name: Checkout DataFox Schema
+        uses: actions/checkout@v4
+        with:
+          repository: datafoxlabs/datafox-schema
+          ref: 4e2b4880a4dde3c4d9573a5dd76200f5a4284fbd
+          token: ${{ secrets.DATAFOX_SCHEMA_READ_TOKEN }}
+          path: .datafox-schema
+      - name: Build DataFox Schema CLI
+        shell: bash
+        run: python3 .datafox-schema/scripts/build-local.py
+      - name: Initialize PostgreSQL and MySQL via DataFox Schema
         shell: bash
         run: |
           set -euo pipefail
-          go install github.com/pressly/goose/v3/cmd/goose@v3.27.0
-      - name: Migrate PostgreSQL and MySQL schemas
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$HOME/go/bin/goose" -dir db/migrations/postgres postgres "$APM_TEST_POSTGRES_DSN" up
-          "$HOME/go/bin/goose" -dir db/migrations/mysql mysql "$APM_TEST_MYSQL_DSN" up
+          DATAFOX_SCHEMA_DSN="$APM_TEST_POSTGRES_DSN" \
+            .datafox-schema/bin/datafox-schema migrate up --domain=admin
+          DATAFOX_SCHEMA_DSN="mysql://app:testpass@127.0.0.1:3306/controlplane" \
+            .datafox-schema/bin/datafox-schema migrate up --domain=admin
       - name: Exercise identical real-engine repository contracts
         shell: bash
         run: |

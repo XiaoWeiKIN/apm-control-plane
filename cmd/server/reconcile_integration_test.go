@@ -41,17 +41,17 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			workspace := "remote-config-http"
+			org := fixtureOrgID("remote-config-http")
 			rawUID := make([]byte, 16)
 			if _, err := rand.Read(rawUID); err != nil {
 				t.Fatal(err)
 			}
 			uid := hex.EncodeToString(rawUID)
-			p := auth.Principal{WorkspaceID: workspace, CredentialID: "java-owner"}
+			p := auth.Principal{OrgID: org, CredentialID: "java-owner"}
 			reg := newRegistry(store, time.Second)
 			reg.delivery = store
 			gateway, connContext, err := makeGateway(reg, auth.New([]appconfig.Credential{
-				{ID: p.CredentialID, WorkspaceID: workspace, Token: "p23-agent-token-long"},
+				{ID: p.CredentialID, OrgID: org, Token: "p23-agent-token-long"},
 			}), slog.New(slog.NewTextHandler(io.Discard, nil)))
 			if err != nil {
 				t.Fatal(err)
@@ -111,11 +111,11 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rev1, err := store.CreateConfigRevision(ctx, workspace, "admin", snapshot1)
+			rev1, err := store.CreateConfigRevision(ctx, org, "admin", snapshot1)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.PublishAgentConfig(ctx, workspace, uid, rev1.ConfigRevisionID, "admin", ""); err != nil {
+			if _, err := store.PublishAgentConfig(ctx, org, uid, rev1.ConfigRevisionID, "admin", ""); err != nil {
 				t.Fatal(err)
 			}
 			got1 := send(2, nil).RemoteConfig
@@ -133,7 +133,7 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 			if got := send(4, applied1); got.RemoteConfig != nil {
 				t.Fatal("APPLIED config was re-offered")
 			}
-			a, err := store.GetAgentAssignment(ctx, workspace, uid)
+			a, err := store.GetAgentAssignment(ctx, org, uid)
 			if err != nil || a.State != "APPLIED" || a.ObservedHash == nil || *a.ObservedHash != rev1.ConfigHash {
 				t.Fatalf("ACK not persisted: %+v %v", a, err)
 			}
@@ -144,7 +144,7 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 			}); got.RemoteConfig != nil {
 				t.Fatal("unexpected config before retry deadline")
 			}
-			a, err = store.GetAgentAssignment(ctx, workspace, uid)
+			a, err = store.GetAgentAssignment(ctx, org, uid)
 			if err != nil || a.State != "PENDING" {
 				t.Fatalf("regressed Agent report left stale APPLIED state: %+v %v", a, err)
 			}
@@ -152,11 +152,11 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rev2, err := store.CreateConfigRevision(ctx, workspace, "admin", snapshot2)
+			rev2, err := store.CreateConfigRevision(ctx, org, "admin", snapshot2)
 			if err != nil {
 				t.Fatal(err)
 			}
-			rel2, err := store.PublishAgentConfig(ctx, workspace, uid, rev2.ConfigRevisionID, "admin", "")
+			rel2, err := store.PublishAgentConfig(ctx, org, uid, rev2.ConfigRevisionID, "admin", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -164,7 +164,7 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 			if got2 == nil || hex.EncodeToString(got2.ConfigHash) != rev2.ConfigHash {
 				t.Fatalf("stale ACK prevented latest ConfigRevision: %+v", got2)
 			}
-			a, err = store.GetAgentAssignment(ctx, workspace, uid)
+			a, err = store.GetAgentAssignment(ctx, org, uid)
 			if err != nil || a.State != "WAITING_ACK" || a.DesiredGeneration != rel2.DesiredGeneration ||
 				a.ObservedHash == nil || *a.ObservedHash != rev1.ConfigHash {
 				t.Fatalf("stale ACK overwrote new release: %+v %v", a, err)
@@ -174,12 +174,12 @@ func TestDurableRemoteConfigHTTPAckPostgresAndMySQL(t *testing.T) {
 				LastRemoteConfigHash: got2.ConfigHash,
 			}
 			send(7, applied2)
-			a, err = store.GetAgentAssignment(ctx, workspace, uid)
+			a, err = store.GetAgentAssignment(ctx, org, uid)
 			if err != nil || a.State != "APPLIED" || a.DesiredGeneration != rel2.DesiredGeneration {
 				t.Fatalf("latest ACK not converged: %+v %v", a, err)
 			}
-			if config, assigned, err := store.ReconcileAgentConfig(ctx, "different-workspace", uid, nil, true); err != nil || assigned || config != nil {
-				t.Fatalf("cross-workspace config leaked: %+v %t %v", config, assigned, err)
+			if config, assigned, err := store.ReconcileAgentConfig(ctx, fixtureOrgID("different-org"), uid, nil, true); err != nil || assigned || config != nil {
+				t.Fatalf("cross-org config leaked: %+v %t %v", config, assigned, err)
 			}
 		})
 	}

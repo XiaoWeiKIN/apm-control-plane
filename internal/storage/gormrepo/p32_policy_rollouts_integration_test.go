@@ -38,8 +38,8 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 
-			const workspace = "p32-policy-rollout-contract"
-			principal := auth.Principal{WorkspaceID: workspace, CredentialID: "java-owner"}
+			org := fixtureOrgID("p32-policy-rollout-contract")
+			principal := auth.Principal{OrgID: org, CredentialID: "java-owner"}
 			uids := []string{newUID(t), newUID(t), newUID(t), newUID(t), newUID(t)}
 			for i, uid := range uids {
 				service, environment := "checkout", "prod"
@@ -57,22 +57,22 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			_, selected, err := store.CreatePolicy(ctx, workspace, "admin", "checkout-head", 0.2)
+			_, selected, err := store.CreatePolicy(ctx, org, "admin", "checkout-head", 0.2)
 			if err != nil {
 				t.Fatal(err)
 			}
-			binding, err := store.CreatePolicyBinding(ctx, workspace, "admin", BindingInput{
+			binding, err := store.CreatePolicyBinding(ctx, org, "admin", BindingInput{
 				PolicyRevisionID: selected.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 1,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, override, err := store.CreatePolicy(ctx, workspace, "admin", "instance-override", 0.8)
+			_, override, err := store.CreatePolicy(ctx, org, "admin", "instance-override", 0.8)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.CreatePolicyBinding(ctx, workspace, "admin", BindingInput{
+			if _, err := store.CreatePolicyBinding(ctx, org, "admin", BindingInput{
 				PolicyRevisionID: override.PolicyRevisionID, ScopeType: policy.ScopeInstance,
 				Selector: policy.Selector{InstanceUID: uids[2]}, Priority: 1,
 			}); err != nil {
@@ -80,15 +80,15 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 			}
 
 			filter := PolicyRolloutFilter{Environment: "prod", ServiceName: "checkout"}
-			if _, err := store.PublishPolicyRollout(ctx, "other-workspace", "admin",
+			if _, err := store.PublishPolicyRollout(ctx, fixtureOrgID("other-org"), "admin",
 				selected.PolicyRevisionID, filter, 1, ""); !errors.Is(err, policy.ErrNotFound) {
-				t.Fatalf("cross-workspace policy release accepted: %v", err)
+				t.Fatalf("cross-org policy release accepted: %v", err)
 			}
-			if _, err := store.PublishPolicyRollout(ctx, workspace, "admin",
+			if _, err := store.PublishPolicyRollout(ctx, org, "admin",
 				"00000000-0000-4000-8000-000000000000", filter, 1, ""); !errors.Is(err, policy.ErrNotFound) {
 				t.Fatalf("unknown PolicyRevision accepted: %v", err)
 			}
-			if _, err := store.PublishPolicyRollout(ctx, workspace, "admin",
+			if _, err := store.PublishPolicyRollout(ctx, org, "admin",
 				selected.PolicyRevisionID, filter, 3, ""); !errors.Is(err, ErrInvalidRollout) {
 				t.Fatalf("batch_size exceeding matched agents accepted: %v", err)
 			}
@@ -102,7 +102,7 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.PublishPolicyRollout(ctx, workspace, "admin", selected.PolicyRevisionID,
+			if _, err := store.PublishPolicyRollout(ctx, org, "admin", selected.PolicyRevisionID,
 				filter, 1, "audit-"+uids[0][:16]); !errors.Is(err, auditErr) {
 				t.Fatalf("audit failure not propagated: %v", err)
 			}
@@ -111,7 +111,7 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 			}
 			for _, table := range []string{"config_revisions", "config_releases", "release_targets", "agent_assignments"} {
 				var count int64
-				if err := store.db.Table(table).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 0 {
+				if err := store.db.Table(table).Where("org_id = ?", org).Count(&count).Error; err != nil || count != 0 {
 					t.Fatalf("%s leaked after failed Policy rollout: rows=%d err=%v", table, count, err)
 				}
 			}
@@ -125,7 +125,7 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			created, err := store.PublishPolicyRollout(ctx, workspace, "admin",
+			created, err := store.PublishPolicyRollout(ctx, org, "admin",
 				selected.PolicyRevisionID, filter, 1, key)
 			if removeErr := store.db.Callback().Query().Remove(queryCallback); removeErr != nil {
 				t.Fatal(removeErr)
@@ -145,7 +145,7 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 				}
 			}
 			var release ConfigReleaseRecord
-			if err := store.db.Where("workspace_id = ? AND release_id = ?", workspace, created.ReleaseID).
+			if err := store.db.Where("org_id = ? AND release_id = ?", org, created.ReleaseID).
 				Take(&release).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -160,32 +160,32 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 				selector.PolicyRevisionID != selected.PolicyRevisionID || len(selector.InstanceUIDs) != 2 {
 				t.Fatalf("unfrozen selection evidence: %+v %v", selector, err)
 			}
-			cfg, err := store.GetConfigRevision(ctx, workspace, created.Targets[0].ConfigRevisionID)
+			cfg, err := store.GetConfigRevision(ctx, org, created.Targets[0].ConfigRevisionID)
 			if err != nil || cfg.SourcePolicyRevisionID == nil ||
 				*cfg.SourcePolicyRevisionID != selected.PolicyRevisionID {
 				t.Fatalf("missing immutable ConfigRevision provenance: %+v %v", cfg, err)
 			}
-			if _, err := store.GetAgentAssignment(ctx, workspace, created.Targets[1].InstanceUID); !errors.Is(err, ErrNotFound) {
+			if _, err := store.GetAgentAssignment(ctx, org, created.Targets[1].InstanceUID); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("queued target received Desired: %v", err)
 			}
-			again, err := store.PublishPolicyRollout(ctx, workspace, "admin",
+			again, err := store.PublishPolicyRollout(ctx, org, "admin",
 				selected.PolicyRevisionID, filter, 1, key)
 			if err != nil || again.ReleaseID != created.ReleaseID || len(again.Activated) != 0 {
 				t.Fatalf("idempotent policy rollout changed release: %+v %v", again, err)
 			}
-			if _, err := store.PublishPolicyRollout(ctx, workspace, "admin",
+			if _, err := store.PublishPolicyRollout(ctx, org, "admin",
 				selected.PolicyRevisionID, filter, 2, key); !errors.Is(err, ErrReleaseConflict) {
 				t.Fatalf("same key with different batch size accepted: %v", err)
 			}
 			// Binding 更新不更改已冻结目标，也不能使相同 Key 重试产生新 Release。
-			if _, err := store.UpdatePolicyBinding(ctx, workspace, "admin", binding.BindingID, BindingInput{
+			if _, err := store.UpdatePolicyBinding(ctx, org, "admin", binding.BindingID, BindingInput{
 				PolicyRevisionID: binding.PolicyRevisionID, ScopeType: binding.ScopeType,
 				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 1,
 				Enabled: false, RowVersion: binding.RowVersion,
 			}); err != nil {
 				t.Fatal(err)
 			}
-			replay, err := store.PublishPolicyRollout(ctx, workspace, "admin",
+			replay, err := store.PublishPolicyRollout(ctx, org, "admin",
 				selected.PolicyRevisionID, filter, 1, key)
 			if err != nil || replay.ReleaseID != created.ReleaseID || len(replay.Activated) != 0 {
 				t.Fatalf("Binding change invalidated idempotent snapshot: %+v %v", replay, err)
@@ -193,70 +193,70 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 
 			// 1. 目标失败暂停；在匹配的新 APPLIED 回执前显式恢复必须失败。
 			firstUID := created.Activated[0]
-			offered, _, err := store.ReconcileAgentConfig(ctx, workspace, firstUID, nil, true)
+			offered, _, err := store.ReconcileAgentConfig(ctx, org, firstUID, nil, true)
 			if err != nil || offered == nil {
 				t.Fatalf("first target offer: %+v %v", offered, err)
 			}
-			if _, _, err := store.ReconcileAgentConfig(ctx, workspace, firstUID,
+			if _, _, err := store.ReconcileAgentConfig(ctx, org, firstUID,
 				&ConfigStatus{Hash: offered.ConfigHash, Status: "FAILED"}, false); err != nil {
 				t.Fatal(err)
 			}
-			paused, err := store.GetRollout(ctx, workspace, created.ReleaseID)
+			paused, err := store.GetRollout(ctx, org, created.ReleaseID)
 			if err != nil || paused.Status != "PAUSED" {
 				t.Fatalf("failed target did not pause: %+v %v", paused, err)
 			}
-			if _, err := store.ResumeRollout(ctx, workspace, created.ReleaseID, "admin", paused.RowVersion); !errors.Is(err, ErrRolloutBlocked) {
+			if _, err := store.ResumeRollout(ctx, org, created.ReleaseID, "admin", paused.RowVersion); !errors.Is(err, ErrRolloutBlocked) {
 				t.Fatalf("resumed failed target before ACK recovery: %v", err)
 			}
-			if _, err := store.ResumeRollout(ctx, workspace, created.ReleaseID, "admin", paused.RowVersion-1); !errors.Is(err, ErrAssignmentConflict) {
+			if _, err := store.ResumeRollout(ctx, org, created.ReleaseID, "admin", paused.RowVersion-1); !errors.Is(err, ErrAssignmentConflict) {
 				t.Fatalf("stale resume version accepted: %v", err)
 			}
 
 			// 2. 晚到 APPLIED 只能更新 Target，不会自动解除 PAUSED。
-			if _, _, err := store.ReconcileAgentConfig(ctx, workspace, firstUID,
+			if _, _, err := store.ReconcileAgentConfig(ctx, org, firstUID,
 				&ConfigStatus{Hash: offered.ConfigHash, Status: "APPLIED"}, false); err != nil {
 				t.Fatal(err)
 			}
-			still, err := store.GetRollout(ctx, workspace, created.ReleaseID)
+			still, err := store.GetRollout(ctx, org, created.ReleaseID)
 			if err != nil || still.Status != "PAUSED" || still.Targets[0].Status != "APPLIED" {
 				t.Fatalf("sticky pause bypassed: %+v %v", still, err)
 			}
-			resumed, err := store.ResumeRollout(ctx, workspace, created.ReleaseID, "admin", still.RowVersion)
+			resumed, err := store.ResumeRollout(ctx, org, created.ReleaseID, "admin", still.RowVersion)
 			if err != nil || resumed.Status != "RUNNING" ||
 				resumed.RowVersion != still.RowVersion+1 || len(resumed.Activated) != 0 {
 				t.Fatalf("failed guarded resume: %+v %v", resumed, err)
 			}
-			if _, err := store.ResumeRollout(ctx, workspace, created.ReleaseID, "admin", still.RowVersion); !errors.Is(err, ErrAssignmentConflict) {
+			if _, err := store.ResumeRollout(ctx, org, created.ReleaseID, "admin", still.RowVersion); !errors.Is(err, ErrAssignmentConflict) {
 				t.Fatalf("duplicate resume version accepted: %v", err)
 			}
 			var after ConfigReleaseRecord
-			if err := store.db.Where("workspace_id = ? AND release_id = ?", workspace, created.ReleaseID).
+			if err := store.db.Where("org_id = ? AND release_id = ?", org, created.ReleaseID).
 				Take(&after).Error; err != nil || after.FinishedAt != nil {
 				t.Fatalf("resumed release retains finished_at: %+v %v", after, err)
 			}
 
 			// 3. Resume 无网络副作用；显式 Advance 激活第二批并以 ACK 完成。
-			next, err := store.AdvanceRollout(ctx, workspace, created.ReleaseID, "admin")
+			next, err := store.AdvanceRollout(ctx, org, created.ReleaseID, "admin")
 			if err != nil || len(next.Activated) != 1 {
 				t.Fatalf("advance after resume: %+v %v", next, err)
 			}
 			secondUID := next.Activated[0]
-			offered, _, err = store.ReconcileAgentConfig(ctx, workspace, secondUID, nil, true)
+			offered, _, err = store.ReconcileAgentConfig(ctx, org, secondUID, nil, true)
 			if err != nil || offered == nil || offered.ConfigHash != cfg.ConfigHash {
 				t.Fatalf("second offer: %+v %v", offered, err)
 			}
-			if _, _, err := store.ReconcileAgentConfig(ctx, workspace, secondUID,
+			if _, _, err := store.ReconcileAgentConfig(ctx, org, secondUID,
 				&ConfigStatus{Hash: offered.ConfigHash, Status: "APPLIED"}, false); err != nil {
 				t.Fatal(err)
 			}
-			done, err := store.GetRollout(ctx, workspace, created.ReleaseID)
+			done, err := store.GetRollout(ctx, org, created.ReleaseID)
 			if err != nil || done.Status != "COMPLETED" {
 				t.Fatalf("rollout not completed: %+v %v", done, err)
 			}
-			if _, err := store.ResumeRollout(ctx, "other-workspace", created.ReleaseID, "admin", done.RowVersion); !errors.Is(err, ErrRolloutNotFound) {
-				t.Fatalf("cross-workspace resume leaked: %v", err)
+			if _, err := store.ResumeRollout(ctx, fixtureOrgID("other-org"), created.ReleaseID, "admin", done.RowVersion); !errors.Is(err, ErrRolloutNotFound) {
+				t.Fatalf("cross-org resume leaked: %v", err)
 			}
-			if _, err := store.ResumeRollout(ctx, workspace, created.ReleaseID, "admin", done.RowVersion); !errors.Is(err, ErrRolloutBlocked) {
+			if _, err := store.ResumeRollout(ctx, org, created.ReleaseID, "admin", done.RowVersion); !errors.Is(err, ErrRolloutBlocked) {
 				t.Fatalf("completed release resumed: %v", err)
 			}
 			// 候选 Agent 超出上限不得静默截断后发布。
@@ -270,7 +270,7 @@ func TestPolicySelectedRolloutAndResumePostgresAndMySQL(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := store.PublishPolicyRollout(ctx, workspace, "admin",
+			if _, err := store.PublishPolicyRollout(ctx, org, "admin",
 				selected.PolicyRevisionID, PolicyRolloutFilter{}, 1, ""); !errors.Is(err, ErrInvalidRollout) {
 				t.Fatalf("unbounded candidate scan silently truncated: %v", err)
 			}
@@ -297,8 +297,8 @@ func TestConcurrentPolicyRolloutIdempotencyPostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 			uids := []string{newUID(t), newUID(t)}
-			workspace := "p32-idempotency-" + uids[0][:12]
-			principal := auth.Principal{WorkspaceID: workspace, CredentialID: "java-owner"}
+			org := fixtureOrgID("p32-idempotency-" + uids[0][:12])
+			principal := auth.Principal{OrgID: org, CredentialID: "java-owner"}
 			for _, uid := range uids {
 				if _, err := store.Observe(ctx, principal, uid, Observation{
 					SeenAt: time.Now().UTC(), Transport: "http",
@@ -308,11 +308,11 @@ func TestConcurrentPolicyRolloutIdempotencyPostgresAndMySQL(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			_, revision, err := store.CreatePolicy(ctx, workspace, "admin", "shared-rollout", 0.2)
+			_, revision, err := store.CreatePolicy(ctx, org, "admin", "shared-rollout", 0.2)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.CreatePolicyBinding(ctx, workspace, "admin", BindingInput{
+			if _, err := store.CreatePolicyBinding(ctx, org, "admin", BindingInput{
 				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 1,
 			}); err != nil {
@@ -328,7 +328,7 @@ func TestConcurrentPolicyRolloutIdempotencyPostgresAndMySQL(t *testing.T) {
 				for _, size := range []int{firstSize, secondSize} {
 					go func(batchSize int) {
 						<-start
-						view, err := store.PublishPolicyRollout(ctx, workspace, "admin",
+						view, err := store.PublishPolicyRollout(ctx, org, "admin",
 							revision.PolicyRevisionID, PolicyRolloutFilter{ServiceName: "checkout"}, batchSize, key)
 						results <- outcome{view, err}
 					}(size)
@@ -360,7 +360,7 @@ func TestConcurrentPolicyRolloutIdempotencyPostgresAndMySQL(t *testing.T) {
 			}
 			for _, table := range []string{"config_revisions", "config_releases"} {
 				var count int64
-				if err := store.db.Table(table).Where("workspace_id = ?", workspace).Count(&count).Error; err != nil || count != 2 {
+				if err := store.db.Table(table).Where("org_id = ?", org).Count(&count).Error; err != nil || count != 2 {
 					t.Fatalf("%s should contain only the two successful publications, count=%d err=%v", table, count, err)
 				}
 			}

@@ -19,9 +19,9 @@ import (
 
 // PublishAgentPolicy atomically resolves a selected Java policy, compiles a
 // ConfigRevision and publishes a single-Agent Desired assignment.
-func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID, expectedPolicyRevisionID, requestedBy, idempotencyKey string) (ReleaseResult, error) {
-	// 1. 校验可信 Workspace、目标身份与期望 PolicyRevision，非法输入提前失败。
-	if workspaceID == "" || utf8.RuneCountInString(workspaceID) > 96 ||
+func (s *Store) PublishAgentPolicy(ctx context.Context, orgID int64, instanceUID, expectedPolicyRevisionID, requestedBy, idempotencyKey string) (ReleaseResult, error) {
+	// 1. 校验可信 Org、目标身份与期望 PolicyRevision，非法输入提前失败。
+	if orgID <= 0 ||
 		requestedBy == "" || utf8.RuneCountInString(requestedBy) > 128 ||
 		len(instanceUID) != 32 || len(expectedPolicyRevisionID) != 36 ||
 		utf8.RuneCountInString(idempotencyKey) > 128 {
@@ -43,23 +43,23 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 2. 与普通发布使用相同的 Agent 锁，先处理幂等重试，不重复编译或生成 Revision。
-		agent, err := lockAgentForReleaseTx(tx, workspaceID, instanceUID)
+		agent, err := lockAgentForReleaseTx(tx, orgID, instanceUID)
 		if err != nil {
 			return err
 		}
 		if idempotencyKey != "" {
 			var previous ConfigReleaseRecord
-			err := tx.Where("workspace_id = ? AND idempotency_key = ?", workspaceID, idempotencyKey).Take(&previous).Error
+			err := tx.Where("org_id = ? AND idempotency_key = ?", orgID, idempotencyKey).Take(&previous).Error
 			if err == nil {
 				if previous.RequestSHA256 != requestHash {
 					return ErrReleaseConflict
 				}
 				var target ReleaseTargetRecord
-				if err := tx.Where("workspace_id = ? AND release_id = ? AND instance_uid = ?",
-					workspaceID, previous.ReleaseID, instanceUID).Take(&target).Error; err != nil {
+				if err := tx.Where("org_id = ? AND release_id = ? AND instance_uid = ?",
+					orgID, previous.ReleaseID, instanceUID).Take(&target).Error; err != nil {
 					return err
 				}
-				result = ReleaseResult{workspaceID, previous.ReleaseID, instanceUID,
+				result = ReleaseResult{orgID, previous.ReleaseID, instanceUID,
 					target.ConfigRevisionID, target.DesiredGeneration, target.Status}
 				return nil
 			}
@@ -75,7 +75,7 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 		}
 
 		// 4. 按当前 Binding 重新解析目标并校验期望 Revision，拒绝静默发布其他版本。
-		resolved, err := (&Store{db: tx}).resolveAgentPolicy(ctx, workspaceID, agent, true)
+		resolved, err := (&Store{db: tx}).resolveAgentPolicy(ctx, orgID, agent, true)
 		if err == nil && resolved.PolicyRevisionID != expectedPolicyRevisionID {
 			err = policy.ErrConflict
 		}
@@ -83,7 +83,7 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 			// 仅在预览失效时确认期望 Revision 是否存在，区分 404 与 409。
 			var count int64
 			if lookupErr := tx.Model(&PolicyRevisionRecord{}).
-				Where("workspace_id = ? AND policy_revision_id = ?", workspaceID, expectedPolicyRevisionID).
+				Where("org_id = ? AND policy_revision_id = ?", orgID, expectedPolicyRevisionID).
 				Count(&count).Error; lookupErr != nil {
 				return lookupErr
 			}
@@ -124,7 +124,7 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 		data := snapshot.ConfigMapBytes()
 		sum := snapshot.Hash()
 		configRevision := ConfigRevisionRecord{
-			WorkspaceID: workspaceID, ConfigRevisionID: configID,
+			OrgID: orgID, ConfigRevisionID: configID,
 			SourcePolicyRevisionID: &expectedPolicyRevisionID,
 			AgentKind:              snapshot.AgentKind(), ConfigDialect: snapshot.ConfigDialect(),
 			PayloadFormat: config.ConfigMapFormat, ConfigMapBytes: data,
@@ -136,7 +136,7 @@ func (s *Store) PublishAgentPolicy(ctx context.Context, workspaceID, instanceUID
 		}
 
 		// 6. 复用 P2.2 的 Release/Target/Assignment/Event 原子事务，提交后由 Gateway 唤醒。
-		return publishAgentConfigTx(tx, agent, workspaceID, instanceUID, configID, requestedBy,
+		return publishAgentConfigTx(tx, agent, orgID, instanceUID, configID, requestedBy,
 			idempotencyKey, requestHash, &expectedPolicyRevisionID, &result)
 	})
 	if err != nil {

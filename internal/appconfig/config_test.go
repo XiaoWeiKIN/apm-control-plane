@@ -31,8 +31,8 @@ database:
 		"APM_LISTEN_ADDR":            "127.0.0.1:5500",
 		"APM_DB_DRIVER":              "mysql",
 		"APM_DATABASE_DSN":           "dummy",
-		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","workspace_id":"t1","token":"agent-token-12345678"}]`,
-		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","workspace_id":"t1","token":"admin-token-12345678"}]`,
+		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","org_id":1,"token":"agent-token-12345678"}]`,
+		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","org_id":1,"token":"admin-token-12345678"}]`,
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -56,8 +56,8 @@ func TestRejectUnknownConfigKey(t *testing.T) {
 func TestRejectInvalidDriverAndDuplicateCredentials(t *testing.T) {
 	base := map[string]string{
 		"APM_DATABASE_DSN":           "test",
-		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","workspace_id":"workspace-a","token":"agent-example-long-token"}]`,
-		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","workspace_id":"workspace-a","token":"admin-example-long-token"}]`,
+		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","org_id":1,"token":"agent-example-long-token"}]`,
+		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","org_id":1,"token":"admin-example-long-token"}]`,
 	}
 	invalidDriver := map[string]string{}
 	for key, val := range base {
@@ -68,80 +68,97 @@ func TestRejectInvalidDriverAndDuplicateCredentials(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unsupported database driver") {
 		t.Fatalf("invalid driver: %v", err)
 	}
-	base["APM_ADMIN_CREDENTIALS_JSON"] = `[{"id":"admin1","workspace_id":"workspace-a","token":"agent-example-long-token"}]`
+	base["APM_ADMIN_CREDENTIALS_JSON"] = `[{"id":"admin1","org_id":1,"token":"agent-example-long-token"}]`
 	_, err = LoadWithEnv(testEnv(base))
 	if err == nil || !strings.Contains(err.Error(), "unique") {
 		t.Fatalf("duplicate credential tokens: %v", err)
 	}
 }
 
-func TestRequireExplicitWorkspaceCredentials(t *testing.T) {
+func TestRequireExplicitOrgCredentials(t *testing.T) {
 	_, err := LoadWithEnv(testEnv(map[string]string{
 		"APM_DATABASE_DSN": "test",
 		"APM_OPAMP_TOKEN":  "old-agent-token-no-longer-used",
 		"APM_ADMIN_TOKEN":  "old-admin-token-no-longer-used",
 	}))
-	if err == nil || !strings.Contains(err.Error(), "workspace-scoped") {
+	if err == nil || !strings.Contains(err.Error(), "org-scoped") {
 		t.Fatalf("old single token fallback must be rejected: %v", err)
 	}
 	_, err = LoadWithEnv(testEnv(map[string]string{
 		"APM_DATABASE_DSN":           "test",
 		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","tenant_id":"old-tenant","token":"agent-example-long-token"}]`,
-		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","workspace_id":"workspace-a","token":"admin-example-long-token"}]`,
+		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","org_id":1,"token":"admin-example-long-token"}]`,
 	}))
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("old tenant_id field must be rejected: %v", err)
 	}
+	_, err = LoadWithEnv(testEnv(map[string]string{
+		"APM_DATABASE_DSN":           "test",
+		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","workspace_id":"old-workspace","token":"agent-example-long-token"}]`,
+		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","org_id":1,"token":"admin-example-long-token"}]`,
+	}))
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("legacy workspace_id field must be rejected: %v", err)
+	}
 	config, err := LoadWithEnv(testEnv(map[string]string{
 		"APM_DATABASE_DSN":           "test",
-		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","workspace_id":"workspace-a","token":"agent-example-long-token"}]`,
-		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","workspace_id":"workspace-a","token":"admin-example-long-token"}]`,
+		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","org_id":1,"token":"agent-example-long-token"}]`,
+		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","org_id":1,"token":"admin-example-long-token"}]`,
 	}))
-	if err != nil || config.AgentCredentials[0].WorkspaceID != "workspace-a" {
-		t.Fatalf("workspace-scoped credentials must load: %v, %+v", err, config.AgentCredentials)
+	if err != nil || config.AgentCredentials[0].OrgID != 1 {
+		t.Fatalf("org-scoped credentials must load: %v, %+v", err, config.AgentCredentials)
 	}
 }
 
 func TestRejectCredentialsWithExtraJSON(t *testing.T) {
 	_, err := LoadWithEnv(testEnv(map[string]string{
 		"APM_DATABASE_DSN":           "test",
-		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","workspace_id":"workspace-a","token":"agent-example-long-token"}] {}`,
-		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","workspace_id":"workspace-a","token":"admin-example-long-token"}]`,
+		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"a1","org_id":1,"token":"agent-example-long-token"}] {}`,
+		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin1","org_id":1,"token":"admin-example-long-token"}]`,
 	}))
 	if err == nil || !strings.Contains(err.Error(), "unexpected trailing") {
 		t.Fatalf("trailing JSON must be rejected: %v", err)
 	}
 }
 
-func TestRejectCredentialIDsBeyondDatabaseLimits(t *testing.T) {
-	cases := []struct {
-		name  string
-		field string
-		value string
-	}{
-		{"workspace", "workspace_id", strings.Repeat("w", 97)},
-		{"credential", "id", strings.Repeat("c", 129)},
+func TestRejectOrganizationIDsOutsideContract(t *testing.T) {
+	for _, orgID := range []int64{0, -1} {
+		credentials, err := json.Marshal([]Credential{{ID: "agent-a", OrgID: orgID, Token: "long-agent-secret-token"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = LoadWithEnv(testEnv(map[string]string{
+			"APM_DATABASE_DSN":           "test",
+			"APM_AGENT_CREDENTIALS_JSON": string(credentials),
+			"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin-a","org_id":1,"token":"long-admin-secret-token"}]`,
+		}))
+		if err == nil || !strings.Contains(err.Error(), "org_id") {
+			t.Fatalf("accepted invalid org %d: %v", orgID, err)
+		}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cred := Credential{ID: "agent-a", WorkspaceID: "workspace-a", Token: "long-agent-secret-token"}
-			if tc.field == "workspace_id" {
-				cred.WorkspaceID = tc.value
-			} else {
-				cred.ID = tc.value
-			}
-			data, err := json.Marshal([]Credential{cred})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = LoadWithEnv(testEnv(map[string]string{
-				"APM_DATABASE_DSN":           "test",
-				"APM_AGENT_CREDENTIALS_JSON": string(data),
-				"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin-a","workspace_id":"workspace-a","token":"long-admin-secret-token"}]`,
-			}))
-			if err == nil || !strings.Contains(err.Error(), tc.field) {
-				t.Fatalf("%s outside schema limits accepted: %v", tc.field, err)
-			}
-		})
+	_, err := LoadWithEnv(testEnv(map[string]string{
+		"APM_DATABASE_DSN":           "test",
+		"APM_AGENT_CREDENTIALS_JSON": `[{"id":"agent-a","org_id":"1","token":"long-agent-secret-token"}]`,
+		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin-a","org_id":1,"token":"long-admin-secret-token"}]`,
+	}))
+	if err == nil {
+		t.Fatal("string Org ID accepted")
+	}
+}
+
+func TestRejectCredentialIDBeyondDatabaseLimit(t *testing.T) {
+	credentials, err := json.Marshal([]Credential{{
+		ID: strings.Repeat("c", 129), OrgID: 1, Token: "long-agent-secret-token",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = LoadWithEnv(testEnv(map[string]string{
+		"APM_DATABASE_DSN":           "test",
+		"APM_AGENT_CREDENTIALS_JSON": string(credentials),
+		"APM_ADMIN_CREDENTIALS_JSON": `[{"id":"admin-a","org_id":1,"token":"long-admin-secret-token"}]`,
+	}))
+	if err == nil || !strings.Contains(err.Error(), "credential id") {
+		t.Fatalf("credential ID outside schema limits accepted: %v", err)
 	}
 }

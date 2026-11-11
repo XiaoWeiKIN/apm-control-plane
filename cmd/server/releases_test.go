@@ -15,7 +15,7 @@ import (
 
 type fakeReleasePublisher struct {
 	calls       int
-	workspaceID string
+	orgID       int64
 	instanceUID string
 	revisionID  string
 	actor       string
@@ -23,16 +23,16 @@ type fakeReleasePublisher struct {
 }
 
 func (f *fakeReleasePublisher) PublishAgentConfig(
-	_ context.Context, workspaceID, uid, revisionID, actor, key string,
+	_ context.Context, orgID int64, uid, revisionID, actor, key string,
 ) (gormrepo.ReleaseResult, error) {
 	f.calls++
-	f.workspaceID = workspaceID
+	f.orgID = orgID
 	f.instanceUID = uid
 	f.revisionID = revisionID
 	f.actor = actor
 	f.key = key
 	return gormrepo.ReleaseResult{
-		WorkspaceID: workspaceID, ReleaseID: "release-1", InstanceUID: uid,
+		OrgID: orgID, ReleaseID: "release-1", InstanceUID: uid,
 		ConfigRevisionID: revisionID, DesiredGeneration: 1, Status: "PENDING",
 	}, nil
 }
@@ -40,7 +40,7 @@ func (f *fakeReleasePublisher) PublishAgentConfig(
 func TestReleaseHandlerRejectsInvalidRequestsBeforePersistence(t *testing.T) {
 	fake := &fakeReleasePublisher{}
 	authenticator := auth.New([]appconfig.Credential{
-		{ID: "admin-a", WorkspaceID: "workspace-a", Token: "test-admin-token-1234"},
+		{ID: "admin-a", OrgID: fixtureOrgID("org-a"), Token: "test-admin-token-1234"},
 	})
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/v1/agents/{uid}/releases", adminReleaseHandler(fake, authenticator, nil))
@@ -63,7 +63,7 @@ func TestReleaseHandlerRejectsInvalidRequestsBeforePersistence(t *testing.T) {
 	}{
 		{"unauthenticated", "/api/v1/agents/" + uidHex + "/releases", "", `{"config_revision_id":"00000000-0000-4000-8000-000000000001"}`, http.StatusUnauthorized},
 		{"bad agent UID", "/api/v1/agents/not-uid/releases", "test-admin-token-1234", `{"config_revision_id":"00000000-0000-4000-8000-000000000001"}`, http.StatusBadRequest},
-		{"unknown JSON field", "/api/v1/agents/" + uidHex + "/releases", "test-admin-token-1234", `{"config_revision_id":"00000000-0000-4000-8000-000000000001","workspace_id":"other"}`, http.StatusBadRequest},
+		{"unknown JSON field", "/api/v1/agents/" + uidHex + "/releases", "test-admin-token-1234", `{"config_revision_id":"00000000-0000-4000-8000-000000000001","org_id":"other"}`, http.StatusBadRequest},
 		{"missing revision", "/api/v1/agents/" + uidHex + "/releases", "test-admin-token-1234", `{}`, http.StatusBadRequest},
 		{"trailing JSON", "/api/v1/agents/" + uidHex + "/releases", "test-admin-token-1234", `{"config_revision_id":"00000000-0000-4000-8000-000000000001"} {}`, http.StatusBadRequest},
 	} {
@@ -77,7 +77,7 @@ func TestReleaseHandlerRejectsInvalidRequestsBeforePersistence(t *testing.T) {
 	ok := request("/api/v1/agents/"+uidHex+"/releases", "test-admin-token-1234",
 		`{"config_revision_id":"00000000-0000-4000-8000-000000000001"}`)
 	if ok.Code != http.StatusAccepted || fake.calls != 1 ||
-		fake.workspaceID != "workspace-a" || fake.actor != "admin-a" ||
+		fake.orgID != fixtureOrgID("org-a") || fake.actor != "admin-a" ||
 		fake.instanceUID != uidHex || fake.revisionID != revision || fake.key != "request-one" {
 		t.Fatalf("release handler bypassed trusted Scope: code=%d fake=%+v", ok.Code, fake)
 	}

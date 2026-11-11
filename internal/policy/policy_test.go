@@ -12,7 +12,7 @@ func TestSelectorScopesAndCanonicalHash(t *testing.T) {
 		selector Selector
 		matches  bool
 	}{
-		{ScopeWorkspace, Selector{}, true},
+		{ScopeOrg, Selector{}, true},
 		{ScopeEnvironment, Selector{Environment: "prod"}, true},
 		{ScopeEnvironment, Selector{Environment: "dev"}, false},
 		{ScopeService, Selector{Environment: "prod", ServiceName: "checkout"}, true},
@@ -38,12 +38,13 @@ func TestSelectorScopesAndCanonicalHash(t *testing.T) {
 		scope    string
 		selector Selector
 	}{
-		{ScopeWorkspace, Selector{Environment: "prod"}},
+		{ScopeOrg, Selector{Environment: "prod"}},
 		{ScopeEnvironment, Selector{}},
 		{ScopeEnvironment, Selector{Environment: "prod", ServiceName: "checkout"}},
 		{ScopeService, Selector{}},
 		{ScopeInstance, Selector{InstanceUID: "not-a-uid"}},
 		{"TENANT", Selector{}},
+		{"WORKSPACE", Selector{}},
 	} {
 		if _, _, err := tt.selector.Canonical(tt.scope); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("accepted unsupported selector %s %+v: %v", tt.scope, tt.selector, err)

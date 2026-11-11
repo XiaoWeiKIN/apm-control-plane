@@ -42,13 +42,13 @@ func TestPolicyRolloutAndResumeAPIPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			const workspace = "p32-policy-rollout-api"
+			org := fixtureOrgID("p32-policy-rollout-api")
 			for i := 0; i < 2; i++ {
 				uid := make([]byte, 16)
 				if _, err := rand.Read(uid); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := store.Observe(ctx, auth.Principal{WorkspaceID: workspace, CredentialID: "agent"},
+				if _, err := store.Observe(ctx, auth.Principal{OrgID: org, CredentialID: "agent"},
 					hex.EncodeToString(uid), gormrepo.Observation{
 						SeenAt: time.Now().UTC(), Transport: "http",
 						Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig),
@@ -57,11 +57,11 @@ func TestPolicyRolloutAndResumeAPIPostgresAndMySQL(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			_, revision, err := store.CreatePolicy(ctx, workspace, "admin", "api-policy", 0.3)
+			_, revision, err := store.CreatePolicy(ctx, org, "admin", "api-policy", 0.3)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.CreatePolicyBinding(ctx, workspace, "admin", gormrepo.BindingInput{
+			if _, err := store.CreatePolicyBinding(ctx, org, "admin", gormrepo.BindingInput{
 				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 1,
 			}); err != nil {
@@ -69,13 +69,13 @@ func TestPolicyRolloutAndResumeAPIPostgresAndMySQL(t *testing.T) {
 			}
 
 			authenticator := auth.New([]appconfig.Credential{
-				{ID: "admin", WorkspaceID: workspace, Token: "p32-admin-policy-long"},
-				{ID: "other", WorkspaceID: "p32-other-workspace", Token: "p32-other-admin-long"},
+				{ID: "admin", OrgID: org, Token: "p32-admin-policy-long"},
+				{ID: "other", OrgID: fixtureOrgID("p32-other-org"), Token: "p32-other-admin-long"},
 			})
 			wakes := make([]string, 0, 2)
-			h := adminRolloutHandler(store, authenticator, func(ws, uid string) {
-				if ws != workspace {
-					t.Errorf("cross-workspace wake: %s", ws)
+			h := adminRolloutHandler(store, authenticator, func(ws int64, uid string) {
+				if ws != org {
+					t.Errorf("cross-org wake: %d", ws)
 				}
 				wakes = append(wakes, uid)
 			})
@@ -136,11 +136,11 @@ func TestPolicyRolloutAndResumeAPIPostgresAndMySQL(t *testing.T) {
 			call("POST", path+"/resume", "p32-admin-policy-long", `{"row_version":1}`, http.StatusConflict)
 
 			first := release.Activated[0]
-			offered, _, err := store.ReconcileAgentConfig(ctx, workspace, first, nil, true)
+			offered, _, err := store.ReconcileAgentConfig(ctx, org, first, nil, true)
 			if err != nil || offered == nil {
 				t.Fatalf("initial ConfigMap not offered: %v", err)
 			}
-			if _, _, err := store.ReconcileAgentConfig(ctx, workspace, first,
+			if _, _, err := store.ReconcileAgentConfig(ctx, org, first,
 				&gormrepo.ConfigStatus{Hash: offered.ConfigHash, Status: "FAILED"}, false); err != nil {
 				t.Fatal(err)
 			}
@@ -153,7 +153,7 @@ func TestPolicyRolloutAndResumeAPIPostgresAndMySQL(t *testing.T) {
 			call("POST", path+"/resume", "p32-admin-policy-long",
 				`{"row_version":`+strconv.FormatInt(paused.RowVersion, 10)+`}`, http.StatusConflict)
 
-			if _, _, err := store.ReconcileAgentConfig(ctx, workspace, first,
+			if _, _, err := store.ReconcileAgentConfig(ctx, org, first,
 				&gormrepo.ConfigStatus{Hash: offered.ConfigHash, Status: "APPLIED"}, false); err != nil {
 				t.Fatal(err)
 			}
@@ -172,11 +172,11 @@ func TestPolicyRolloutAndResumeAPIPostgresAndMySQL(t *testing.T) {
 				t.Fatalf("advance missed wake: %+v %v", advanced, wakes)
 			}
 			second := advanced.Activated[0]
-			offered, _, err = store.ReconcileAgentConfig(ctx, workspace, second, nil, true)
+			offered, _, err = store.ReconcileAgentConfig(ctx, org, second, nil, true)
 			if err != nil || offered == nil {
 				t.Fatalf("next batch ConfigMap: %v", err)
 			}
-			if _, _, err := store.ReconcileAgentConfig(ctx, workspace, second,
+			if _, _, err := store.ReconcileAgentConfig(ctx, org, second,
 				&gormrepo.ConfigStatus{Hash: offered.ConfigHash, Status: "APPLIED"}, false); err != nil {
 				t.Fatal(err)
 			}

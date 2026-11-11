@@ -35,8 +35,8 @@ func TestSharedWorkloadCredentialPostgresAndMySQL(t *testing.T) {
 			}
 			defer store.Close()
 
-			workspace := "workload-" + tc.driver + "-" + newUID(t)
-			owner := auth.Principal{WorkspaceID: workspace, CredentialID: "shared-credential"}
+			org := fixtureOrgID("workload-" + tc.driver + "-" + newUID(t))
+			owner := auth.Principal{OrgID: org, CredentialID: "shared-credential"}
 			observation := Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",
 				Description: &Description{Kind: "java-apm", Service: "checkout"},
@@ -50,36 +50,36 @@ func TestSharedWorkloadCredentialPostgresAndMySQL(t *testing.T) {
 					t.Fatalf("shared credential registration %s: %+v %v", uid, record, err)
 				}
 			}
-			agents, err := store.List(ctx, workspace)
+			agents, err := store.List(ctx, org)
 			if err != nil || len(agents) != len(uids) {
 				t.Fatalf("workload inventory: %+v %v", agents, err)
 			}
 
-			// 2. 同 Workspace 的其他凭证不能接管 UID 或修改已有元数据。
+			// 2. 同 Org 的其他凭证不能接管 UID 或修改已有元数据。
 			spoofed := Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",
 				Description: &Description{Kind: "python-apm", Service: "spoofed"},
 			}
 			_, err = store.Observe(ctx, auth.Principal{
-				WorkspaceID: workspace, CredentialID: "other-credential",
+				OrgID: org, CredentialID: "other-credential",
 			}, uids[0], spoofed)
 			if !errors.Is(err, ErrOwnership) {
 				t.Fatalf("different credential acquired workload UID: %v", err)
 			}
-			after, err := store.List(ctx, workspace)
+			after, err := store.List(ctx, org)
 			if err != nil || !reflect.DeepEqual(agents, after) {
 				t.Fatalf("workload inventory changed after rejected takeover: before=%+v after=%+v err=%v", agents, after, err)
 			}
 
-			// 3. 相同 UID 在另一 Workspace 独立，不能覆盖原 Workspace 的归属。
-			foreign := auth.Principal{WorkspaceID: workspace + "-other", CredentialID: "foreign-credential"}
+			// 3. 相同 UID 在另一 Org 独立，不能覆盖原 Org 的归属。
+			foreign := auth.Principal{OrgID: org + 1, CredentialID: "foreign-credential"}
 			record, err := store.Observe(ctx, foreign, uids[0], spoofed)
 			if err != nil || record.CredentialID != foreign.CredentialID || record.ServiceName != "spoofed" {
-				t.Fatalf("same UID in distinct Workspace: %+v %v", record, err)
+				t.Fatalf("same UID in distinct Org: %+v %v", record, err)
 			}
-			original, err := store.Get(ctx, workspace, uids[0])
+			original, err := store.Get(ctx, org, uids[0])
 			if err != nil || original.ServiceName != "checkout" || original.CredentialID != owner.CredentialID {
-				t.Fatalf("cross-Workspace UID collision corrupted owner: %+v %v", original, err)
+				t.Fatalf("cross-Org UID collision corrupted owner: %+v %v", original, err)
 			}
 		})
 	}

@@ -40,7 +40,7 @@ func TestSingleAgentReleaseContractPostgresAndMySQL(t *testing.T) {
 				}
 			}()
 			id := newUID(t)
-			p := auth.Principal{WorkspaceID: "release-workspace", CredentialID: "java-agent"}
+			p := auth.Principal{OrgID: fixtureOrgID("release-org"), CredentialID: "java-agent"}
 			obs := Observation{
 				SeenAt: time.Now().UTC(), Transport: "http",
 				Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus |
@@ -51,55 +51,55 @@ func TestSingleAgentReleaseContractPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			snapshot1, _ := config.CompileJavaSampling(0.1)
-			revision1, err := store.CreateConfigRevision(ctx, p.WorkspaceID, "admin-a", snapshot1)
+			revision1, err := store.CreateConfigRevision(ctx, p.OrgID, "admin-a", snapshot1)
 			if err != nil {
 				t.Fatal(err)
 			}
 			snapshot2, _ := config.CompileJavaSampling(0.2)
-			revision2, err := store.CreateConfigRevision(ctx, p.WorkspaceID, "admin-a", snapshot2)
+			revision2, err := store.CreateConfigRevision(ctx, p.OrgID, "admin-a", snapshot2)
 			if err != nil {
 				t.Fatal(err)
 			}
 			key := "release-" + id[:16]
 
-			// Workspace and ConfigRevision mismatches cannot create release rows.
-			if _, err := store.PublishAgentConfig(ctx, "other-workspace", id, revision1.ConfigRevisionID, "admin-a", ""); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("cross-workspace Agent access: %v", err)
+			// Org and ConfigRevision mismatches cannot create release rows.
+			if _, err := store.PublishAgentConfig(ctx, fixtureOrgID("other-org"), id, revision1.ConfigRevisionID, "admin-a", ""); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("cross-org Agent access: %v", err)
 			}
-			if _, err := store.PublishAgentConfig(ctx, p.WorkspaceID, newUID(t), revision1.ConfigRevisionID, "admin-a", ""); !errors.Is(err, ErrNotFound) {
+			if _, err := store.PublishAgentConfig(ctx, p.OrgID, newUID(t), revision1.ConfigRevisionID, "admin-a", ""); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("unknown Agent release: %v", err)
 			}
-			if _, err := store.PublishAgentConfig(ctx, p.WorkspaceID, id, "00000000-0000-4000-8000-000000000000", "admin-a", ""); !errors.Is(err, ErrConfigRevisionNotFound) {
+			if _, err := store.PublishAgentConfig(ctx, p.OrgID, id, "00000000-0000-4000-8000-000000000000", "admin-a", ""); !errors.Is(err, ErrConfigRevisionNotFound) {
 				t.Fatalf("unknown ConfigRevision release: %v", err)
 			}
-			if _, err := store.PublishAgentConfig(ctx, p.WorkspaceID, id, revision1.ConfigRevisionID, "admin-a", ""); err != nil {
+			if _, err := store.PublishAgentConfig(ctx, p.OrgID, id, revision1.ConfigRevisionID, "admin-a", ""); err != nil {
 				// A successful release here would be untracked; use key only for the intended first release.
 				t.Fatal(err)
 			}
 			// First release above is intentional: verify a no-idempotency-key request is valid.
 			var existing AgentAssignmentRecord
-			if err := store.db.Where("workspace_id = ? AND instance_uid = ?", p.WorkspaceID, id).Take(&existing).Error; err != nil {
+			if err := store.db.Where("org_id = ? AND instance_uid = ?", p.OrgID, id).Take(&existing).Error; err != nil {
 				t.Fatal(err)
 			}
 			if existing.DesiredGeneration != 1 {
 				t.Fatalf("first Generation = %d", existing.DesiredGeneration)
 			}
 
-			first, err := store.PublishAgentConfig(ctx, p.WorkspaceID, id, revision1.ConfigRevisionID, "admin-a", key)
+			first, err := store.PublishAgentConfig(ctx, p.OrgID, id, revision1.ConfigRevisionID, "admin-a", key)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if first.DesiredGeneration != 2 || first.Status != "PENDING" {
 				t.Fatalf("unexpected release: %+v", first)
 			}
-			again, err := store.PublishAgentConfig(ctx, p.WorkspaceID, id, revision1.ConfigRevisionID, "admin-a", key)
+			again, err := store.PublishAgentConfig(ctx, p.OrgID, id, revision1.ConfigRevisionID, "admin-a", key)
 			if err != nil || again.ReleaseID != first.ReleaseID || again.DesiredGeneration != first.DesiredGeneration {
 				t.Fatalf("idempotent request created duplicate: %+v %v", again, err)
 			}
-			if _, err := store.PublishAgentConfig(ctx, p.WorkspaceID, id, revision2.ConfigRevisionID, "admin-a", key); !errors.Is(err, ErrReleaseConflict) {
+			if _, err := store.PublishAgentConfig(ctx, p.OrgID, id, revision2.ConfigRevisionID, "admin-a", key); !errors.Is(err, ErrReleaseConflict) {
 				t.Fatalf("same idempotency key with different request: %v", err)
 			}
-			assignment, err := store.GetAgentAssignment(ctx, p.WorkspaceID, id)
+			assignment, err := store.GetAgentAssignment(ctx, p.OrgID, id)
 			if err != nil || assignment.ReleaseID != first.ReleaseID || assignment.DesiredGeneration != 2 ||
 				assignment.RowVersion != 2 || assignment.State != "PENDING" || assignment.DesiredHash != revision1.ConfigHash {
 				t.Fatalf("current Desired not atomically updated: %+v %v", assignment, err)
@@ -115,20 +115,20 @@ func TestSingleAgentReleaseContractPostgresAndMySQL(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			_, err = store.PublishAgentConfig(ctx, p.WorkspaceID, id, revision2.ConfigRevisionID, "admin-a", "fail-"+id[:16])
+			_, err = store.PublishAgentConfig(ctx, p.OrgID, id, revision2.ConfigRevisionID, "admin-a", "fail-"+id[:16])
 			if !errors.Is(err, callbackErr) {
 				t.Fatalf("audit failure not propagated: %v", err)
 			}
 			if err := store.db.Callback().Create().Remove(callback); err != nil {
 				t.Fatal(err)
 			}
-			still, err := store.GetAgentAssignment(ctx, p.WorkspaceID, id)
+			still, err := store.GetAgentAssignment(ctx, p.OrgID, id)
 			if err != nil || still.ReleaseID != first.ReleaseID || still.DesiredGeneration != 2 || still.DesiredHash != revision1.ConfigHash {
 				t.Fatalf("rollback left an incomplete Desired: %+v %v", still, err)
 			}
 			for _, table := range []string{"config_releases", "release_targets", "config_events"} {
 				var count int64
-				if err := store.db.Table(table).Where("workspace_id = ?", p.WorkspaceID).Count(&count).Error; err != nil {
+				if err := store.db.Table(table).Where("org_id = ?", p.OrgID).Count(&count).Error; err != nil {
 					t.Fatal(err)
 				}
 				if count != 2 {
@@ -144,7 +144,7 @@ func TestSingleAgentReleaseContractPostgresAndMySQL(t *testing.T) {
 				wg.Add(1)
 				go func(i int) {
 					defer wg.Done()
-					result, err := store.PublishAgentConfig(ctx, p.WorkspaceID, id, revision2.ConfigRevisionID,
+					result, err := store.PublishAgentConfig(ctx, p.OrgID, id, revision2.ConfigRevisionID,
 						"admin-a", fmt.Sprintf("concurrent-%d-%s", i, id[:16]))
 					results <- result
 					errs <- err
@@ -165,16 +165,16 @@ func TestSingleAgentReleaseContractPostgresAndMySQL(t *testing.T) {
 			if !gens[3] || !gens[4] || len(gens) != 2 {
 				t.Fatalf("generations not serialized: %v", gens)
 			}
-			current, err := store.GetAgentAssignment(ctx, p.WorkspaceID, id)
+			current, err := store.GetAgentAssignment(ctx, p.OrgID, id)
 			if err != nil || current.DesiredGeneration != 4 || current.RowVersion != 4 ||
 				current.DesiredHash != revision2.ConfigHash || current.State != "PENDING" {
 				t.Fatalf("latest Desired wrong: %+v %v", current, err)
 			}
 			var pending, superseded int64
-			if err := store.db.Model(&ReleaseTargetRecord{}).Where("workspace_id = ? AND instance_uid = ? AND status = ?", p.WorkspaceID, id, "PENDING").Count(&pending).Error; err != nil {
+			if err := store.db.Model(&ReleaseTargetRecord{}).Where("org_id = ? AND instance_uid = ? AND status = ?", p.OrgID, id, "PENDING").Count(&pending).Error; err != nil {
 				t.Fatal(err)
 			}
-			if err := store.db.Model(&ReleaseTargetRecord{}).Where("workspace_id = ? AND instance_uid = ? AND status = ?", p.WorkspaceID, id, "SUPERSEDED").Count(&superseded).Error; err != nil {
+			if err := store.db.Model(&ReleaseTargetRecord{}).Where("org_id = ? AND instance_uid = ? AND status = ?", p.OrgID, id, "SUPERSEDED").Count(&superseded).Error; err != nil {
 				t.Fatal(err)
 			}
 			if pending != 1 || superseded != 3 {
@@ -182,7 +182,7 @@ func TestSingleAgentReleaseContractPostgresAndMySQL(t *testing.T) {
 			}
 			for _, table := range []string{"config_releases", "release_targets", "config_events"} {
 				var count int64
-				if err := store.db.Table(table).Where("workspace_id = ?", p.WorkspaceID).Count(&count).Error; err != nil {
+				if err := store.db.Table(table).Where("org_id = ?", p.OrgID).Count(&count).Error; err != nil {
 					t.Fatal(err)
 				}
 				if count != 4 {
@@ -197,12 +197,12 @@ func TestSingleAgentReleaseContractPostgresAndMySQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			restored, err := store.GetAgentAssignment(ctx, p.WorkspaceID, id)
+			restored, err := store.GetAgentAssignment(ctx, p.OrgID, id)
 			if err != nil || restored.ReleaseID != current.ReleaseID || restored.DesiredGeneration != 4 {
 				t.Fatalf("restart lost Desired: %+v %v", restored, err)
 			}
-			if _, err := store.GetAgentAssignment(ctx, "other-workspace", id); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("cross-workspace assignment leaked: %v", err)
+			if _, err := store.GetAgentAssignment(ctx, fixtureOrgID("other-org"), id); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("cross-org assignment leaked: %v", err)
 			}
 		})
 	}
@@ -222,19 +222,19 @@ func TestUnsupportedReleaseDoesNotCreateAssignment(t *testing.T) {
 			}
 			defer store.Close()
 			id := newUID(t)
-			p := auth.Principal{WorkspaceID: "reject-workspace", CredentialID: "nonjava-agent"}
+			p := auth.Principal{OrgID: fixtureOrgID("reject-org"), CredentialID: "nonjava-agent"}
 			if _, err := store.Observe(ctx, p, id, Observation{SeenAt: time.Now().UTC(), Transport: "http", Capabilities: 3, Description: &Description{Kind: "go-apm"}}); err != nil {
 				t.Fatal(err)
 			}
 			snapshot, _ := config.CompileJavaSampling(0.5)
-			revision, err := store.CreateConfigRevision(ctx, p.WorkspaceID, "admin", snapshot)
+			revision, err := store.CreateConfigRevision(ctx, p.OrgID, "admin", snapshot)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.PublishAgentConfig(ctx, p.WorkspaceID, id, revision.ConfigRevisionID, "admin", ""); !errors.Is(err, ErrUnsupportedReleaseTarget) {
+			if _, err := store.PublishAgentConfig(ctx, p.OrgID, id, revision.ConfigRevisionID, "admin", ""); !errors.Is(err, ErrUnsupportedReleaseTarget) {
 				t.Fatalf("non-Java Agent accepted Java config: %v", err)
 			}
-			if _, err := store.GetAgentAssignment(ctx, p.WorkspaceID, id); !errors.Is(err, ErrNotFound) {
+			if _, err := store.GetAgentAssignment(ctx, p.OrgID, id); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("unsupported config wrote Desired: %v", err)
 			}
 		})
@@ -257,10 +257,10 @@ func TestReleaseIdempotencyKeyAcrossConcurrentTargets(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			workspace := "concurrent-idempotency-workspace"
+			org := fixtureOrgID("concurrent-idempotency-org")
 			uidA, uidB := newUID(t), newUID(t)
 			for _, id := range []string{uidA, uidB} {
-				if _, err := store.Observe(ctx, auth.Principal{WorkspaceID: workspace, CredentialID: "owner"},
+				if _, err := store.Observe(ctx, auth.Principal{OrgID: org, CredentialID: "owner"},
 					id, Observation{
 						SeenAt: time.Now().UTC(), Transport: "http",
 						Capabilities: uint64(protobufs.AgentCapabilities_AgentCapabilities_ReportsStatus |
@@ -271,7 +271,7 @@ func TestReleaseIdempotencyKeyAcrossConcurrentTargets(t *testing.T) {
 				}
 			}
 			snapshot, _ := config.CompileJavaSampling(0.5)
-			revision, err := store.CreateConfigRevision(ctx, workspace, "admin", snapshot)
+			revision, err := store.CreateConfigRevision(ctx, org, "admin", snapshot)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -286,7 +286,7 @@ func TestReleaseIdempotencyKeyAcrossConcurrentTargets(t *testing.T) {
 				wg.Add(1)
 				go func(id string) {
 					defer wg.Done()
-					_, err := store.PublishAgentConfig(ctx, workspace, id, revision.ConfigRevisionID, "admin", key)
+					_, err := store.PublishAgentConfig(ctx, org, id, revision.ConfigRevisionID, "admin", key)
 					results <- outcome{uid: id, err: err}
 				}(id)
 			}
@@ -308,7 +308,7 @@ func TestReleaseIdempotencyKeyAcrossConcurrentTargets(t *testing.T) {
 			}
 			var count int64
 			if err := store.db.Model(&ConfigReleaseRecord{}).
-				Where("workspace_id = ? AND idempotency_key = ?", workspace, key).
+				Where("org_id = ? AND idempotency_key = ?", org, key).
 				Count(&count).Error; err != nil {
 				t.Fatal(err)
 			}

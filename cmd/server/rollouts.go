@@ -13,19 +13,19 @@ import (
 )
 
 type rolloutStore interface {
-	PublishRollout(context.Context, string, string, string, []string, int, string) (gormrepo.RolloutView, error)
-	PublishPolicyRollout(context.Context, string, string, string, gormrepo.PolicyRolloutFilter, int, string) (gormrepo.RolloutView, error)
-	ResumeRollout(context.Context, string, string, string, int64) (gormrepo.RolloutView, error)
-	PublishRollback(context.Context, string, string, string, string, int64, int, string) (gormrepo.RolloutView, error)
-	AdvanceRollout(context.Context, string, string, string) (gormrepo.RolloutView, error)
-	GetRollout(context.Context, string, string) (gormrepo.RolloutView, error)
+	PublishRollout(context.Context, int64, string, string, []string, int, string) (gormrepo.RolloutView, error)
+	PublishPolicyRollout(context.Context, int64, string, string, gormrepo.PolicyRolloutFilter, int, string) (gormrepo.RolloutView, error)
+	ResumeRollout(context.Context, int64, string, string, int64) (gormrepo.RolloutView, error)
+	PublishRollback(context.Context, int64, string, string, string, int64, int, string) (gormrepo.RolloutView, error)
+	AdvanceRollout(context.Context, int64, string, string) (gormrepo.RolloutView, error)
+	GetRollout(context.Context, int64, string) (gormrepo.RolloutView, error)
 }
 
 // adminRolloutHandler manages explicit, bounded multi-Agent batches without
 // performing any network sends inside the database transaction.
-func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, onPublished func(string, string)) http.Handler {
+func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, onPublished func(int64, string)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		// 1. 先授权 Workspace；不允许 Agent 自报身份或跨作用域查询。
+		// 1. 先授权 Org；不允许 Agent 自报身份或跨作用域查询。
 		principal, ok := credentials.Authenticate(req.Header.Get("Authorization"))
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -53,7 +53,7 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 				http.Error(w, "unexpected trailing JSON", http.StatusBadRequest)
 				return
 			}
-			result, err = store.PublishRollout(req.Context(), principal.WorkspaceID, principal.CredentialID,
+			result, err = store.PublishRollout(req.Context(), principal.OrgID, principal.CredentialID,
 				body.ConfigRevisionID, body.InstanceUIDs, body.BatchSize, req.Header.Get("Idempotency-Key"))
 			code = http.StatusAccepted
 		case req.Method == http.MethodPost && req.PathValue("release_id") != "" &&
@@ -74,7 +74,7 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 				http.Error(w, "unexpected trailing JSON", http.StatusBadRequest)
 				return
 			}
-			result, err = store.PublishRollback(req.Context(), principal.WorkspaceID,
+			result, err = store.PublishRollback(req.Context(), principal.OrgID,
 				principal.CredentialID, req.PathValue("release_id"), body.ConfigRevisionID,
 				body.RowVersion, body.BatchSize, req.Header.Get("Idempotency-Key"))
 			code = http.StatusAccepted
@@ -96,7 +96,7 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 				http.Error(w, "unexpected trailing JSON", http.StatusBadRequest)
 				return
 			}
-			result, err = store.PublishPolicyRollout(req.Context(), principal.WorkspaceID, principal.CredentialID,
+			result, err = store.PublishPolicyRollout(req.Context(), principal.OrgID, principal.CredentialID,
 				body.PolicyRevisionID, gormrepo.PolicyRolloutFilter{
 					Environment: body.Environment, ServiceName: body.ServiceName,
 				}, body.BatchSize, req.Header.Get("Idempotency-Key"))
@@ -116,14 +116,14 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 				http.Error(w, "unexpected trailing JSON", http.StatusBadRequest)
 				return
 			}
-			result, err = store.ResumeRollout(req.Context(), principal.WorkspaceID,
+			result, err = store.ResumeRollout(req.Context(), principal.OrgID,
 				req.PathValue("release_id"), principal.CredentialID, body.RowVersion)
 		case req.Method == http.MethodPost && req.PathValue("release_id") != "":
 			advance = true
-			result, err = store.AdvanceRollout(req.Context(), principal.WorkspaceID,
+			result, err = store.AdvanceRollout(req.Context(), principal.OrgID,
 				req.PathValue("release_id"), principal.CredentialID)
 		case req.Method == http.MethodGet && req.PathValue("release_id") != "":
-			result, err = store.GetRollout(req.Context(), principal.WorkspaceID, req.PathValue("release_id"))
+			result, err = store.GetRollout(req.Context(), principal.OrgID, req.PathValue("release_id"))
 		default:
 			http.NotFound(w, req)
 			return
@@ -147,7 +147,7 @@ func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, on
 		default:
 			if onPublished != nil {
 				for _, uid := range result.Activated {
-					onPublished(principal.WorkspaceID, uid)
+					onPublished(principal.OrgID, uid)
 				}
 			}
 			if advance && result.Status == "PAUSED" {

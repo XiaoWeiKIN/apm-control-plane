@@ -43,18 +43,18 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			workspace := "p25-api-workspace"
+			org := fixtureOrgID("p25-api-org")
 			rawUID := make([]byte, 16)
 			if _, err := rand.Read(rawUID); err != nil {
 				t.Fatal(err)
 			}
 			uid := hex.EncodeToString(rawUID)
 			agentAuth := auth.New([]appconfig.Credential{{
-				ID: "java-agent", WorkspaceID: workspace, Token: "p25-agent-token-long",
+				ID: "java-agent", OrgID: org, Token: "p25-agent-token-long",
 			}})
 			adminAuth := auth.New([]appconfig.Credential{
-				{ID: "admin-a", WorkspaceID: workspace, Token: "p25-admin-token-long"},
-				{ID: "admin-b", WorkspaceID: "another-workspace", Token: "p25-other-admin-token-long"},
+				{ID: "admin-a", OrgID: org, Token: "p25-admin-token-long"},
+				{ID: "admin-b", OrgID: fixtureOrgID("another-org"), Token: "p25-other-admin-token-long"},
 			})
 			reg := newRegistry(store, time.Second)
 			reg.delivery = store
@@ -117,11 +117,11 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 				t.Fatal("unassigned Agent received config")
 			}
 
-			_, revision, err := store.CreatePolicy(ctx, workspace, "admin-a", "checkout", 0.35)
+			_, revision, err := store.CreatePolicy(ctx, org, "admin-a", "checkout", 0.35)
 			if err != nil {
 				t.Fatal(err)
 			}
-			binding, err := store.CreatePolicyBinding(ctx, workspace, "admin-a", gormrepo.BindingInput{
+			binding, err := store.CreatePolicyBinding(ctx, org, "admin-a", gormrepo.BindingInput{
 				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 10,
 			})
@@ -161,7 +161,7 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 			post("p25-other-admin-token-long", body, http.StatusNotFound)
 			post("p25-admin-token-long", []byte(`{"policy_revision_id":"invalid"}`), http.StatusBadRequest)
 			post("p25-admin-token-long", []byte(`{"policy_revision_id":"zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz"}`), http.StatusBadRequest)
-			disabled, err := store.UpdatePolicyBinding(ctx, workspace, "admin-a", binding.BindingID, gormrepo.BindingInput{
+			disabled, err := store.UpdatePolicyBinding(ctx, org, "admin-a", binding.BindingID, gormrepo.BindingInput{
 				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 10,
 				Enabled: false, RowVersion: binding.RowVersion,
@@ -171,7 +171,7 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 			}
 			post("p25-admin-token-long", body, http.StatusConflict)
 			post("p25-admin-token-long", []byte(`{"policy_revision_id":"00000000-0000-4000-8000-000000000000"}`), http.StatusNotFound)
-			if _, err := store.UpdatePolicyBinding(ctx, workspace, "admin-a", binding.BindingID, gormrepo.BindingInput{
+			if _, err := store.UpdatePolicyBinding(ctx, org, "admin-a", binding.BindingID, gormrepo.BindingInput{
 				PolicyRevisionID: revision.PolicyRevisionID, ScopeType: policy.ScopeService,
 				Selector: policy.Selector{ServiceName: "checkout"}, Priority: 10,
 				Enabled: true, RowVersion: disabled.RowVersion,
@@ -191,7 +191,7 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 			if remote == nil {
 				t.Fatal("HTTP OpAMP did not deliver Policy-derived ConfigMap")
 			}
-			saved, err := store.GetConfigRevision(ctx, workspace, release.ConfigRevisionID)
+			saved, err := store.GetConfigRevision(ctx, org, release.ConfigRevisionID)
 			if err != nil || !bytes.Equal(remote.ConfigHash, mustHash(t, saved.ConfigHash)) ||
 				remote.Config.GetConfigMap()["apm/sampling.json"] == nil {
 				t.Fatalf("OpAMP ConfigMap/hash differs from durable policy compilation: %+v %v", remote, err)
@@ -201,7 +201,7 @@ func TestPolicyReleaseOpAMPHTTPPostgresAndMySQL(t *testing.T) {
 				LastRemoteConfigHash: remote.ConfigHash,
 			}
 			send(3, applied)
-			state, err := store.GetAgentAssignment(ctx, workspace, uid)
+			state, err := store.GetAgentAssignment(ctx, org, uid)
 			if err != nil || state.State != "APPLIED" || state.ReleaseID != release.ReleaseID {
 				t.Fatalf("policy release did not converge: %+v %v", state, err)
 			}

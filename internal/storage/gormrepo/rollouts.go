@@ -35,7 +35,7 @@ type RolloutTarget struct {
 }
 
 type RolloutView struct {
-	WorkspaceID         string          `json:"workspace_id"`
+	OrgID               int64           `json:"org_id"`
 	ReleaseID           string          `json:"release_id"`
 	Status              string          `json:"status"`
 	RowVersion          int64           `json:"row_version"`
@@ -64,14 +64,14 @@ type rollbackIntent struct {
 
 // PublishRollout freezes an explicitly bounded target set and activates batch 0
 // in one transaction. Later batches remain QUEUED without changing Desired.
-func (s *Store) PublishRollout(ctx context.Context, workspace, actor, configID string, uids []string, batchSize int, key string) (RolloutView, error) {
-	return s.publishRollout(ctx, workspace, actor, configID, uids, batchSize, key, nil)
+func (s *Store) PublishRollout(ctx context.Context, org int64, actor, configID string, uids []string, batchSize int, key string) (RolloutView, error) {
+	return s.publishRollout(ctx, org, actor, configID, uids, batchSize, key, nil)
 }
 
 // publishRollout reuses the P3.1 transaction for a compensating Release.
-func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID string, uids []string, batchSize int, key string, rollback *rollbackIntent) (RolloutView, error) {
+func (s *Store) publishRollout(ctx context.Context, org int64, actor, configID string, uids []string, batchSize int, key string, rollback *rollbackIntent) (RolloutView, error) {
 	// 1. 在开事务前规范化目标，拒绝重复 UID、无界批量和无效作用域。
-	if workspace == "" || utf8.RuneCountInString(workspace) > 96 ||
+	if org <= 0 ||
 		actor == "" || utf8.RuneCountInString(actor) > 128 ||
 		len(configID) != 36 || utf8.RuneCountInString(key) > 128 ||
 		len(uids) < 2 || len(uids) > maxRolloutTargets || batchSize < 1 || batchSize > len(uids) {
@@ -116,7 +116,7 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 		for _, uid := range targets {
 			var agent AgentRecord
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("workspace_id = ? AND instance_uid = ?", workspace, uid).Take(&agent).Error; err != nil {
+				Where("org_id = ? AND instance_uid = ?", org, uid).Take(&agent).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return ErrNotFound
 				}
@@ -126,7 +126,7 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 		}
 		if key != "" {
 			var previous ConfigReleaseRecord
-			err := tx.Where("workspace_id = ? AND idempotency_key = ?", workspace, key).Take(&previous).Error
+			err := tx.Where("org_id = ? AND idempotency_key = ?", org, key).Take(&previous).Error
 			if err == nil {
 				if previous.RequestSHA256 != requestHash {
 					return ErrReleaseConflict
@@ -142,7 +142,7 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 			// 幂等回放后锁定源 Release，验证其类型、CAS 和可补偿状态。
 			var source ConfigReleaseRecord
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("workspace_id = ? AND release_id = ?", workspace, rollback.SourceReleaseID).
+				Where("org_id = ? AND release_id = ?", org, rollback.SourceReleaseID).
 				Take(&source).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return ErrRolloutNotFound
@@ -162,7 +162,7 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 				return ErrRolloutBlocked
 			}
 			var sourceTargets []ReleaseTargetRecord
-			if err := tx.Where("workspace_id = ? AND release_id = ?", workspace, source.ReleaseID).
+			if err := tx.Where("org_id = ? AND release_id = ?", org, source.ReleaseID).
 				Order("instance_uid").Find(&sourceTargets).Error; err != nil {
 				return err
 			}
@@ -176,7 +176,7 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 			}
 		}
 		var revision ConfigRevisionRecord
-		if err := tx.Where("workspace_id = ? AND config_revision_id = ?", workspace, configID).
+		if err := tx.Where("org_id = ? AND config_revision_id = ?", org, configID).
 			Take(&revision).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrConfigRevisionNotFound
@@ -196,7 +196,7 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 				return ErrUnsupportedReleaseTarget
 			}
 			var current AgentAssignmentRecord
-			err := tx.Where("workspace_id = ? AND instance_uid = ?", workspace, uid).Take(&current).Error
+			err := tx.Where("org_id = ? AND instance_uid = ?", org, uid).Take(&current).Error
 			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
@@ -229,7 +229,7 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 			idem = &key
 		}
 		release := ConfigReleaseRecord{
-			WorkspaceID: workspace, ReleaseID: id, AgentKind: revision.AgentKind,
+			OrgID: org, ReleaseID: id, AgentKind: revision.AgentKind,
 			TargetSelectorJSON: string(selector), RequestSHA256: requestHash,
 			IdempotencyKey: idem, RolloutPlanJSON: string(rolloutJSON),
 			Status: "RUNNING", RowVersion: 1, RequestedBy: actor,
@@ -260,7 +260,7 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 				return err
 			}
 			if err := tx.Create(&ConfigEventRecord{
-				WorkspaceID: workspace, EventID: id, EventType: "ROLLBACK_REQUESTED",
+				OrgID: org, EventID: id, EventType: "ROLLBACK_REQUESTED",
 				ReleaseID: &release.ReleaseID, ActorType: "ADMIN", ActorID: actor,
 				DetailsJSON: string(details), OccurredAt: now,
 			}).Error; err != nil {
@@ -277,14 +277,14 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 				status = "PENDING"
 			}
 			target := ReleaseTargetRecord{
-				WorkspaceID: workspace, ReleaseID: id, InstanceUID: uid,
+				OrgID: org, ReleaseID: id, InstanceUID: uid,
 				ConfigRevisionID: configID, BatchNo: i / batchSize, Status: status,
 				DesiredGeneration: generation, LastError: "", CreatedAt: now, UpdatedAt: now,
 			}
 			if err := tx.Create(&target).Error; err != nil {
 				return err
 			}
-			if err := rolloutEventTx(tx, workspace, id, uid, generation, "TARGET_FROZEN", actor, now); err != nil {
+			if err := rolloutEventTx(tx, org, id, uid, generation, "TARGET_FROZEN", actor, now); err != nil {
 				return err
 			}
 		}
@@ -296,10 +296,10 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 			if current != nil {
 				generation = current.DesiredGeneration + 1
 			}
-			if err := rolloutAssignTx(tx, workspace, uid, id, configID, revision.ConfigHash, generation, current, actor, now); err != nil {
+			if err := rolloutAssignTx(tx, org, uid, id, configID, revision.ConfigHash, generation, current, actor, now); err != nil {
 				return err
 			}
-			if err := rolloutEventTx(tx, workspace, id, uid, generation, "TARGET_ASSIGNED", actor, now); err != nil {
+			if err := rolloutEventTx(tx, org, id, uid, generation, "TARGET_ASSIGNED", actor, now); err != nil {
 				return err
 			}
 		}
@@ -314,13 +314,13 @@ func (s *Store) publishRollout(ctx context.Context, workspace, actor, configID s
 
 // AdvanceRollout starts exactly the next frozen batch after all earlier targets
 // are APPLIED. It never activates a partial batch after a stale Generation.
-func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor string) (RolloutView, error) {
-	if !policyIdentityOK(workspace, actor) || len(releaseID) != 36 {
+func (s *Store) AdvanceRollout(ctx context.Context, org int64, releaseID, actor string) (RolloutView, error) {
+	if !policyIdentityOK(org, actor) || len(releaseID) != 36 {
 		return RolloutView{}, ErrInvalidRollout
 	}
 	// 1. 不可变目标列表在事务外读取，避免 MySQL RR 创建过早的读快照。
 	var frozen []ReleaseTargetRecord
-	if err := s.db.WithContext(ctx).Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
+	if err := s.db.WithContext(ctx).Where("org_id = ? AND release_id = ?", org, releaseID).
 		Order("instance_uid").Find(&frozen).Error; err != nil {
 		return RolloutView{}, err
 	}
@@ -335,7 +335,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 		for _, target := range frozen {
 			var agent AgentRecord
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("workspace_id = ? AND instance_uid = ?", workspace, target.InstanceUID).
+				Where("org_id = ? AND instance_uid = ?", org, target.InstanceUID).
 				Take(&agent).Error; err != nil {
 				return err
 			}
@@ -343,7 +343,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 		}
 		var release ConfigReleaseRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
+			Where("org_id = ? AND release_id = ?", org, releaseID).
 			Take(&release).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrRolloutNotFound
@@ -365,7 +365,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 		if release.Status != "RUNNING" {
 			return ErrRolloutBlocked
 		}
-		if err := tx.Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
+		if err := tx.Where("org_id = ? AND release_id = ?", org, releaseID).
 			Order("batch_no, instance_uid").Find(&frozen).Error; err != nil {
 			return err
 		}
@@ -394,7 +394,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 			if err := rolloutStateTx(tx, release, "PAUSED", now); err != nil {
 				return err
 			}
-			if err := rolloutEventTx(tx, workspace, releaseID, blocked, 0, "ROLLOUT_PAUSED", actor, now); err != nil {
+			if err := rolloutEventTx(tx, org, releaseID, blocked, 0, "ROLLOUT_PAUSED", actor, now); err != nil {
 				return err
 			}
 			result, err = rolloutViewTx(tx, release)
@@ -414,7 +414,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 			}
 		}
 		var revision ConfigRevisionRecord
-		if err := tx.Where("workspace_id = ? AND config_revision_id = ?", workspace, next[0].ConfigRevisionID).
+		if err := tx.Where("org_id = ? AND config_revision_id = ?", org, next[0].ConfigRevisionID).
 			Take(&revision).Error; err != nil {
 			return err
 		}
@@ -430,7 +430,7 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 				break
 			}
 			var assignment AgentAssignmentRecord
-			err := tx.Where("workspace_id = ? AND instance_uid = ?", workspace, target.InstanceUID).
+			err := tx.Where("org_id = ? AND instance_uid = ?", org, target.InstanceUID).
 				Take(&assignment).Error
 			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
@@ -452,15 +452,15 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 		if blocked != "" {
 			// 4. 后续目标发生能力变化或 Generation 冲突时记录暂停，不激活任何目标。
 			if err := tx.Model(&ReleaseTargetRecord{}).
-				Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND status = 'QUEUED'",
-					workspace, releaseID, blocked).
+				Where("org_id = ? AND release_id = ? AND instance_uid = ? AND status = 'QUEUED'",
+					org, releaseID, blocked).
 				Updates(map[string]any{"status": blockedStatus, "updated_at": now}).Error; err != nil {
 				return err
 			}
 			if err := rolloutStateTx(tx, release, "PAUSED", now); err != nil {
 				return err
 			}
-			if err := rolloutEventTx(tx, workspace, releaseID, blocked, 0, "ROLLOUT_PAUSED", actor, now); err != nil {
+			if err := rolloutEventTx(tx, org, releaseID, blocked, 0, "ROLLOUT_PAUSED", actor, now); err != nil {
 				return err
 			}
 			result, err = rolloutViewTx(tx, release)
@@ -474,8 +474,8 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 		// 5. 下一批所有 Target/Assignment/审计在一个事务中推进。
 		for _, target := range next {
 			r := tx.Model(&ReleaseTargetRecord{}).
-				Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND status = 'QUEUED'",
-					workspace, releaseID, target.InstanceUID).
+				Where("org_id = ? AND release_id = ? AND instance_uid = ? AND status = 'QUEUED'",
+					org, releaseID, target.InstanceUID).
 				Updates(map[string]any{"status": "PENDING", "updated_at": now})
 			if r.Error != nil {
 				return r.Error
@@ -483,11 +483,11 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 			if r.RowsAffected != 1 {
 				return ErrAssignmentConflict
 			}
-			if err := rolloutAssignTx(tx, workspace, target.InstanceUID, releaseID, target.ConfigRevisionID,
+			if err := rolloutAssignTx(tx, org, target.InstanceUID, releaseID, target.ConfigRevisionID,
 				revision.ConfigHash, target.DesiredGeneration, current[target.InstanceUID], actor, now); err != nil {
 				return err
 			}
-			if err := rolloutEventTx(tx, workspace, releaseID, target.InstanceUID,
+			if err := rolloutEventTx(tx, org, releaseID, target.InstanceUID,
 				target.DesiredGeneration, "TARGET_ASSIGNED", actor, now); err != nil {
 				return err
 			}
@@ -508,18 +508,18 @@ func (s *Store) AdvanceRollout(ctx context.Context, workspace, releaseID, actor 
 	return result, err
 }
 
-func rolloutAssignTx(tx *gorm.DB, workspace, uid, releaseID, configID, hash string,
+func rolloutAssignTx(tx *gorm.DB, org int64, uid, releaseID, configID, hash string,
 	generation int64, current *AgentAssignmentRecord, actor string, now time.Time) error {
 	if current == nil {
 		return tx.Create(&AgentAssignmentRecord{
-			WorkspaceID: workspace, InstanceUID: uid, ReleaseID: releaseID, ConfigRevisionID: configID,
+			OrgID: org, InstanceUID: uid, ReleaseID: releaseID, ConfigRevisionID: configID,
 			DesiredHash: hash, DesiredGeneration: generation, RowVersion: 1,
 			State: "PENDING", LastError: "", UpdatedAt: now,
 		}).Error
 	}
 	r := tx.Model(&AgentAssignmentRecord{}).
-		Where("workspace_id = ? AND instance_uid = ? AND desired_generation = ? AND row_version = ?",
-			workspace, uid, current.DesiredGeneration, current.RowVersion).
+		Where("org_id = ? AND instance_uid = ? AND desired_generation = ? AND row_version = ?",
+			org, uid, current.DesiredGeneration, current.RowVersion).
 		Updates(map[string]any{
 			"release_id": releaseID, "config_revision_id": configID, "desired_hash": hash,
 			"desired_generation": generation, "row_version": current.RowVersion + 1,
@@ -541,8 +541,8 @@ func supersedePreviousTargetTx(tx *gorm.DB, current AgentAssignmentRecord, actor
 	// 1. 锁定旧 Target，避免与同一 Agent 的状态回执交错。
 	var target ReleaseTargetRecord
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("workspace_id = ? AND release_id = ? AND instance_uid = ?",
-			current.WorkspaceID, current.ReleaseID, current.InstanceUID).
+		Where("org_id = ? AND release_id = ? AND instance_uid = ?",
+			current.OrgID, current.ReleaseID, current.InstanceUID).
 		Take(&target).Error; err != nil {
 		return err
 	}
@@ -555,7 +555,7 @@ func supersedePreviousTargetTx(tx *gorm.DB, current AgentAssignmentRecord, actor
 	// 2. 已完成的历史发布保留 APPLIED；未完成的多 Agent 发布立即暂停。
 	var previous ConfigReleaseRecord
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("workspace_id = ? AND release_id = ?", current.WorkspaceID, current.ReleaseID).
+		Where("org_id = ? AND release_id = ?", current.OrgID, current.ReleaseID).
 		Take(&previous).Error; err != nil {
 		return err
 	}
@@ -567,8 +567,8 @@ func supersedePreviousTargetTx(tx *gorm.DB, current AgentAssignmentRecord, actor
 		return nil
 	}
 	r := tx.Model(&ReleaseTargetRecord{}).
-		Where("workspace_id = ? AND release_id = ? AND instance_uid = ? AND status = ?",
-			current.WorkspaceID, current.ReleaseID, current.InstanceUID, target.Status).
+		Where("org_id = ? AND release_id = ? AND instance_uid = ? AND status = ?",
+			current.OrgID, current.ReleaseID, current.InstanceUID, target.Status).
 		Updates(map[string]any{"status": "SUPERSEDED", "updated_at": now})
 	if r.Error != nil {
 		return r.Error
@@ -582,11 +582,11 @@ func supersedePreviousTargetTx(tx *gorm.DB, current AgentAssignmentRecord, actor
 	if err := rolloutStateTx(tx, previous, "PAUSED", now); err != nil {
 		return err
 	}
-	return rolloutEventTx(tx, current.WorkspaceID, current.ReleaseID, current.InstanceUID,
+	return rolloutEventTx(tx, current.OrgID, current.ReleaseID, current.InstanceUID,
 		current.DesiredGeneration, "ROLLOUT_PAUSED", actor, now)
 }
 
-func rolloutEventTx(tx *gorm.DB, workspace, releaseID, uid string, generation int64,
+func rolloutEventTx(tx *gorm.DB, org int64, releaseID, uid string, generation int64,
 	eventType, actor string, now time.Time) error {
 	id, err := newReleaseUUID()
 	if err != nil {
@@ -597,7 +597,7 @@ func rolloutEventTx(tx *gorm.DB, workspace, releaseID, uid string, generation in
 		gen = &generation
 	}
 	return tx.Create(&ConfigEventRecord{
-		WorkspaceID: workspace, EventID: id, ReleaseID: &releaseID, InstanceUID: &uid,
+		OrgID: org, EventID: id, ReleaseID: &releaseID, InstanceUID: &uid,
 		DesiredGeneration: gen, EventType: eventType, ActorType: "ADMIN",
 		ActorID: actor, DetailsJSON: "{}", OccurredAt: now,
 	}).Error
@@ -614,8 +614,8 @@ func rolloutStateTx(tx *gorm.DB, release ConfigReleaseRecord, status string, now
 		updates["finished_at"] = nil
 	}
 	r := tx.Model(&ConfigReleaseRecord{}).
-		Where("workspace_id = ? AND release_id = ? AND row_version = ?",
-			release.WorkspaceID, release.ReleaseID, release.RowVersion).Updates(updates)
+		Where("org_id = ? AND release_id = ? AND row_version = ?",
+			release.OrgID, release.ReleaseID, release.RowVersion).Updates(updates)
 	if r.Error != nil {
 		return r.Error
 	}
@@ -627,12 +627,12 @@ func rolloutStateTx(tx *gorm.DB, release ConfigReleaseRecord, status string, now
 
 func rolloutViewTx(tx *gorm.DB, release ConfigReleaseRecord) (RolloutView, error) {
 	var frozen []ReleaseTargetRecord
-	err := tx.Where("workspace_id = ? AND release_id = ?", release.WorkspaceID, release.ReleaseID).
+	err := tx.Where("org_id = ? AND release_id = ?", release.OrgID, release.ReleaseID).
 		Order("batch_no, instance_uid").Find(&frozen).Error
 	if err != nil {
 		return RolloutView{}, err
 	}
-	result := RolloutView{WorkspaceID: release.WorkspaceID, ReleaseID: release.ReleaseID,
+	result := RolloutView{OrgID: release.OrgID, ReleaseID: release.ReleaseID,
 		Status: release.Status, RowVersion: release.RowVersion, RollbackOfReleaseID: release.RollbackOfReleaseID, Targets: make([]RolloutTarget, 0, len(frozen))}
 	for _, target := range frozen {
 		result.Targets = append(result.Targets, RolloutTarget{
@@ -645,14 +645,14 @@ func rolloutViewTx(tx *gorm.DB, release ConfigReleaseRecord) (RolloutView, error
 
 // ResumeRollout only clears PAUSED after a matching explicit Admin CAS.
 // No failed or superseded Target is silently retried or replaced.
-func (s *Store) ResumeRollout(ctx context.Context, workspace, releaseID, actor string, expectedVersion int64) (RolloutView, error) {
-	if !policyIdentityOK(workspace, actor) || len(releaseID) != 36 || expectedVersion < 1 {
+func (s *Store) ResumeRollout(ctx context.Context, org int64, releaseID, actor string, expectedVersion int64) (RolloutView, error) {
+	if !policyIdentityOK(org, actor) || len(releaseID) != 36 || expectedVersion < 1 {
 		return RolloutView{}, ErrInvalidRollout
 	}
 
 	// 1. 在事务外读取不可变目标 UID，保证后续锁顺序与发布/Advance 一致。
 	var frozen []ReleaseTargetRecord
-	if err := s.db.WithContext(ctx).Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
+	if err := s.db.WithContext(ctx).Where("org_id = ? AND release_id = ?", org, releaseID).
 		Order("instance_uid").Find(&frozen).Error; err != nil {
 		return RolloutView{}, err
 	}
@@ -665,14 +665,14 @@ func (s *Store) ResumeRollout(ctx context.Context, workspace, releaseID, actor s
 		for _, target := range frozen {
 			var agent AgentRecord
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("workspace_id = ? AND instance_uid = ?", workspace, target.InstanceUID).
+				Where("org_id = ? AND instance_uid = ?", org, target.InstanceUID).
 				Take(&agent).Error; err != nil {
 				return err
 			}
 		}
 		var release ConfigReleaseRecord
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
+			Where("org_id = ? AND release_id = ?", org, releaseID).
 			Take(&release).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrRolloutNotFound
@@ -689,7 +689,7 @@ func (s *Store) ResumeRollout(ctx context.Context, workspace, releaseID, actor s
 		if release.Status != "PAUSED" {
 			return ErrRolloutBlocked
 		}
-		if err := tx.Where("workspace_id = ? AND release_id = ?", workspace, releaseID).
+		if err := tx.Where("org_id = ? AND release_id = ?", org, releaseID).
 			Order("batch_no, instance_uid").Find(&frozen).Error; err != nil {
 			return err
 		}
@@ -701,7 +701,7 @@ func (s *Store) ResumeRollout(ctx context.Context, workspace, releaseID, actor s
 			case "QUEUED":
 				queued++
 				var assignment AgentAssignmentRecord
-				err := tx.Where("workspace_id = ? AND instance_uid = ?", workspace, target.InstanceUID).
+				err := tx.Where("org_id = ? AND instance_uid = ?", org, target.InstanceUID).
 					Take(&assignment).Error
 				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 					return err
@@ -718,7 +718,7 @@ func (s *Store) ResumeRollout(ctx context.Context, workspace, releaseID, actor s
 				}
 			case "APPLIED":
 				var assignment AgentAssignmentRecord
-				if err := tx.Where("workspace_id = ? AND instance_uid = ?", workspace, target.InstanceUID).
+				if err := tx.Where("org_id = ? AND instance_uid = ?", org, target.InstanceUID).
 					Take(&assignment).Error; err != nil {
 					return err
 				}
@@ -740,7 +740,7 @@ func (s *Store) ResumeRollout(ctx context.Context, workspace, releaseID, actor s
 		if err := rolloutStateTx(tx, release, status, now); err != nil {
 			return err
 		}
-		if err := rolloutEventTx(tx, workspace, releaseID, frozen[0].InstanceUID, 0,
+		if err := rolloutEventTx(tx, org, releaseID, frozen[0].InstanceUID, 0,
 			"ROLLOUT_RESUMED", actor, now); err != nil {
 			return err
 		}
@@ -756,9 +756,9 @@ func (s *Store) ResumeRollout(ctx context.Context, workspace, releaseID, actor s
 	return result, err
 }
 
-func (s *Store) GetRollout(ctx context.Context, workspace, releaseID string) (RolloutView, error) {
+func (s *Store) GetRollout(ctx context.Context, org int64, releaseID string) (RolloutView, error) {
 	var release ConfigReleaseRecord
-	err := s.db.WithContext(ctx).Where("workspace_id = ? AND release_id = ?", workspace, releaseID).Take(&release).Error
+	err := s.db.WithContext(ctx).Where("org_id = ? AND release_id = ?", org, releaseID).Take(&release).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return RolloutView{}, ErrRolloutNotFound
 	}

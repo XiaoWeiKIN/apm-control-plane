@@ -17,7 +17,7 @@ import (
 )
 
 // PolicyRolloutFilter limits the inventory snapshot; omitted fields match the
-// whole Workspace. Inventory attributes select candidates, never authorize them.
+// whole Org. Inventory attributes select candidates, never authorize them.
 type PolicyRolloutFilter struct {
 	Environment string `json:"environment,omitempty"`
 	ServiceName string `json:"service_name,omitempty"`
@@ -25,10 +25,10 @@ type PolicyRolloutFilter struct {
 
 // PublishPolicyRollout selects a bounded inventory snapshot and freezes matching
 // Java Agents in the existing P3.1 atomic rollout transaction.
-func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, policyRevisionID string,
+func (s *Store) PublishPolicyRollout(ctx context.Context, org int64, actor, policyRevisionID string,
 	filter PolicyRolloutFilter, batchSize int, key string) (RolloutView, error) {
-	// 1. 拒绝非法 Workspace、Revision 和候选筛选范围，不接受隐式截断。
-	if !policyIdentityOK(workspace, actor) || len(policyRevisionID) != 36 ||
+	// 1. 拒绝非法 Org、Revision 和候选筛选范围，不接受隐式截断。
+	if !policyIdentityOK(org, actor) || len(policyRevisionID) != 36 ||
 		utf8.RuneCountInString(key) > 128 ||
 		utf8.RuneCountInString(filter.Environment) > 128 ||
 		utf8.RuneCountInString(filter.ServiceName) > 128 ||
@@ -52,7 +52,7 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 	if key != "" {
 		var previous ConfigReleaseRecord
 		err := s.db.WithContext(ctx).
-			Where("workspace_id = ? AND idempotency_key = ?", workspace, key).Take(&previous).Error
+			Where("org_id = ? AND idempotency_key = ?", org, key).Take(&previous).Error
 		if err == nil {
 			if previous.RequestSHA256 != requestHash {
 				return RolloutView{}, ErrReleaseConflict
@@ -61,7 +61,7 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 			if err := json.Unmarshal([]byte(previous.RolloutPlanJSON), &plan); err != nil || plan.BatchSize < 1 {
 				return RolloutView{}, ErrReleaseConflict
 			}
-			return s.GetRollout(ctx, workspace, previous.ReleaseID)
+			return s.GetRollout(ctx, org, previous.ReleaseID)
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return RolloutView{}, err
@@ -72,7 +72,7 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var revision PolicyRevisionRecord
 		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).
-			Where("workspace_id = ? AND policy_revision_id = ?", workspace, policyRevisionID).
+			Where("org_id = ? AND policy_revision_id = ?", org, policyRevisionID).
 			Take(&revision).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return policy.ErrNotFound
@@ -81,7 +81,7 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 		}
 		var parent PolicyRecord
 		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).
-			Where("workspace_id = ? AND policy_id = ?", workspace, revision.PolicyID).
+			Where("org_id = ? AND policy_id = ?", org, revision.PolicyID).
 			Take(&parent).Error; err != nil {
 			return err
 		}
@@ -92,7 +92,7 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 
 		// 3. 锁住有界候选 Agent，再统一读取一次 Binding 快照用于全部目标。
 		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("workspace_id = ? AND agent_kind = ?", workspace, config.JavaAgentKind)
+			Where("org_id = ? AND agent_kind = ?", org, config.JavaAgentKind)
 		if filter.Environment != "" {
 			query = query.Where("environment = ?", filter.Environment)
 		}
@@ -107,7 +107,7 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 		if len(candidates) > maxRolloutTargets || len(candidates) < 2 {
 			return ErrInvalidRollout
 		}
-		entries, err := (&Store{db: tx}).policyBindingSnapshot(ctx, workspace, true)
+		entries, err := (&Store{db: tx}).policyBindingSnapshot(ctx, org, true)
 		if err != nil {
 			return err
 		}
@@ -160,7 +160,7 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 		data := snapshot.ConfigMapBytes()
 		sum := snapshot.Hash()
 		record := ConfigRevisionRecord{
-			WorkspaceID: workspace, ConfigRevisionID: configID,
+			OrgID: org, ConfigRevisionID: configID,
 			SourcePolicyRevisionID: &policyRevisionID,
 			AgentKind:              snapshot.AgentKind(), ConfigDialect: snapshot.ConfigDialect(),
 			PayloadFormat: config.ConfigMapFormat, ConfigMapBytes: data,
@@ -172,7 +172,7 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 		}
 
 		// 5. 复用 P3.1 的完整冻结事务，外层事务保证新 ConfigRevision 同步回滚。
-		result, err = (&Store{db: tx}).PublishRollout(ctx, workspace, actor, configID, uids, batchSize, "")
+		result, err = (&Store{db: tx}).PublishRollout(ctx, org, actor, configID, uids, batchSize, "")
 		if err != nil {
 			return err
 		}
@@ -190,7 +190,7 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 			idem = &key
 		}
 		r := tx.Model(&ConfigReleaseRecord{}).
-			Where("workspace_id = ? AND release_id = ?", workspace, result.ReleaseID).
+			Where("org_id = ? AND release_id = ?", org, result.ReleaseID).
 			Updates(map[string]any{
 				"policy_revision_id":   policyRevisionID,
 				"target_selector_json": string(selector),
@@ -212,13 +212,13 @@ func (s *Store) PublishPolicyRollout(ctx context.Context, workspace, actor, poli
 		// 唯一键竞争事务已回滚；读取胜出者并判断 Request Hash。
 		var previous ConfigReleaseRecord
 		if readErr := s.db.WithContext(ctx).
-			Where("workspace_id = ? AND idempotency_key = ?", workspace, key).Take(&previous).Error; readErr != nil {
+			Where("org_id = ? AND idempotency_key = ?", org, key).Take(&previous).Error; readErr != nil {
 			return RolloutView{}, readErr
 		}
 		if previous.RequestSHA256 != requestHash {
 			return RolloutView{}, ErrReleaseConflict
 		}
-		return s.GetRollout(ctx, workspace, previous.ReleaseID)
+		return s.GetRollout(ctx, org, previous.ReleaseID)
 	}
 	return result, err
 }

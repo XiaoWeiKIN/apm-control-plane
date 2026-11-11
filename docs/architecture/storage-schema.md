@@ -2,21 +2,21 @@
 
 > **文档类型**：面向开发者的详细数据模型 / 实现合同（Proposed）。
 >
-> **日期**：2026-10-19；**数据库**：PostgreSQL / MySQL；**运行架构**：单个部署选择一种主数据库，GORM v2 + Goose。
+> **日期**：2026-10-19；**数据库**：PostgreSQL / MySQL；**运行架构**：单个部署选择一种主数据库，storekit/sqlstore + datafox-schema Go DSL。
 >
-> **实现状态**：P1.1 Inventory 与 P2.1 Java Sampling ConfigRevision 已实现。**P2.2 增量**实现单 Agent Release、冻结 Target、当前 Desired Assignment 和审计事件（PostgreSQL/MySQL Goose 00003、Admin HTTP 202、双数据库事务测试）。**Policy/Selector、OpAMP 实际投递和 ACK Reconciler、P3 多 Agent 灰度与回滚仍未实现。** Workspace/IAM 权限真源集成仍待评审；本文不代替 DD-001 批准。
+> **实现状态**：P1.1 Inventory 与 P2.1 Java Sampling ConfigRevision 已实现。**P2.2 增量**实现单 Agent Release、冻结 Target、当前 Desired Assignment 和审计事件（统一 Schema DSL、Admin HTTP 202、双数据库事务测试）。**Policy/Selector、OpAMP 实际投递和 ACK Reconciler、P3 多 Agent 灰度与回滚仍未实现。** Org/IAM 权限真源集成仍待评审；本文不代替 DD-001 批准。
 >
 > **来源**：[DD-001（Draft）](../design-docs/dd-001_opamp-control-plane.md)、[EP-001（Blocked）](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md)、[FR-001—FR-013](../requirements/APM_CONTROL_PLANE.md)、[P1.1 持久化实现](p1-durable-inventory.md)、[技术选型](technology-selection.md)。
 
 ## 1. 先理解存储模型
 
-**Workspace 是整个可观测系统的工作空间，不是企业客户 Tenant**；与 Logs、Metrics、Traces、Dashboard 等模块使用同一个可信 Workspace 作用域。Workspace 主数据、成员与权限由已有可观测平台管理；本服务只管理 Workspace 内的 Agent、配置发布与审计。**不创建独立 Workspace/Tenant 主数据表**，也不接受 Agent 自报的 Workspace 作为授权来源。
+**Org 是整个可观测平台的组织级租户隔离边界**，与 Logs、Metrics、Traces、Dashboard 共享同一个可信组织 ID、成员及权限体系。组织主数据由平台 Org/IAM 负责；本服务仅管理其下的 Agent、Policy、Release 与审计，不另建组织主表，也不接受 Agent 自报的 `org_id` 作为授权依据。
 
 Control Plane **不存 Span、Metric 或大规模心跳历史**，而是存储 Agent 身份、配置内容、期望状态、实际报告以及配置发布记录。一个 Agent 可以不断重连，但其实例身份不应因网络 Session 改变；一个采样 Policy 可以发布很多次，同一配置 Hash 也可以被不同 Release 复用。
 
 因此，将数据分成三条生命周期：
 
-1. **身份和 Inventory**：可观测平台 Workspace（统一资源作用域）→ 稳定 Agent Principal → Agent Instance。Credential 只是用于验证 Principal 的可轮换方式；网络连接在内存，不在数据库中保存 `net.Conn` 或 OpAMP Connection。
+1. **身份和 Inventory**：可观测平台 Org（统一资源作用域）→ 稳定 Agent Principal → Agent Instance。Credential 只是用于验证 Principal 的可轮换方式；网络连接在内存，不在数据库中保存 `net.Conn` 或 OpAMP Connection。
 2. **不可变定义**：Policy → Policy Revision → 按 AgentKind/ConfigDialect 编译的 Config Revision。内容与 Hash 在创建后不再修改；调整策略创建新版本。
 3. **可变协调与不可变证据**：Release 冻结目标 Agent 集合；Release Target 记录目标批次；Assignment 表表示**每个 Agent 当前的唯一 Desired/Observed 视图**；Config Event 以 append-only 记录发布、回执与回滚历史。
 
@@ -42,7 +42,7 @@ erDiagram
   agent_instances ||--o{ config_events : observed
 ~~~
 
-上述为**本服务内部实体的逻辑关联**，不包含上游工作空间主数据，且不是已执行的物理外键。表中所有引用 `Agent Instance`、`Policy`、`Revision`、`Release` 的业务 ID 都必须携带同一个 `workspace_id`；实现时应采用**复合外键或等价的数据库约束**，不能单靠 API 已检查工作空间来避免跨工作空间关联。
+上述为**本服务内部实体的逻辑关联**，不包含上游组织主数据，且不是已执行的物理外键。表中所有引用 `Agent Instance`、`Policy`、`Revision`、`Release` 的业务 ID 都必须携带同一个 `org_id`；实现时应采用**复合外键或等价的数据库约束**，不能单靠 API 已检查组织来避免跨组织关联。
 
 ### 1.2 表清单与落地阶段
 
@@ -50,11 +50,11 @@ erDiagram
 | --- | --- | --- | --- | --- |
 | `agent_principals` | Agent 的稳定授权主体 | 低频更新 | P2 身份治理 | 未创建 |
 | `credential_bindings` | Credential 引用 → Principal，可轮换 | 低频更新 | P2 身份治理 | 未创建 |
-| `agent_instances` | Agent 身份与最新状态 | 低频身份更新、高频状态更新 | **P1.1** | **已实现 `workspace_id`，见双方言初始化 Migration** |
+| `agent_instances` | Agent 身份与最新状态 | 低频身份更新、高频状态更新 | **P1.1** | **已实现 `org_id`，见双方言初始化 Migration** |
 | `policies` | 策略逻辑身份 | 低频更新 | P2 | 未创建 |
 | `policy_revisions` | 不可变策略版本 | Append-only | P2 | 未创建 |
 | `policy_bindings` | Scope/Selector → 生效版本 | 有 CAS 的少量修改 | P2 | 未创建 |
-| `config_revisions` | 按 AgentKind 编译的不可变完整配置 | Append-only | **P2.1** | **编译与 Goose 00002 已实现，P2.2 可引用已有 Revision** |
+| `config_revisions` | 按 AgentKind 编译的不可变完整配置 | Append-only | **P2.1** | **编译与统一 Schema DSL 已实现，P2.2 可引用已有 Revision** |
 | `config_releases` | 一次发布的命令、状态、幂等键、计划 | 发布创建，状态变更 | P2.2 / P3 灰度 | **单 Agent Pending 发布与幂等键已实现；灰度未实现** |
 | `release_targets` | 某次发布的**冻结目标快照**与批次结果 | 目标不可变，执行状态可更新 | P2.2 / P3 灰度 | **单 Agent、batch_no=0、Pending/Superseded 已实现** |
 | `agent_assignments` | 每 Agent **当前** Desired/Observed 和 CAS | 可变、可恢复 | P2.2 / P2.3 | **Desired/Generation/RowVersion CAS 已实现；ACK 状态更新待 P2.3** |
@@ -68,7 +68,7 @@ erDiagram
 
 | 逻辑类型 | PostgreSQL 候选 | MySQL 候选 | 约束与原因 |
 | --- | --- | --- | --- |
-| Workspace ID | `VARCHAR(96)`（现有） | `VARCHAR(96)`（现有） | P1.1 当前 Schema 使用 `workspace_id`；必须从可信凭证配置获得，平台 IAM 集成仍未实现 |
+| Org ID | `BIGINT`（现有平台 ID） | `BIGINT`（现有平台 ID） | P1.1 当前 Schema 使用 `org_id`；必须从可信凭证配置获得，平台 IAM 集成仍未实现 |
 | Agent Instance UID | `VARCHAR(32)` | `CHAR(32) CHARACTER SET ascii COLLATE ascii_bin` | 延用已实现的 16 字节 UID 小写 hex 表示，当前无需同步优化为二进制键 |
 | 新的业务 ID | `VARCHAR(36)` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | 建议由应用产生 UUID 字符串；不依赖自增 ID、`RETURNING` |
 | Principal / Credential 外部引用 | `VARCHAR(128)` | `VARCHAR(128)` | 字符串范围由发行凭证的可信系统定义；不存明文 Token |
@@ -81,47 +81,43 @@ erDiagram
 | 布尔 | `BOOLEAN` | `BOOLEAN`（TINYINT） | 统一 GORM bool |
 | OpAMP Capabilities | 当前 `BIGINT` | 当前 `BIGINT` | **已有 P1.1 限制**：无符号 uint64 高位无法表达；变更前必须约定无损的 8 字节或二进制编码 |
 
-**暂不把 UID 改为 `BINARY(16)`**：目标是先统一 Workspace 语义，不为没有性能数据的优化增加编码复杂度。未来若证据显示索引体积成为瓶颈，可再评估二进制 UID。
+**暂不把 UID 改为 `BINARY(16)`**：目标是先统一 Org 语义，不为没有性能数据的优化增加编码复杂度。未来若证据显示索引体积成为瓶颈，可再评估二进制 UID。
 
 ### 2.2 全局不变量
 
-- **工作空间边界**：每个管理实体都有 `workspace_id`，跨实体引用时携带相同的 `workspace_id`。读取、更新、删除和 CAS 条件均以 Workspace 作为首要过滤维度。MySQL 需要统一二进制或大小写敏感 Collation 处理标识符。
+- **组织边界**：每个管理实体都有 `org_id`，跨实体引用时携带相同的 `org_id`。读取、更新、删除和 CAS 条件均以 Org 作为首要过滤维度。MySQL 需要统一二进制或大小写敏感 Collation 处理标识符。
 - **身份边界**：OpAMP Agent 自报的 UID、Service、Kind、Distribution **均不是授权凭据**。Credential 映射到可信 Principal 后才能访问指定实例。
 - **不可变定义**：`policy_revisions`、`config_revisions` 的正文和 Hash 创建后不得 UPDATE/DELETE。需要改变时创建新 Revision；直接 SQL 写也应受权限限制。
-- **同一 Agent 的当前期望**：每个 `(workspace_id,instance_uid)` 至多只有一条当前 Assignment。发布状态通过 `desired_generation` 与 `row_version` 保护，不用 Agent 上报 Hash 替代服务端生成的版本号。
+- **同一 Agent 的当前期望**：每个 `(org_id,instance_uid)` 至多只有一条当前 Assignment。发布状态通过 `desired_generation` 与 `row_version` 保护，不用 Agent 上报 Hash 替代服务端生成的版本号。
 - **真实回执**：Observed 状态来自 OpAMP，不得根据 HTTP/WS 发送成功直接标记 APPLIED。旧 Hash 的 ACK 应记录为事件，但不得将新的 Desired 状态改为 APPLIED。
 - **可重启**：Release、目标快照、Assignment、完整 Config Revision 和关键事件必须全部可从 DB 恢复，Reconciler 的唤醒队列可丢失但可以通过周期扫描重建。
-- **引用与删除**：生产系统对已被 Release/Target/Event 引用的内容默认采用 `RESTRICT`，不通过 `ON DELETE CASCADE` 删除历史。Workspace/Agent 退出通过状态或受控归档表达。
+- **引用与删除**：生产系统对已被 Release/Target/Event 引用的内容默认采用 `RESTRICT`，不通过 `ON DELETE CASCADE` 删除历史。Org/Agent 退出通过状态或受控归档表达。
 
 ## 3. 身份与资产域
 
-### 3.1 工作空间归属 — 复用可观测平台 Workspace（不新增本地主数据表）
+### 3.1 组织归属 — 复用平台 Org（不新建本地主数据表）
 
-**明确的产品语义**：本 Control Plane 的资源隔离单元是**整个可观测性系统的工作空间（Workspace）**，不是企业客户（Tenant）、计费账户，也不是另一个独立的 APM 专属组织。Agent Inventory、Policy、Config、Release 和审计都属于某一个既有 Workspace。其稳定标识来自**可观测平台的工作空间服务 / 可信认证上下文**；名称、成员、角色和生命周期由该上游系统管理。
+**领域定义**：Org 是与 Datadog / Grafana Organization 同层级的顶层租户和授权边界，不是 Project、Environment 或可进一步切分的 Workspace。Agent Inventory、Policy、Config、Release 与审计资源均属于一个 Org。
 
-~~~
-可观测性平台（Workspace 权威来源）
-  ├── Workspace A ── Logs / Metrics / Traces / Dashboards
-  │                 └── APM Control Plane: Agents / Policies / Releases
-  └── Workspace B ── Logs / Metrics / Traces / Dashboards
-                    └── APM Control Plane: Agents / Policies / Releases
-~~~
+```text
+可观测平台 Org / IAM（组织真源）
+  ├── Org A ── Logs / Metrics / Traces / Dashboards / APM Control Plane
+  └── Org B ── Logs / Metrics / Traces / Dashboards / APM Control Plane
+```
 
-**本项目不新建独立的 `workspaces` 主数据表。** 使用 `workspace_id` 作为各业务表的归属字段；同一数据库内不同业务表之间使用 `(workspace_id,业务 ID)` 复合主键/外键，防止跨 Workspace 引用。Workspace 是否存在、用户能否管理、Agent Credential 是否有权限写入该 Workspace，**必须通过可信平台身份与授权层确认**。由于上游 Workspace 不在本数据库中，不能假装有本地 `FOREIGN KEY (workspace_id) REFERENCES workspaces(...)`。
+**本服务不维护独立的 `orgs` 主数据表。** 所有 Control Plane 业务表的归属字段统一为 `org_id`，跨业务表关联采用包含 `org_id` 的复合主键/外键，防止跨组织引用。组织的创建、成员、角色、禁用与删除由上游可信 Org/IAM 负责。
 
-如未来部署需要离线验证 Workspace 状态，可增加由上游同步的只读 `workspace_refs` 本地投影，带同步版本和禁用/删除语义。它不是新的工作空间创建入口，且**不列为首期核心表**；必须明确同步延迟、撤销传播和一致性要求。不要在接到 Agent 自报的 `workspace_id` 时自动创建 Workspace。
+`org_id` 由经过认证的 Agent/Admin Credential 绑定产生，不允许从 AgentDescription、请求体或不可信 Header 推断。现阶段使用部署配置维护凭证映射，尚未集成动态 Org/IAM 校验与撤销；上线前需明确该安全边界。数据库延用当前规范字符串 ID（BIGINT），不另造第二套 ID；与上游 Org 标识的角色和授权必须在 IAM 集成时确认。
 
-`workspace_id` 建议直接复用现有平台 ID 的**规范字符串表示**（文中 `VARCHAR(96)` 是暂定存储上限）；如果共享平台已经采用 `org_id` 或其他名字，应在集成层明确字段映射，并保证数值/字符串规范、唯一性和授权一致，**不能为 APM 重新生成第二套 ID**。Workspace 名称变更不改变其 ID，跨 Workspace 迁移 Agent 需显式审批，不能通过更新自报 `service.name` 或 `environment` 完成。
-
-**P1.1 实现边界**：初始化表、GORM、`auth.Principal.WorkspaceID`、Credential JSON 和 Admin API 使用 `workspace_id`，不再识别旧 `tenant_id`。Workspace ID 仍由可信部署者提供的 Token 配置绑定，服务端目前不会向可观测平台的 Workspace/IAM 服务查询成员身份或禁用状态；这属于待批准的生产安全集成工作。
+当前迁移仅支持空库，Schema 由 `datafox-schema migrate up --domain=admin` 初始化；不接管旧 `workspace_id` 表、不执行数据回填，也不建立 Org → Workspace 映射。
 
 ### 3.2 `agent_principals` — 稳定授权主体
 
-**主键**：`(workspace_id, principal_id)`；Workspace 有效性由上游可信平台确认，本库没有指向外部 Workspace 的 FK。一个 Principal 可以拥有多个 Agent Instance，可以对应多枚轮换中的 Credential。**Principal 和 OpAMP Instance UID 不是同一概念**。
+**主键**：`(org_id, principal_id)`；Org 有效性由上游可信平台确认，本库没有指向外部 Org 的 FK。一个 Principal 可以拥有多个 Agent Instance，可以对应多枚轮换中的 Credential。**Principal 和 OpAMP Instance UID 不是同一概念**。
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| `workspace_id` | VARCHAR(96) | PK/可信 Workspace Scope | 工作空间 |
+| `org_id` | BIGINT | PK/可信 Org Scope | 组织 |
 | `principal_id` | VARCHAR(128) | PK | 服务端颁发的稳定 Agent 所有权主体 |
 | `display_name` | VARCHAR(128) | NOT NULL | 人类可读标记 |
 | `status` | VARCHAR(24) | NOT NULL | ACTIVE / DISABLED |
@@ -132,11 +128,11 @@ erDiagram
 
 ### 3.3 `credential_bindings` — 凭证引用与轮换
 
-**主键**：`(workspace_id, credential_ref)`；`(workspace_id,principal_id)` FK → `agent_principals`。这一表只保存**外部可信 Credential ID** 和生命周期元数据，**不存**明文 Token、可重放密钥、数据库 DSN、证书私钥。
+**主键**：`(org_id, credential_ref)`；`(org_id,principal_id)` FK → `agent_principals`。这一表只保存**外部可信 Credential ID** 和生命周期元数据，**不存**明文 Token、可重放密钥、数据库 DSN、证书私钥。
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| `workspace_id` | VARCHAR(96) | PK/可信 Workspace Scope | 工作空间 |
+| `org_id` | BIGINT | PK/可信 Org Scope | 组织 |
 | `credential_ref` | VARCHAR(128) | PK | Secret Manager / IAM 的稳定凭证引用 |
 | `principal_id` | VARCHAR(128) | NOT NULL/FK | 绑定稳定 Principal |
 | `credential_kind` | VARCHAR(24) | NOT NULL | SCOPED_TOKEN / MTLS_CERT（未来） |
@@ -146,15 +142,15 @@ erDiagram
 | `revoked_at` | UTC Timestamp | NULL | 撤销时间 |
 | `created_at` | UTC Timestamp | NOT NULL | 建立绑定时间 |
 
-`credential_ref` 可在轮换时增加另一条指向**同一 Principal**；旧 Credential 被撤销不改变 Agent Instance 的所有权。 对只传 Bearer Token 的 OpAMP 接入，认证系统必须能够从凭证**无歧义地反查可信 Workspace 和 Principal**，不能采用客户端自报 Workspace 来消除同名冲突；当前 P1.1 的启动配置已经禁止重复 Token。**是否采用本地 Credential 表、外部 IAM 真源及撤销传播机制尚需安全评审**；此表是业务关系设计，不宣称已有 Token 轮换能力。
+`credential_ref` 可在轮换时增加另一条指向**同一 Principal**；旧 Credential 被撤销不改变 Agent Instance 的所有权。 对只传 Bearer Token 的 OpAMP 接入，认证系统必须能够从凭证**无歧义地反查可信 Org 和 Principal**，不能采用客户端自报 Org 来消除同名冲突；当前 P1.1 的启动配置已经禁止重复 Token。**是否采用本地 Credential 表、外部 IAM 真源及撤销传播机制尚需安全评审**；此表是业务关系设计，不宣称已有 Token 轮换能力。
 
 ### 3.4 `agent_instances` — Agent Inventory（已存在；目标为原位演进）
 
-**当前已实现主键**：`(workspace_id,instance_uid)`。已实现的 [PostgreSQL Migration](../../db/migrations/postgres/00001_agent_instances.sql)、[MySQL Migration](../../db/migrations/mysql/00001_agent_instances.sql) 与 GORM 模型使用相同的 Workspace 作用域。生产 Workspace 授权集成仍待审批，不能将数据库字段存在等同于已验证平台 IAM。
+**当前已实现主键**：`(org_id,instance_uid)`。[DataFox Schema DSL](https://github.com/datafoxlabs/datafox-schema/tree/main/admin/migrations) 与 GORM 模型使用相同的 Org 作用域。生产 Org 授权集成仍待审批，不能将数据库字段存在等同于已验证平台 IAM。
 
 | 字段 | 状态 | 类型 | 约束 / 语义 |
 | --- | --- | --- | --- |
-| `workspace_id` | **现有** | VARCHAR(96) | PK；从可信部署配置的凭证获得，未接入统一 Workspace/IAM 服务 |
+| `org_id` | **现有** | BIGINT | PK；从可信部署配置的凭证获得，未接入统一 Org/IAM 服务 |
 | `instance_uid` | **现有** | 32-char hex | PK，Agent Instance Key |
 | `credential_id` | **P1.1 当前已有** | VARCHAR(128) | 当前实现的首次注册绑定；未来是否转为稳定 `owner_principal_id` 仍待安全设计审批 |
 | `owner_principal_id` | **拟新增** | VARCHAR(128) | FK → `agent_principals`；换 Token 不改变主体 |
@@ -175,7 +171,7 @@ erDiagram
 | `created_at` / `updated_at` | **拟新增** | UTC Timestamp | Identity / Metadata 生命周期 |
 | `retired_at` | **拟新增** | Nullable UTC Timestamp | 受控退役，不执行级联删除 |
 
-**当前索引**：PK `(workspace_id,instance_uid)` 和 `(workspace_id,last_seen)`。不保留 `tenant_id` 列，也不引入回填或双索引兼容期。后续如确有 Inventory UI 按 AgentKind/Service/Env 分页的需求，可针对访问模式增加 `(workspace_id,environment,service_name,instance_uid)` 或 `(workspace_id,agent_kind,instance_uid)`。没有真实查询证据前不预建所有组合索引。
+**当前索引**：PK `(org_id,instance_uid)` 和 `(org_id,last_seen)`。不保留 `tenant_id` 列，也不引入回填或双索引兼容期。后续如确有 Inventory UI 按 AgentKind/Service/Env 分页的需求，可针对访问模式增加 `(org_id,environment,service_name,instance_uid)` 或 `(org_id,agent_kind,instance_uid)`。没有真实查询证据前不预建所有组合索引。
 
 **重要边界**：P1.1 把最新 Observation 内联在实例表中，避免额外写时 Join。只有真实报告写压力造成身份表大量 UPDATE/索引维护后，才考虑 §10 的 `agent_observations` 一对一拆表；不要为了概念分层而提前实施。
 
@@ -183,11 +179,11 @@ erDiagram
 
 ### 4.1 `policies` — 策略逻辑身份
 
-**主键**：`(workspace_id,policy_id)`。Policy 本身可改名称、停用，但不包含易失的策略正文。当前唯一实际 Adapter 是自定义 Java Head Sampling；PolicyKind 的可扩展性**不表示**其他 AgentKind 已支持该策略。
+**主键**：`(org_id,policy_id)`。Policy 本身可改名称、停用，但不包含易失的策略正文。当前唯一实际 Adapter 是自定义 Java Head Sampling；PolicyKind 的可扩展性**不表示**其他 AgentKind 已支持该策略。
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `workspace_id` | VARCHAR(96) | PK/可信 Workspace Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `policy_id` | UUID text | PK，服务端生成 |
 | `policy_type` | VARCHAR(48) | 如 `head_sampling`，以注册的 Adapter 能力约束 |
 | `agent_kind` | VARCHAR(64) | 目标 AgentKind（如 java-apm） |
@@ -196,15 +192,15 @@ erDiagram
 | `created_by` | VARCHAR(128) | 管理员 Principal/Actor 引用（由 Admin IAM 授权） |
 | `created_at` / `updated_at` | UTC Timestamp | NOT NULL |
 
-可按产品 UX 决定 `UNIQUE(workspace_id,name)`；建议不要在没有“名称必须唯一”需求时添加不可逆业务约束。
+可按产品 UX 决定 `UNIQUE(org_id,name)`；建议不要在没有“名称必须唯一”需求时添加不可逆业务约束。
 
 ### 4.2 `policy_revisions` — 不可变业务策略版本
 
-**主键**：`(workspace_id,policy_revision_id)`；`(workspace_id,policy_id)` FK → `policies`；**唯一**：`(workspace_id,policy_id,revision_number)`。
+**主键**：`(org_id,policy_revision_id)`；`(org_id,policy_id)` FK → `policies`；**唯一**：`(org_id,policy_id,revision_number)`。
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `workspace_id` | VARCHAR(96) | PK/可信 Workspace Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `policy_revision_id` | UUID text | PK |
 | `policy_id` | UUID text | FK → policies |
 | `revision_number` | BIGINT | NOT NULL，严格单调，范围在单一 Policy 内 |
@@ -218,15 +214,15 @@ erDiagram
 
 ### 4.3 `policy_bindings` — Scope/Selector 对应生效版本
 
-**主键**：`(workspace_id,binding_id)`。一条 Binding 是一个可更新的**选择器入口**，引用一个既有不可变 Policy Revision。所谓 Global Default 指当前 Workspace 范围默认规则，不是跨 Workspace 的隐式超级策略。
+**主键**：`(org_id,binding_id)`。一条 Binding 是一个可更新的**选择器入口**，引用一个既有不可变 Policy Revision。所谓 Global Default 指当前 Org 范围默认规则，不是跨 Org 的隐式超级策略。
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `workspace_id` | VARCHAR(96) | PK/可信 Workspace Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `binding_id` | UUID text | PK |
 | `policy_revision_id` | UUID text | FK → policy_revisions |
 | `agent_kind` | VARCHAR(64) | NOT NULL，和 Policy/Adapter 兼容 |
-| `scope_type` | VARCHAR(24) | TENANT / ENVIRONMENT / SERVICE / INSTANCE |
+| `scope_type` | VARCHAR(24) | ORG / ENVIRONMENT / SERVICE / INSTANCE |
 | `selector_json` | TEXT / LONGTEXT | canonical Selector，所有可匹配键明确版本化 |
 | `selector_hash` | CHAR(64) | SHA-256(selector_json) |
 | `priority` | INTEGER | 同 Scope 内的显式优先级 |
@@ -236,15 +232,15 @@ erDiagram
 | `created_by` / `updated_by` | VARCHAR(128) | 操作者引用 |
 | `created_at` / `updated_at` | UTC Timestamp | NOT NULL |
 
-**建议索引**：`(workspace_id,agent_kind,enabled,scope_type,priority)`；**精确 Selector 防重复**可选择 `(workspace_id,agent_kind,scope_type,selector_hash,priority)` 唯一（需在正式评审中确认是否允许同 Selector 多条 Disabled 版本）。**部分重叠 Selector 的冲突不能只依赖 SQL 唯一索引**，必须由 Resolver 在稳定排序/冲突检测中拒绝同级不同内容；更新 Binding 与相关发布必须遵循事务和版本检查。Binding 中的 `service.name` 匹配值来自 Agent 声明，匹配动作必须先完成 Workspace 授权和 Adapter 能力判定。
+**建议索引**：`(org_id,agent_kind,enabled,scope_type,priority)`；**精确 Selector 防重复**可选择 `(org_id,agent_kind,scope_type,selector_hash,priority)` 唯一（需在正式评审中确认是否允许同 Selector 多条 Disabled 版本）。**部分重叠 Selector 的冲突不能只依赖 SQL 唯一索引**，必须由 Resolver 在稳定排序/冲突检测中拒绝同级不同内容；更新 Binding 与相关发布必须遵循事务和版本检查。Binding 中的 `service.name` 匹配值来自 Agent 声明，匹配动作必须先完成 Org 授权和 Adapter 能力判定。
 
-### P2.4 物理落地（Goose 00004）
+### P2.4 物理落地（DataFox Schema DSL）
 
-P2.4 使用 `db/migrations/postgres/00004_policies.sql` 与 `db/migrations/mysql/00004_policies.sql` 实际创建以上三表，并在 `config_revisions.source_policy_revision_id` 上添加同 Workspace 复合 FK。启动时 Store.Open 要求 Goose 至少执行到 00004；缺失必须失败。MySQL 使用 InnoDB/utf8mb4_bin，UUID/FK 字段使用 ascii_bin；MySQL DDL 不假设事务回滚。
+统一 Schema DSL 初始化以上三表，并为 `config_revisions.source_policy_revision_id` 添加同 Org 复合外键。`Store.Open` 要求 `admin_agent_management_schema` 成功历史，缺失必须失败。MySQL 使用 InnoDB/utf8mb4_bin，UUID/FK 字段使用 ascii_bin；MySQL DDL 不假设事务回滚。
 
-首个实际业务合同：**Java Head Sampling**，`policy_type=head_sampling`、`agent_kind=java-apm`。创建 Policy 与首个不可变 Revision 在同一事务内完成；后续 Revision 锁住父 Policy 递增 `revision_number`。Binding 的可变列通过 `row_version` CAS 更新，默认 enabled；同 Workspace 的 SQL FK 阻止跨 Workspace 引用 Revision。暂不启用 `expires_at`：到期策略尚无调用场景，若后续实施临时策略再通过独立 Migration 增加。
+首个实际业务合同：**Java Head Sampling**，`policy_type=head_sampling`、`agent_kind=java-apm`。创建 Policy 与首个不可变 Revision 在同一事务内完成；后续 Revision 锁住父 Policy 递增 `revision_number`。Binding 的可变列通过 `row_version` CAS 更新，默认 enabled；同 Org 的 SQL FK 阻止跨 Org 引用 Revision。暂不启用 `expires_at`：到期策略尚无调用场景，若后续实施临时策略再通过独立 Migration 增加。
 
-`WORKSPACE > ENVIRONMENT` 等优先权由业务明确规范为 `INSTANCE > SERVICE > ENVIRONMENT > WORKSPACE`，同 Scope 再按 Priority 降序；最高同级正文 Hash 不一致返回冲突，正文一致时稳定选择 Binding ID 最小值。细节与只读管理接口见 [P2.4 Policy Resolver](p24-policy-resolution.md)。当前不新增 `config_releases.policy_revision_id` 的外键：单 Agent 直接配置发布仍沿用现有 ConfigRevision，Policy 解析不隐式创建发布。
+`ORG > ENVIRONMENT` 等优先权由业务明确规范为 `INSTANCE > SERVICE > ENVIRONMENT > ORG`，同 Scope 再按 Priority 降序；最高同级正文 Hash 不一致返回冲突，正文一致时稳定选择 Binding ID 最小值。细节与只读管理接口见 [P2.4 Policy Resolver](p24-policy-resolution.md)。当前不新增 `config_releases.policy_revision_id` 的外键：单 Agent 直接配置发布仍沿用现有 ConfigRevision，Policy 解析不隐式创建发布。
 
 ## 5. 配置内容、发布与协调域
 
@@ -252,13 +248,13 @@ P2.4 使用 `db/migrations/postgres/00004_policies.sql` 与 `db/migrations/mysql
 
 **P2.1 已实现的子集**：`internal/config.CompileJavaSampling(rate)` 只编译 Java Head Sampling ConfigMap，其 JSON 文件名为 `apm/sampling.json`。先使用 Go Protobuf 的 deterministic marshal 序列化完整 `AgentConfigMap`，然后对**该序列化字节**计算 SHA-256；`hash_algorithm = sha256-proto-deterministic-v1`。此序列化选择属于固定的应用级版本契约，不能假设 Protobuf deterministic marshal 是跨不同实现/版本的通用规范编码；应保留原始 bytes/hash 供以后直接下发。
 
-存储实现为 `internal/storage/gormrepo/config_revisions.go`，PostgreSQL/MySQL 的 `db/migrations/*/00002_config_revisions.sql`。新建 Revision 生成独立 UUID，`(workspace_id, config_revision_id)` 为复合主键；允许不同 Revision 内容 Hash 相同。仅提供 Create/Get，**不提供 Update/Delete 业务方法**。P2.1 尚无 Policy 主表，`source_policy_revision_id` 暂为可空列，**此时还没有 FK**；后续 Policy 实施时再建立相应约束。没有自动 Agent 分配、发布或 OpAMP 远程下发。
+存储实现为 `internal/storage/gormrepo/config_revisions.go`，PostgreSQL/MySQL 的统一 DataFox Schema DSL。新建 Revision 生成独立 UUID，`(org_id, config_revision_id)` 为复合主键；允许不同 Revision 内容 Hash 相同。仅提供 Create/Get，**不提供 Update/Delete 业务方法**。P2.1 尚无 Policy 主表，`source_policy_revision_id` 暂为可空列，**此时还没有 FK**；后续 Policy 实施时再建立相应约束。没有自动 Agent 分配、发布或 OpAMP 远程下发。
 
-**主键**：`(workspace_id,config_revision_id)`。一个 `policy_revision` 可因不同 AgentKind、ConfigDialect、发行版/能力要求，编译成多个不同 Config Revision。每条记录对应**完整的 OpAMP RemoteConfig ConfigMap**，不是单独的一个 `sampling.rate` 字段。
+**主键**：`(org_id,config_revision_id)`。一个 `policy_revision` 可因不同 AgentKind、ConfigDialect、发行版/能力要求，编译成多个不同 Config Revision。每条记录对应**完整的 OpAMP RemoteConfig ConfigMap**，不是单独的一个 `sampling.rate` 字段。
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `workspace_id` | VARCHAR(96) | PK/可信 Workspace Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `config_revision_id` | UUID text | PK |
 | `source_policy_revision_id` | Nullable UUID text | FK → policy_revisions；预留未来直接配置输入 |
 | `agent_kind` | VARCHAR(64) | NOT NULL，目标类型 |
@@ -276,25 +272,25 @@ P2.4 使用 `db/migrations/postgres/00004_policies.sql` 与 `db/migrations/mysql
 
 ### 5.2 `config_releases` — 一次发布操作
 
-**P2.2 实现边界**：`POST /api/v1/agents/{uid}/releases` 需要 Admin Bearer Token，JSON 传入现有 `config_revision_id`，可选 `Idempotency-Key`。`gormrepo.Store.PublishAgentConfig` 锁定同 Workspace 的 Agent，校验 Java AgentKind、ConfigDialect、HashAlgorithm 和 `AcceptsRemoteConfig`，在同一事务中创建 Release、冻结一个 Target、更新 Assignment 的 `desired_generation/row_version` 并写入 `TARGET_ASSIGNED` 审计事件。Release 和 Target 初始均为 `PENDING`，`batch_no=0`；旧的 Pending Target 被新 Release 标记为 `SUPERSEDED`。同 Key/同请求重试返回原 Release，不重复推进 Generation；同 Key 不同请求 Conflict。对现有 ConfigRevision 的引用必须保持同一 Workspace。
+**P2.2 实现边界**：`POST /api/v1/agents/{uid}/releases` 需要 Admin Bearer Token，JSON 传入现有 `config_revision_id`，可选 `Idempotency-Key`。`gormrepo.Store.PublishAgentConfig` 锁定同 Org 的 Agent，校验 Java AgentKind、ConfigDialect、HashAlgorithm 和 `AcceptsRemoteConfig`，在同一事务中创建 Release、冻结一个 Target、更新 Assignment 的 `desired_generation/row_version` 并写入 `TARGET_ASSIGNED` 审计事件。Release 和 Target 初始均为 `PENDING`，`batch_no=0`；旧的 Pending Target 被新 Release 标记为 `SUPERSEDED`。同 Key/同请求重试返回原 Release，不重复推进 Generation；同 Key 不同请求 Conflict。对现有 ConfigRevision 的引用必须保持同一 Org。
 
 **不包含 P2.3 投递语义**：数据库 Pending 不是 Agent 已收到、APPLIED，也不表示真正的 Java Runtime 生效。`observed_hash`/`observed_status` 的 Reconciler 归因、WebSocket Push、HTTP Polling 下发，以及 P3 批次/回滚均未实现。P2.2 的 `config_releases` 和 `config_events` 保留未来字段，但当前操作只写一次业务事件。
 
-**主键**：`(workspace_id,release_id)`。Release 代表**一次人或系统发起的操作**，不是当前生效配置；即使目标为空、全部失败或被下一次发布覆盖，也应有明确的结果记录。
+**主键**：`(org_id,release_id)`。Release 代表**一次人或系统发起的操作**，不是当前生效配置；即使目标为空、全部失败或被下一次发布覆盖，也应有明确的结果记录。
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `workspace_id` | VARCHAR(96) | PK/可信 Workspace Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `release_id` | UUID text | PK |
 | `policy_revision_id` | Nullable UUID text | FK → policy_revisions |
 | `agent_kind` | VARCHAR(64) | NOT NULL，只对明确匹配的 Kind 发布 |
 | `target_selector_json` | TEXT / LONGTEXT | NOT NULL，创建时冻结的目标查询表达式 |
 | `request_sha256` | CHAR(64) | NOT NULL，规范请求摘要，判断幂等键冲突 |
-| `idempotency_key` | Nullable VARCHAR(128) | `UNIQUE(workspace_id,idempotency_key)` |
+| `idempotency_key` | Nullable VARCHAR(128) | `UNIQUE(org_id,idempotency_key)` |
 | `rollout_plan_json` | TEXT / LONGTEXT | NOT NULL，P2 可以为单批次，P3 扩展灰度参数 |
 | `status` | VARCHAR(24) | PREPARING / PENDING / RUNNING / PAUSED / COMPLETED / FAILED / CANCELLED |
 | `row_version` | BIGINT | NOT NULL，状态转换 CAS |
-| `rollback_of_release_id` | Nullable UUID text | 同 Workspace 内原 Release 的 FK |
+| `rollback_of_release_id` | Nullable UUID text | 同 Org 内原 Release 的 FK |
 | `requested_by` | VARCHAR(128) | 管理 API 已授权 Actor |
 | `created_at` / `started_at` / `finished_at` | UTC Timestamp | created NOT NULL，后两者可空 |
 
@@ -304,15 +300,15 @@ P2.4 使用 `db/migrations/postgres/00004_policies.sql` 与 `db/migrations/mysql
 
 ### 5.3 `release_targets` — 冻结发布目标与结果
 
-**主键**：`(workspace_id,release_id,instance_uid)`。三个关键 FK：
+**主键**：`(org_id,release_id,instance_uid)`。三个关键 FK：
 
-- `(workspace_id,release_id)` → `config_releases`
-- `(workspace_id,instance_uid)` → `agent_instances`
-- `(workspace_id,config_revision_id)` → `config_revisions`
+- `(org_id,release_id)` → `config_releases`
+- `(org_id,instance_uid)` → `agent_instances`
+- `(org_id,config_revision_id)` → `config_revisions`
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `workspace_id` | VARCHAR(96) | PK/可信 Workspace Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `release_id` | UUID text | PK/FK |
 | `instance_uid` | 32-char hex | PK/FK |
 | `config_revision_id` | UUID text | NOT NULL/FK，Adapter 为该目标编译的内容 |
@@ -324,15 +320,15 @@ P2.4 使用 `db/migrations/postgres/00004_policies.sql` 与 `db/migrations/mysql
 
 **目标集合冻结**：Release 在准备阶段查询符合条件的 Agent，完成目标身份/能力校验，写入这些 Target。之后匹配的新 Agent **不能作为旧 Release 的隐式成功目标**。Target 的成员身份、Config Revision、Batch Number、Generation 不允许变更；只有本 Release 的执行状态与错误可更新。后续新 Release 使旧 Target 变成 SUPERSEDED 时，保留它的结果和原因。
 
-索引：`(workspace_id,release_id,batch_no,status)` 用于 Rollout 进度；`(workspace_id,instance_uid,created_at)` 便于查看单 Agent 发布历史（仅在查询实际需要时建立）。
+索引：`(org_id,release_id,batch_no,status)` 用于 Rollout 进度；`(org_id,instance_uid,created_at)` 便于查看单 Agent 发布历史（仅在查询实际需要时建立）。
 
 ### 5.4 `agent_assignments` — 每 Agent 的当前 Desired/Observed
 
-**主键**：`(workspace_id,instance_uid)`；FK → Agent Instance。**一个 Agent 首期只有一个完整的 OpAMP RemoteConfig Assignment**：不要为每个 JSON 子项分配互相冲突的独立 Hash。
+**主键**：`(org_id,instance_uid)`；FK → Agent Instance。**一个 Agent 首期只有一个完整的 OpAMP RemoteConfig Assignment**：不要为每个 JSON 子项分配互相冲突的独立 Hash。
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `workspace_id` | VARCHAR(96) | PK/可信 Workspace Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `instance_uid` | 32-char hex | PK/FK |
 | `release_id` | UUID text | NOT NULL/FK，创建当前 Desired 的 Release |
 | `config_revision_id` | UUID text | NOT NULL/FK，当前完整配置 |
@@ -348,7 +344,7 @@ P2.4 使用 `db/migrations/postgres/00004_policies.sql` 与 `db/migrations/mysql
 | `last_error` | TEXT | 不泄漏配置正文或 Secret |
 | `updated_at` | UTC Timestamp | NOT NULL |
 
-**归属一致性**：建议 `(workspace_id,release_id,instance_uid)` 在 `agent_assignments` 中以复合 FK 指向 `release_targets`，确保当前 Assignment 确实属于这次发布的冻结目标。写入时还须检查 `config_revision_id`、`desired_generation` 与目标快照一致；必要时为 Target 建立含这些列的唯一键并设置相应复合 FK，而不是只在 Go 中分别验证独立 Release ID 与 ConfigRevision ID。
+**归属一致性**：建议 `(org_id,release_id,instance_uid)` 在 `agent_assignments` 中以复合 FK 指向 `release_targets`，确保当前 Assignment 确实属于这次发布的冻结目标。写入时还须检查 `config_revision_id`、`desired_generation` 与目标快照一致；必要时为 Target 建立含这些列的唯一键并设置相应复合 FK，而不是只在 Go 中分别验证独立 Release ID 与 ConfigRevision ID。
 
 **CAS 示例（伪 SQL，GORM 负责方言占位符）**：
 
@@ -359,7 +355,7 @@ UPDATE agent_assignments
        observed_status = 'APPLIED',
        observed_at = :received_at,
        row_version = row_version + 1
- WHERE workspace_id = :workspace_id
+ WHERE org_id = :org_id
    AND instance_uid = :instance_uid
    AND desired_generation = :expected_generation
    AND desired_hash = :reported_hash
@@ -368,15 +364,15 @@ UPDATE agent_assignments
 
 必须检查 `RowsAffected == 1`；没有命中时是过期、并发冲突或已被新 Release 替代，不得直接 `Save()` 覆盖。客户端 OpAMP 回执**没有服务端的 desired_generation**：它是服务端读到当前 Assignment 后用于保护 CAS 的版本，不能声称 Agent 直接确认了 Generation。**相同 Hash 跨 Release 重用时，匹配 Hash 只能证明内容状态，不能为新 Release 生成无根据的“新应用成功”证据**；需要状态机显式继承先前内容证明或记录缺乏新的回执。
 
-索引：`(workspace_id,state,next_retry_at)` 支持 Reconciler 扫描；主键支持按 Agent 查询；`(workspace_id,release_id)` 用于按 Release 归集当前成员状态。避免为频繁变化的状态列无节制增加索引。
+索引：`(org_id,state,next_retry_at)` 支持 Reconciler 扫描；主键支持按 Agent 查询；`(org_id,release_id)` 用于按 Release 归集当前成员状态。避免为频繁变化的状态列无节制增加索引。
 
 ### 5.5 `config_events` — 审计与回执历史
 
-**主键**：`(workspace_id,event_id)`。这是**事实/审计事件记录**，不是替代 Agent Assignment 的唯一状态源；只记录有意义的变更、OpAMP 配置回执、失败或管理操作，不把每次心跳和每个 Span 写成审计事件。
+**主键**：`(org_id,event_id)`。这是**事实/审计事件记录**，不是替代 Agent Assignment 的唯一状态源；只记录有意义的变更、OpAMP 配置回执、失败或管理操作，不把每次心跳和每个 Span 写成审计事件。
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
-| `workspace_id` | VARCHAR(96) | PK/可信 Workspace Scope |
+| `org_id` | BIGINT | PK/可信 Org Scope |
 | `event_id` | UUID text | PK |
 | `event_type` | VARCHAR(48) | 如 RELEASE_CREATED、TARGET_ASSIGNED、CONFIG_SENT、CONFIG_APPLIED、CONFIG_FAILED、ROLLBACK_REQUESTED |
 | `release_id` | Nullable UUID text | FK → config_releases |
@@ -390,7 +386,7 @@ UPDATE agent_assignments
 | `details_json` | TEXT / LONGTEXT | 非敏感、受大小限制的事件内容 |
 | `occurred_at` | UTC Timestamp | NOT NULL，平台记录的时间 |
 
-**建议索引**：`(workspace_id,release_id,occurred_at)`、`(workspace_id,instance_uid,occurred_at)`，以及必要时 `(workspace_id,occurred_at)`。审计写入和核心状态更新应在同一个业务事务内提交，避免出现“发布已经成功却无事件”或“事件存在但业务状态未提交”。
+**建议索引**：`(org_id,release_id,occurred_at)`、`(org_id,instance_uid,occurred_at)`，以及必要时 `(org_id,occurred_at)`。审计写入和核心状态更新应在同一个业务事务内提交，避免出现“发布已经成功却无事件”或“事件存在但业务状态未提交”。
 
 事件 append-only 的要求应通过写路径、数据库角色权限和运维审计保证；真实保留期限、归档与脱敏/删除策略需与合规要求另行评审，不在这里发明固定 TTL。
 
@@ -399,19 +395,19 @@ UPDATE agent_assignments
 ### 6.1 Agent 注册和 Token 轮换
 
 ~~~text
-Credential Token -> 可信认证系统 -> (workspace_id, credential_ref, principal_id)
+Credential Token -> 可信认证系统 -> (org_id, credential_ref, principal_id)
      -> 检查 Principal ACTIVE -> 校验 UID
-     -> agent_instances(workspace_id, instance_uid, owner_principal_id)
+     -> agent_instances(org_id, instance_uid, owner_principal_id)
      -> 观察快照 -> 返回 OpAMP 响应
 ~~~
 
-P1.1 **实际实现**仍以 `credential_id` 进行首次绑定：同一个 Workspace 内其他 Credential 上报相同 UID 会被拒绝，作用域由可信部署的 Credential JSON 中 `workspace_id` 决定，尚未接入平台 Workspace/IAM 查询。后续目标是以稳定 `principal_id` 表示所有权，不为了兼容旧业务数据而额外引入双读/双写流程。不能仅靠新 Token 覆盖旧的 `credential_id` 来完成轮换。
+P1.1 **实际实现**仍以 `credential_id` 进行首次绑定：同一个 Org 内其他 Credential 上报相同 UID 会被拒绝，作用域由可信部署的 Credential JSON 中 `org_id` 决定，尚未接入平台 Org/IAM 查询。后续目标是以稳定 `principal_id` 表示所有权，不为了兼容旧业务数据而额外引入双读/双写流程。不能仅靠新 Token 覆盖旧的 `credential_id` 来完成轮换。
 
 身份删除/轮换授权必须是显式受控操作，不允许 Agent 单方面报告一个新 Principal 即完成换绑。HTTP 请求执行完毕后不保留 Session；WebSocket Session 在内存里，有连接所有权和关闭回调。未来多实例 HA 的 Fencing / Session Ownership **不在此 Schema 中冒充已解决**。
 
 ### 6.2 创建策略与绑定
 
-Admin 在 Workspace Scope 内创建 `policies`；新增 `policy_revisions` 后，必要时更新 `policy_bindings` 的当前 Revision 与 RowVersion。Resolver 根据 Workspace/Kind、Scope、Selector、Priority 计算唯一结果。同级不同内容的重叠 Selector 应返回 Conflict，而不是依赖数据库排序选中第一条。业务正文改变 → 新 Revision；生效指向变化 → 更新 Binding 并追加事件。
+Admin 在 Org Scope 内创建 `policies`；新增 `policy_revisions` 后，必要时更新 `policy_bindings` 的当前 Revision 与 RowVersion。Resolver 根据 Org/Kind、Scope、Selector、Priority 计算唯一结果。同级不同内容的重叠 Selector 应返回 Conflict，而不是依赖数据库排序选中第一条。业务正文改变 → 新 Revision；生效指向变化 → 更新 Binding 并追加事件。
 
 ### 6.3 发布事务与冻结目标
 
@@ -421,7 +417,7 @@ sequenceDiagram
     participant DB as Database
     participant R as Reconciler
     participant A as OpAMP Agent
-    API->>DB: 校验 Workspace / PolicyRevision / Adapter
+    API->>DB: 校验 Org / PolicyRevision / Adapter
     API->>DB: TX: INSERT ConfigRevision（如未存在）
     API->>DB: TX: INSERT Release + Frozen Targets
     API->>DB: TX: CAS 更新 AgentAssignments
@@ -461,18 +457,18 @@ P2 先只使用 `release_targets.batch_no = 0`。P3 的灰度批次可以先在 
 
 | 读写路径 | 访问条件 | 所需索引 / 约束 |
 | --- | --- | --- |
-| Agent 详情 / 状态写入 | Workspace + UID | `agent_instances` PK |
-| 按时间列出 Agent | Workspace + LastSeen 范围 | **已实现** `agent_instances(workspace_id,last_seen)` |
-| 获取策略的版本 | Workspace + PolicyID + RevisionNumber | `policy_revisions` 唯一键 |
-| 查询适用 Binding | Workspace + Kind + Scope + Enabled | `policy_bindings` 复合索引 |
-| 根据 Release 列出某 Batch 的目标及结果 | Workspace + ReleaseID + BatchNo + Status | `release_targets` 复合索引 |
-| 获取某 Agent 当前期望 | Workspace + InstanceUID | `agent_assignments` PK |
-| 扫描待重试任务 | Workspace + State + NextRetryAt | `agent_assignments` 扫描索引 |
-| 查看 Release 进度 | Workspace + ReleaseID | `config_releases` PK 和 `release_targets` |
-| 单 Agent 审计时间线 | Workspace + InstanceUID + OccurredAt | `config_events` 时间索引 |
-| 按请求幂等键去重 | Workspace + IdempotencyKey | `config_releases` UNIQUE（NULL 允许多个） |
+| Agent 详情 / 状态写入 | Org + UID | `agent_instances` PK |
+| 按时间列出 Agent | Org + LastSeen 范围 | **已实现** `agent_instances(org_id,last_seen)` |
+| 获取策略的版本 | Org + PolicyID + RevisionNumber | `policy_revisions` 唯一键 |
+| 查询适用 Binding | Org + Kind + Scope + Enabled | `policy_bindings` 复合索引 |
+| 根据 Release 列出某 Batch 的目标及结果 | Org + ReleaseID + BatchNo + Status | `release_targets` 复合索引 |
+| 获取某 Agent 当前期望 | Org + InstanceUID | `agent_assignments` PK |
+| 扫描待重试任务 | Org + State + NextRetryAt | `agent_assignments` 扫描索引 |
+| 查看 Release 进度 | Org + ReleaseID | `config_releases` PK 和 `release_targets` |
+| 单 Agent 审计时间线 | Org + InstanceUID + OccurredAt | `config_events` 时间索引 |
+| 按请求幂等键去重 | Org + IdempotencyKey | `config_releases` UNIQUE（NULL 允许多个） |
 
-**写入热点注意**：目标 `agent_instances` 的 LastSeen 更新将维护 `(workspace_id,last_seen)` 索引。Agent 高频心跳应在 OpAMP 层有节制地刷新数据库，不必把每次 Polling 变成一次同步 UPDATE；但延迟上限和刷新策略不能未经产品 SLO 确认就硬编码成不可靠的“在线”定义。
+**写入热点注意**：目标 `agent_instances` 的 LastSeen 更新将维护 `(org_id,last_seen)` 索引。Agent 高频心跳应在 OpAMP 层有节制地刷新数据库，不必把每次 Polling 变成一次同步 UPDATE；但延迟上限和刷新策略不能未经产品 SLO 确认就硬编码成不可靠的“在线”定义。
 
 首次不引入 Redis、Kafka、分库分表、数据库物化 View、分布式消息事务或复杂 ORM 多层泛型；GORM 使用显式的 Repository/Tx 边界即可。真正出现查询和并发问题时再依据指标增加索引、热表或协调队列。
 
@@ -481,11 +477,11 @@ P2 先只使用 `release_targets.batch_no = 0`。P3 的灰度批次可以先在 
 这段只说明 PostgreSQL 的复合键与 CAS 约束风格，**不是**可直接执行的全量 Migration，也不意味着 P1.1 Schema 已变更：
 
 ~~~sql
--- 提议示例：Workspace 真源在可观测平台，不创建本地主数据表。
--- P1.1 初始 SQL/Go Model 使用 workspace_id；
--- 以下业务表统一使用 workspace_id，本示例并非已执行 Migration。
+-- 提议示例：Org 真源在可观测平台，不创建本地主数据表。
+-- P1.1 初始 SQL/Go Model 使用 org_id；
+-- 以下业务表统一使用 org_id，本示例并非已执行 Migration。
 CREATE TABLE policies (
-    workspace_id VARCHAR(96) NOT NULL,
+    org_id VARCHAR(96) NOT NULL,
     policy_id VARCHAR(36) NOT NULL,
     policy_type VARCHAR(48) NOT NULL,
     agent_kind VARCHAR(64) NOT NULL,
@@ -494,11 +490,11 @@ CREATE TABLE policies (
     created_by VARCHAR(128) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (workspace_id, policy_id)
+    PRIMARY KEY (org_id, policy_id)
 );
 
 CREATE TABLE policy_revisions (
-    workspace_id VARCHAR(96) NOT NULL,
+    org_id VARCHAR(96) NOT NULL,
     policy_revision_id VARCHAR(36) NOT NULL,
     policy_id VARCHAR(36) NOT NULL,
     revision_number BIGINT NOT NULL,
@@ -507,10 +503,10 @@ CREATE TABLE policy_revisions (
     body_sha256 CHAR(64) NOT NULL,
     created_by VARCHAR(128) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (workspace_id, policy_revision_id),
-    UNIQUE (workspace_id, policy_id, revision_number),
-    FOREIGN KEY (workspace_id, policy_id)
-        REFERENCES policies(workspace_id, policy_id)
+    PRIMARY KEY (org_id, policy_revision_id),
+    UNIQUE (org_id, policy_id, revision_number),
+    FOREIGN KEY (org_id, policy_id)
+        REFERENCES policies(org_id, policy_id)
 );
 ~~~
 
@@ -518,28 +514,28 @@ CREATE TABLE policy_revisions (
 
 ## 9. 尚未正式部署：直接统一 P1.1 初始化 Schema 与后续版本
 
-**实施前提**：用户确认尚无须保留的历史数据，本实现修订直接让 P1.1 初始 Schema 使用 `workspace_id`。**不做 Tenant → Workspace 兼容迁移**。如发现已经使用旧版 Migration 并需要保留数据的环境，该前提不成立，应停止直接覆写后独立评估。
+**实施前提**：用户确认尚无须保留的历史数据，本实现修订直接让 P1.1 初始 Schema 使用 `org_id`。**不做 Tenant → Org 兼容迁移**。如发现已经使用旧版 Migration 并需要保留数据的环境，该前提不成立，应停止直接覆写后独立评估。
 
 | 阶段 | 实施内容 | 验收条件 |
 | --- | --- | --- |
-| P1.1 Workspace Scope（代码已实现） | 初始 PostgreSQL/MySQL Goose SQL、GORM `AgentRecord`、Repository、`auth.Principal`、Credential JSON 和 Admin API 统一 `workspace_id` | 双数据库全新建库、Agent 注册/查询、权限隔离测试通过后才能作为稳定交付证据；**不代表平台 IAM 已联通** |
-| P2 授权主体 | 按正式安全设计引入 `agent_principals`、`credential_bindings`；是否把当前 `credential_id` 替换为稳定 Principal 归属由设计审批决定 | Token 轮换不会意外改变 Agent 所有权；撤销/授权路径经过可信 Workspace 验证 |
+| P1.1 Org Scope（代码已实现） | 初始 PostgreSQL/MySQL Schema DSL、GORM `AgentRecord`、Repository、`auth.Principal`、Credential JSON 和 Admin API 统一 `org_id` | 双数据库全新建库、Agent 注册/查询、权限隔离测试通过后才能作为稳定交付证据；**不代表平台 IAM 已联通** |
+| P2 授权主体 | 按正式安全设计引入 `agent_principals`、`credential_bindings`；是否把当前 `credential_id` 替换为稳定 Principal 归属由设计审批决定 | Token 轮换不会意外改变 Agent 所有权；撤销/授权路径经过可信 Org 验证 |
 | P2 Policy | `policies`、`policy_revisions`、`policy_bindings` | Revision 不可变，Selector 冲突有确定性行为 |
-| P2 Config/Release | `config_revisions`、`config_releases`、`release_targets`、`agent_assignments`、`config_events` | 发布事务原子性、Assignment CAS、ACK 归因、重启恢复和跨 Workspace 隔离 |
+| P2 Config/Release | `config_revisions`、`config_releases`、`release_targets`、`agent_assignments`、`config_events` | 发布事务原子性、Assignment CAS、ACK 归因、重启恢复和跨 Org 隔离 |
 | P3 Rollout | 在 Release/Target 中补充必要的灰度字段和查询索引 | 受控批次、失败阻断、回滚和审计可恢复 |
 | 按需扩展 | 只有性能/产品证据充分时才增加 `agent_observations`、`apm_services`、`release_batches` | 以实际查询/写负载和保留要求评估必要性 |
 
-**当前初始 Schema 不存在 `tenant_id` 与 `workspace_id` 双字段、不做双读双写、不为旧的 `default` 值造 Workspace，也不自动迁移未确认归属的数据。** 如果实际发现已经部署的共享/生产数据，须停止直接修改初始 Migration 的做法，重新审查是否必须引入增量 Goose Migration 和可信映射。这是对事实前提的保护，不是当前方案中隐藏的兼容分支。
+**当前初始 Schema 不存在 `tenant_id` 与 `org_id` 双字段、不做双读双写、不为旧的 `default` 值造 Org，也不自动迁移未确认归属的数据。** 如果实际发现已经部署的共享/生产数据，须停止直接初始化并另行设计受控迁移，当前分支不提供数据回填或兼容。这是对事实前提的保护，不是当前方案中隐藏的兼容分支。
 
-即使不保留历史数据，也要在 PostgreSQL/MySQL 分别验证全新建库、字段约束、唯一性、可信 Workspace 注入和代码行为。MySQL `CREATE/ALTER TABLE` 可能隐式提交；Goose 负责明确版本的执行，生产运行时不使用 GORM AutoMigrate。
+即使不保留历史数据，也要在 PostgreSQL/MySQL 分别验证全新建库、字段约束、唯一性、可信 Org 注入和代码行为。MySQL `CREATE/ALTER TABLE` 可能隐式提交；storekit/migrator 负责记录迁移执行历史，生产运行时不使用 GORM AutoMigrate。
 
 ## 10. 延迟引入的三个扩展表
 
 | 可选表 | 引入条件 | 推荐关键字段 / 约束 |
 | --- | --- | --- |
-| `agent_observations` | Agent 状态写入压力使 Inventory 表写放大、索引维护成为明确瓶颈 | `(workspace_id,instance_uid)` PK/FK，一对一保存 LastSeen、Health、Capabilities、Reported Hash/Status；仅按有证据的热表拆分实施 |
-| `apm_services` | 需要服务目录属性/Ownership/标签，且不再满足于 Agent 自报 Service 坐标 | `(workspace_id,service_id)` PK，`(workspace_id,environment,namespace,name)` 业务唯一键；Collector 不强制属于 Java Service |
-| `release_batches` | P3 需要每批独立审批、人员权限、暂停或恢复记录 | `(workspace_id,release_id,batch_no)` PK/FK，Batch Status、ApprovedBy、StartedAt、CompletedAt |
+| `agent_observations` | Agent 状态写入压力使 Inventory 表写放大、索引维护成为明确瓶颈 | `(org_id,instance_uid)` PK/FK，一对一保存 LastSeen、Health、Capabilities、Reported Hash/Status；仅按有证据的热表拆分实施 |
+| `apm_services` | 需要服务目录属性/Ownership/标签，且不再满足于 Agent 自报 Service 坐标 | `(org_id,service_id)` PK，`(org_id,environment,namespace,name)` 业务唯一键；Collector 不强制属于 Java Service |
+| `release_batches` | P3 需要每批独立审批、人员权限、暂停或恢复记录 | `(org_id,release_id,batch_no)` PK/FK，Batch Status、ApprovedBy、StartedAt、CompletedAt |
 
 这些都是**候选扩展**。即使逻辑概念中有 Agent Observation、APM Service 或 Rollout Batch，也不表示首个关系型实现必须拥有同名物理表。
 
@@ -547,7 +543,7 @@ CREATE TABLE policy_revisions (
 
 | 设计/实现校验 | 应提供的可验证证据 |
 | --- | --- |
-| Workspace Scope / PK | 每个内部资源表均包含可信 `workspace_id`，跨表复合 FK、跨工作空间读写负向测试；Workspace 存在性由平台认证/授权校验 |
+| Org Scope / PK | 每个内部资源表均包含可信 `org_id`，跨表复合 FK、跨组织读写负向测试；Org 存在性由平台认证/授权校验 |
 | Agent 凭证轮换 | 新旧 Credential 指向同一稳定 Principal，轮换后原 UID 不被错误拒绝；撤销旧凭证后不能写入 |
 | Release 事务 | Revision + Release + Frozen Target + Assignment + Event 全成功或全失败 |
 | Assignment CAS | 双发布竞争、过期 Generation、并发 ACK 不覆盖新 Desired |
@@ -555,7 +551,7 @@ CREATE TABLE policy_revisions (
 | Config 不可变 / 完整恢复 | 同字节 ConfigMap、Hash、Dialect 和 AgentKind，重启后可再次发送 |
 | Selector 冲突 | 相同优先级、部分重叠 Selector、Instance Override TTL 等确定性行为 |
 | HTTP / WS | HTTP 回执和 freshness、WS 单 writer 和会话所有权分别测试 |
-| MySQL / PostgreSQL | 分方言 Goose 升级、约束冲突、UTC、字符集、事务和重试语义实测 |
+| MySQL / PostgreSQL | 双数据库 DSL 初始化、约束冲突、UTC、字符集、事务和重试语义实测 |
 | 审计与回滚 | 新 Release/事件留痕、旧 Release 不删除、Config 与 Token Secret 不落普通日志 |
 | 容量与保留 | 无未经测量的吞吐或固定 TTL 声明；根据实际需求确定索引、保留/归档策略 |
 
@@ -574,8 +570,8 @@ CREATE TABLE policy_revisions (
 
 ## 13. 维护与溯源
 
-- P1.1 真实 Migration：[PostgreSQL](../../db/migrations/postgres/00001_agent_instances.sql) / [MySQL](../../db/migrations/mysql/00001_agent_instances.sql)。
+- 当前 Control Plane Schema：[DataFox Schema DSL](https://github.com/datafoxlabs/datafox-schema/tree/main/admin/migrations)。
 - 当前 GORM `AgentRecord`、`Observe`、`Get`、`List`：[store.go](../../internal/storage/gormrepo/store.go)。
 - 需求不变量：[FR-001–FR-013](../requirements/APM_CONTROL_PLANE.md)。
 - 主架构与发布状态：[开发者架构指南](README.md)、[DD-001](../design-docs/dd-001_opamp-control-plane.md)、[EP-001](../exec-plans/active/ep-001_build-control-plane/EXECPLAN.md)。
-- 设计归属：本文为独立技术详设，**不是**新的受治理 DD-NNN，也不是批准快照；长期权威仍归 DD-001/后续被批准的设计与 ADR。实施后如出现偏差，应先更新对应批准的设计和此文件，再增加新的 Goose Migration。
+- 设计归属：本文为独立技术详设，**不是**新的受治理 DD-NNN，也不是批准快照；长期权威仍归 DD-001/后续被批准的设计与 ADR。实施后如出现偏差，应先更新对应批准的设计和此文件，再增加新的 DataFox Schema Migration。

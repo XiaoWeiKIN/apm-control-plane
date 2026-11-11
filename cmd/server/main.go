@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -33,8 +34,8 @@ import (
 // The production implementation is GORM; unit tests use an in-memory fake.
 type AgentStore interface {
 	Observe(context.Context, auth.Principal, string, gormrepo.Observation) (gormrepo.AgentRecord, error)
-	Get(context.Context, string, string) (gormrepo.AgentRecord, error)
-	List(context.Context, string) ([]gormrepo.AgentRecord, error)
+	Get(context.Context, int64, string) (gormrepo.AgentRecord, error)
+	List(context.Context, int64) ([]gormrepo.AgentRecord, error)
 }
 
 // runtimeAgent.users and lastActive are protected by registry.mu.
@@ -76,7 +77,7 @@ var errRegistryClosing = errors.New("control plane is shutting down")
 // No other connection is allowed to overwrite that runtime session.
 var errSessionConflict = errors.New("agent instance already has an active session")
 
-func key(workspace, uid string) string { return workspace + "/" + uid }
+func key(org int64, uid string) string { return strconv.FormatInt(org, 10) + "/" + uid }
 
 func validUID(id string) bool {
 	if len(id) != 32 {
@@ -129,7 +130,7 @@ func description(d *protobufs.AgentDescription) *gormrepo.Description {
 }
 
 func (r *registry) snapshot(rec gormrepo.AgentRecord, now time.Time) map[string]any {
-	id := key(rec.WorkspaceID, rec.InstanceUID)
+	id := key(rec.OrgID, rec.InstanceUID)
 	r.mu.Lock()
 	rt := r.sessions[id]
 	r.mu.Unlock()
@@ -150,7 +151,7 @@ func (r *registry) snapshot(rec gormrepo.AgentRecord, now time.Time) map[string]
 	}
 	return map[string]any{
 		"instance_uid":         rec.InstanceUID,
-		"workspace_id":         rec.WorkspaceID,
+		"org_id":               rec.OrgID,
 		"service_name":         rec.ServiceName,
 		"service_namespace":    rec.ServiceNamespace,
 		"environment":          rec.Environment,
@@ -172,7 +173,7 @@ func (r *registry) snapshot(rec gormrepo.AgentRecord, now time.Time) map[string]
 }
 
 func (r *registry) list(ctx context.Context, p auth.Principal) ([]map[string]any, error) {
-	items, err := r.store.List(ctx, p.WorkspaceID)
+	items, err := r.store.List(ctx, p.OrgID)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +186,7 @@ func (r *registry) list(ctx context.Context, p auth.Principal) ([]map[string]any
 }
 
 func (r *registry) get(ctx context.Context, p auth.Principal, uid string) (map[string]any, error) {
-	item, err := r.store.Get(ctx, p.WorkspaceID, uid)
+	item, err := r.store.Get(ctx, p.OrgID, uid)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +202,7 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 		return nil, false, fmt.Errorf("instance_uid must be 16 bytes")
 	}
 	id := hex.EncodeToString(msg.InstanceUid)
-	k := key(p.WorkspaceID, id)
+	k := key(p.OrgID, id)
 	r.mu.Lock()
 	if r.closing {
 		r.mu.Unlock()
@@ -276,7 +277,7 @@ func (r *registry) update(ctx context.Context, p auth.Principal, isWS bool, conn
 	var durable *protobufs.AgentRemoteConfig
 	assigned := false
 	if r.delivery != nil {
-		config, exists, err := r.delivery.ReconcileAgentConfig(ctx, p.WorkspaceID, id, status, !isWS)
+		config, exists, err := r.delivery.ReconcileAgentConfig(ctx, p.OrgID, id, status, !isWS)
 		if err != nil {
 			return nil, false, err
 		}
@@ -327,7 +328,7 @@ func (r *registry) disconnect(p auth.Principal, conn types.Connection) {
 	delete(r.wsConnections, conn)
 	agents := make([]*runtimeAgent, 0)
 	for k, rt := range r.sessions {
-		if strings.HasPrefix(k, p.WorkspaceID+"/") {
+		if strings.HasPrefix(k, strconv.FormatInt(p.OrgID, 10)+"/") {
 			agents = append(agents, rt)
 		}
 	}
@@ -392,7 +393,7 @@ func (r *registry) assign(ctx context.Context, p auth.Principal, uid string, rat
 	if err != nil {
 		return nil, err
 	}
-	record, err := r.store.Get(ctx, p.WorkspaceID, uid)
+	record, err := r.store.Get(ctx, p.OrgID, uid)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +402,7 @@ func (r *registry) assign(ctx context.Context, p auth.Principal, uid string, rat
 		r.mu.Unlock()
 		return nil, errRegistryClosing
 	}
-	k := key(p.WorkspaceID, uid)
+	k := key(p.OrgID, uid)
 	rt := r.sessions[k]
 	if rt == nil {
 		rt = &runtimeAgent{}
@@ -636,7 +637,7 @@ func run(ctx context.Context, log *slog.Logger) (runErr error) {
 		}
 	}()
 
-	// 3. 装配可信 Workspace 认证、Registry、OpAMP 及管理 API。
+	// 3. 装配可信 Org 认证、Registry、OpAMP 及管理 API。
 	reg := newRegistry(store, cfg.HTTPPollingTTL)
 	reg.delivery = store
 	handler, connCtx, err := makeGateway(reg, auth.New(cfg.AgentCredentials), log)
