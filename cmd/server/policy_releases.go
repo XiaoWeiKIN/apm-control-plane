@@ -13,12 +13,12 @@ import (
 )
 
 type policyReleasePublisher interface {
-	PublishAgentPolicy(context.Context, string, string, string, string, string) (gormrepo.ReleaseResult, error)
+	PublishAgentPolicy(context.Context, int64, string, string, string, string) (gormrepo.ReleaseResult, error)
 }
 
 // adminPolicyReleaseHandler commits the selected policy's ConfigRevision and
 // single-Agent release before waking the existing OpAMP delivery path.
-func adminPolicyReleaseHandler(publisher policyReleasePublisher, credentials *auth.Authenticator, onPublished func(string, string)) http.Handler {
+func adminPolicyReleaseHandler(publisher policyReleasePublisher, credentials *auth.Authenticator, onPublished func(int64, string)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// 1. 使用可信 Admin Credential 限定 Org 与目标 UID。
 		principal, ok := credentials.Authenticate(req.Header.Get("Authorization"))

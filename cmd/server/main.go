@@ -77,7 +77,7 @@ var errRegistryClosing = errors.New("control plane is shutting down")
 // No other connection is allowed to overwrite that runtime session.
 var errSessionConflict = errors.New("agent instance already has an active session")
 
-func key(org int64, uid string) string { return org + "/" + uid }
+func key(org int64, uid string) string { return strconv.FormatInt(org, 10) + "/" + uid }
 
 func validUID(id string) bool {
 	if len(id) != 32 {

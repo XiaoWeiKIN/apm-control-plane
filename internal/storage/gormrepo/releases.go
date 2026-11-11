@@ -166,7 +166,7 @@ func lockAgentForReleaseTx(tx *gorm.DB, orgID int64, instanceUID string) (AgentR
 
 // publishAgentConfigTx owns the Release/Target/Assignment/Event transaction body.
 // Callers hold the Agent row lock in the same transaction; no OpAMP sends occur here.
-func publishAgentConfigTx(tx *gorm.DB, agent AgentRecord, orgID, instanceUID, configRevisionID, requestedBy,
+func publishAgentConfigTx(tx *gorm.DB, agent AgentRecord, orgID int64, instanceUID, configRevisionID, requestedBy,
 	idempotencyKey, requestHash string, sourcePolicyRevisionID *string, result *ReleaseResult) error {
 	// 1. 已处理的同一幂等请求直接返回原 Release，不能再次更新 Desired。
 	if idempotencyKey != "" {

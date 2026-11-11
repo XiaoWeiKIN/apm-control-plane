@@ -12,11 +12,11 @@ import (
 )
 
 type releasePublisher interface {
-	PublishAgentConfig(context.Context, string, string, string, string, string) (gormrepo.ReleaseResult, error)
+	PublishAgentConfig(context.Context, int64, string, string, string, string) (gormrepo.ReleaseResult, error)
 }
 
 // adminReleaseHandler persists release intent; actual OpAMP delivery belongs to P2.3.
-func adminReleaseHandler(publisher releasePublisher, credentials *auth.Authenticator, onPublished func(string, string)) http.Handler {
+func adminReleaseHandler(publisher releasePublisher, credentials *auth.Authenticator, onPublished func(int64, string)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// 1. 认证 Org 与校验 UID/请求结构，非法输入不触发数据库写入。
 		principal, ok := credentials.Authenticate(req.Header.Get("Authorization"))

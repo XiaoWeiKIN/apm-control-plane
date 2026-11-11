@@ -13,17 +13,17 @@ import (
 )
 
 type rolloutStore interface {
-	PublishRollout(context.Context, string, string, string, []string, int, string) (gormrepo.RolloutView, error)
-	PublishPolicyRollout(context.Context, string, string, string, gormrepo.PolicyRolloutFilter, int, string) (gormrepo.RolloutView, error)
-	ResumeRollout(context.Context, string, string, string, int64) (gormrepo.RolloutView, error)
-	PublishRollback(context.Context, string, string, string, string, int64, int, string) (gormrepo.RolloutView, error)
-	AdvanceRollout(context.Context, string, string, string) (gormrepo.RolloutView, error)
-	GetRollout(context.Context, string, string) (gormrepo.RolloutView, error)
+	PublishRollout(context.Context, int64, string, string, []string, int, string) (gormrepo.RolloutView, error)
+	PublishPolicyRollout(context.Context, int64, string, string, gormrepo.PolicyRolloutFilter, int, string) (gormrepo.RolloutView, error)
+	ResumeRollout(context.Context, int64, string, string, int64) (gormrepo.RolloutView, error)
+	PublishRollback(context.Context, int64, string, string, string, int64, int, string) (gormrepo.RolloutView, error)
+	AdvanceRollout(context.Context, int64, string, string) (gormrepo.RolloutView, error)
+	GetRollout(context.Context, int64, string) (gormrepo.RolloutView, error)
 }
 
 // adminRolloutHandler manages explicit, bounded multi-Agent batches without
 // performing any network sends inside the database transaction.
-func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, onPublished func(string, string)) http.Handler {
+func adminRolloutHandler(store rolloutStore, credentials *auth.Authenticator, onPublished func(int64, string)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// 1. 先授权 Org；不允许 Agent 自报身份或跨作用域查询。
 		principal, ok := credentials.Authenticate(req.Header.Get("Authorization"))

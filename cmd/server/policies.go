@@ -13,11 +13,11 @@ import (
 )
 
 type policyStore interface {
-	CreatePolicy(context.Context, string, string, string, float64) (gormrepo.PolicyRecord, gormrepo.PolicyRevisionRecord, error)
-	CreatePolicyRevision(context.Context, string, string, string, float64) (gormrepo.PolicyRevisionRecord, error)
-	CreatePolicyBinding(context.Context, string, string, gormrepo.BindingInput) (gormrepo.PolicyBindingRecord, error)
-	UpdatePolicyBinding(context.Context, string, string, string, gormrepo.BindingInput) (gormrepo.PolicyBindingRecord, error)
-	ResolveAgentPolicy(context.Context, string, string) (gormrepo.PolicyResolution, error)
+	CreatePolicy(context.Context, int64, string, string, float64) (gormrepo.PolicyRecord, gormrepo.PolicyRevisionRecord, error)
+	CreatePolicyRevision(context.Context, int64, string, string, float64) (gormrepo.PolicyRevisionRecord, error)
+	CreatePolicyBinding(context.Context, int64, string, gormrepo.BindingInput) (gormrepo.PolicyBindingRecord, error)
+	UpdatePolicyBinding(context.Context, int64, string, string, gormrepo.BindingInput) (gormrepo.PolicyBindingRecord, error)
+	ResolveAgentPolicy(context.Context, int64, string) (gormrepo.PolicyResolution, error)
 }
 
 // policyAPI exposes org-scoped policy authoring and read-only Agent resolution.
